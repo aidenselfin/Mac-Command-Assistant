@@ -1,0 +1,3 @@
+pynput>=1.7.6
+pyobjc-framework-Cocoa>=9.0
+pyobjc-framework-ApplicationServices>=9.0
