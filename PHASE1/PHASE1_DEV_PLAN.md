@@ -11,7 +11,7 @@
 
 Phase 1은 아래 3가지를 **모두** 충족했을 때 완료로 간주한다.
 
-1. 터미널에서 `python logger.py` 를 실행하면 백그라운드에서 마우스 클릭 감지가 시작된다.
+1. 터미널에서 `python logger.py` 를 실행하면 백그운드에서 마우스 클릭 감지가 시작된다.
 2. 사용자가 어떤 앱에서 어떤 버튼을 클릭하든, 클릭 직후 0.3초 이내에 `logs/click_log.csv` 에 아래 형식으로 한 줄이 추가된다.
    ```
    2026-04-30 22:45:01,Safari,New Tab Button,mouse_click
@@ -69,14 +69,16 @@ Adaptive-Keyboard-Interface/
 
 | 컬럼 이름 | 타입 | 예시 값 | 설명 |
 |---|---|---|---|
-| `timestamp` | `DATETIME` (문자열) | `2026-04-30 22:45:01` | 클릭 발생 시각. `YYYY-MM-DD HH:MM:SS` 형식 |
+| `timestamp` | `DATETIME` | `2026-04-30 22:45:01` | 클릭 발생 시각. `YYYY-MM-DD HH:MM:SS` 형식 |
 | `app_name` | `STRING` | `Safari` | 클릭 시점에 포커스된 앱의 이름 |
-| `element_name` | `STRING` | `New Tab Button` | Accessibility API가 반환한 `AXTitle` 또는 `AXDescription` 값 |
-| `action_type` | `STRING` (고정값) | `mouse_click` | Phase 1에서는 항상 `mouse_click` 고정. Phase 4에서 `keyboard_shortcut` 추가 예정 |
+| `window_title` | `STRING` | `YouTube - Safari` | 현재 활성화된 윈도우의 제목 (작업 맥락 파악 용도) |
+| `element_name` | `STRING` | `[비디오 컨트롤] 재생` | 부모 UI 요소 + 선택한 요소의 `AXTitle` 또는 `AXRole` |
+| `action_type` | `STRING` | `mouse_click`, `app_switch`, `mouse_scroll` | 클릭(`mouse_click`), 앱 전환(`app_switch`), 스크롤(`mouse_scroll`) |
+| `intent` | `STRING` | `Interaction` | 클릭의 예상 목적 (`Input Preparation`, `Navigation`, `Interaction`, `Focus/General`) |
 
-**첫 줄(헤더):** `timestamp,app_name,element_name,action_type`
+**첫 줄(헤더):** `timestamp,app_name,window_title,element_name,action_type,intent`
 
-파일이 이미 존재하면 헤더를 다시 쓰지 않고 기존 파일에 이어쓴다(`append` 모드).
+매 실행 시 기존 `logs/click_log.csv` 파일은 삭제되고 새롭게 헤더를 기록하여 시작한다.
 
 ---
 
@@ -290,16 +292,17 @@ Phase 1에서 스크립트가 중단되면 안 되는 상황과 그 처리 방�
 ```python
 # logger.py
 # 섹션 순서:
-# 1. import 문 (표준 라이브러리 → 서드파티 순)
-# 2. 상수 정의 (LOG_DIR, LOG_FILE, CSV_HEADER)
-# 3. get_active_app_name() 함수
-# 4. get_element_name_at(x, y) 함수
-# 5. write_log(app_name, element_name) 함수
+# 1. import 문 (표준 라이브러리 → 서드파티 순, threading 포함)
+# 2. 상수 정의 및 전역 상태 (LOG_DIR, CSV_HEADER, Lock 추가)
+# 3. get_active_app_and_window() 함수
+# 4. get_element_info_at(x, y) 함수
+# 5. write_log(app_name, window_title, element_name, action_type, intent) 함수
 # 6. on_click(x, y, button, pressed) 콜백 함수
-# 7. if __name__ == '__main__': 블록 (Listener 시작)
+# 7. poll_active_app() 백그라운드 모니터링 스레드
+# 8. if __name__ == '__main__': 블록 (스레드와 Listener 동시 시작)
 ```
 
-전체 파일 길이는 주석 포함 100줄 이내로 유지한다. 하나의 함수가 하나의 역할만 담당한다.
+멀티 스레드 아키텍처를 사용하여, `on_click`은 마우스 클릭만 전담하고 `poll_active_app`은 0.5초 주기로 트랙패드 스와이프나 단축키로 인한 앱 전환을 실시간으로 감지한다. 두 스레드가 동시에 `write_log`를 호출할 수 있으므로 `threading.Lock`을 통해 파일 쓰기 충돌을 방지한다.
 
 ---
 
