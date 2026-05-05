@@ -70,13 +70,13 @@ Adaptive-Keyboard-Interface/
 | 컬럼 이름 | 타입 | 예시 값 | 설명 |
 |---|---|---|---|
 | `timestamp` | `DATETIME` | `2026-04-30 22:45:01` | 클릭 발생 시각. `YYYY-MM-DD HH:MM:SS` 형식 |
+| `action_type` | `STRING` | `mouse_click`, `app_switch`, `mouse_scroll` | 클릭(`mouse_click`), 앱 전환(`app_switch`), 스크롤(`mouse_scroll`) |
 | `app_name` | `STRING` | `Safari` | 클릭 시점에 포커스된 앱의 이름 |
 | `window_title` | `STRING` | `YouTube - Safari` | 현재 활성화된 윈도우의 제목 (작업 맥락 파악 용도) |
 | `element_name` | `STRING` | `[비디오 컨트롤] 재생` | 부모 UI 요소 + 선택한 요소의 `AXTitle` 또는 `AXRole` |
-| `action_type` | `STRING` | `mouse_click`, `app_switch`, `mouse_scroll` | 클릭(`mouse_click`), 앱 전환(`app_switch`), 스크롤(`mouse_scroll`) |
 | `intent` | `STRING` | `Interaction` | 클릭의 예상 목적 (`Input Preparation`, `Navigation`, `Interaction`, `Focus/General`) |
 
-**첫 줄(헤더):** `timestamp,app_name,window_title,element_name,action_type,intent`
+**첫 줄(헤더):** `timestamp,action_type,app_name,window_title,element_name,intent`
 
 매 실행 시 기존 `logs/click_log.csv` 파일은 삭제되고 새롭게 헤더를 기록하여 시작한다.
 
@@ -204,7 +204,7 @@ from pathlib import Path
 
 LOG_DIR = Path("logs")
 LOG_FILE = LOG_DIR / "click_log.csv"
-CSV_HEADER = ["timestamp", "app_name", "element_name", "action_type"]
+CSV_HEADER = ["timestamp", "action_type", "app_name", "window_title", "element_name", "intent"]
 
 def write_log(app_name: str, element_name: str) -> None:
     """

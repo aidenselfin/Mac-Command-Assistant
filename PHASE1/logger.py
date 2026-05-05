@@ -21,7 +21,7 @@ from pynput.mouse import Listener, Button
 _BASE_DIR = Path(__file__).parent
 LOG_DIR   = _BASE_DIR / "logs"
 LOG_FILE  = LOG_DIR / "click_log.csv"
-CSV_HEADER = ["timestamp", "app_name", "window_title", "element_name", "action_type", "intent"]
+CSV_HEADER = ["timestamp", "action_type", "app_name", "window_title", "element_name", "intent"]
 
 # 파일 쓰기 충돌 방지용 Lock
 log_lock = threading.Lock()
@@ -29,14 +29,22 @@ log_lock = threading.Lock()
 # 상태 기록용 전역 변수
 previous_app_name = None
 last_scroll_time = 0.0
+current_app_name = "UNKNOWN_APP"
+current_window_title = "UNKNOWN_WINDOW"
 
 # ── 3. 현재 활성 앱 및 창 제목 읽기 ──────────────────────────────────────────────────
 def get_active_app_and_window() -> tuple[str, str]:
     """
     현재 포커스된 앱의 이름과 활성화된 윈도우의 제목을 반환한다.
+    (메인 스레드에서 주기적으로 갱신된 전역 변수를 읽음)
     """
-    app_name = "UNKNOWN_APP"
-    window_title = "UNKNOWN_WINDOW"
+    return current_app_name, current_window_title
+
+def update_active_app_and_window() -> None:
+    """
+    메인 스레드에서 호출되어 현재 포커스된 앱과 윈도우 정보를 전역 변수에 갱신한다.
+    """
+    global current_app_name, current_window_title
     try:
         from Cocoa import NSWorkspace
         from ApplicationServices import (
@@ -48,9 +56,10 @@ def get_active_app_and_window() -> tuple[str, str]:
         app_info = workspace.frontmostApplication()
         
         if app_info is None:
-            return app_name, window_title
+            return
             
         app_name = app_info.localizedName() or app_info.bundleIdentifier() or "UNKNOWN_APP"
+        window_title = "UNKNOWN_WINDOW"
         
         pid = app_info.processIdentifier()
         app_element = AXUIElementCreateApplication(pid)
@@ -61,9 +70,11 @@ def get_active_app_and_window() -> tuple[str, str]:
                 val = str(title).strip()
                 if val:
                     window_title = " ".join(val.split())
+                    
+        current_app_name = app_name
+        current_window_title = window_title
     except Exception:
         pass
-    return app_name, window_title
 
 # ── 4. 클릭 좌표에서 UI 요소 이름 및 의도(Intent) 읽기 ────────────────────────────────────────
 def get_element_info_at(x: float, y: float) -> tuple[str, str]:
@@ -155,10 +166,10 @@ def write_log(app_name: str, window_title: str, element_name: str, action_type: 
                     writer.writerow(CSV_HEADER)
                 writer.writerow([
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    action_type,
                     app_name,
                     window_title,
                     element_name,
-                    action_type,
                     intent
                 ])
     except PermissionError as e:
@@ -214,28 +225,26 @@ def on_scroll(x: float, y: float, dx: float, dy: float) -> None:
 def poll_active_app() -> None:
     """
     주기적으로 활성화된 앱을 검사하여 스와이프나 단축키로 인한 화면 전환을 감지한다.
+    메인 스레드의 런루프 펌핑과 함께 주기적으로 호출된다.
     """
     global previous_app_name
-    while True:
-        try:
-            app_name, window_title = get_active_app_and_window()
-            if app_name != "UNKNOWN_APP":
-                if previous_app_name is None:
-                    # 첫 실행 시 초기화
-                    previous_app_name = app_name
-                elif previous_app_name != app_name:
-                    action_type = "app_switch"
-                    element_name = "[System] App Activated"
-                    intent = "Workspace Switch"
-                    
-                    write_log(app_name, window_title, element_name, action_type, intent)
-                    print(f"[LOG] {app_name}({action_type}) | {window_title[:20]} | {element_name} | {intent}")
-                    
-                    previous_app_name = app_name
-        except Exception:
-            pass
-        
-        time.sleep(0.5)
+    
+    update_active_app_and_window()
+    app_name, window_title = current_app_name, current_window_title
+    
+    if app_name != "UNKNOWN_APP":
+        if previous_app_name is None:
+            # 첫 실행 시 초기화
+            previous_app_name = app_name
+        elif previous_app_name != app_name:
+            action_type = "app_switch"
+            element_name = "[System] App Activated"
+            intent = "Workspace Switch"
+            
+            write_log(app_name, window_title, element_name, action_type, intent)
+            print(f"[LOG] {app_name}({action_type}) | {window_title[:20]} | {element_name} | {intent}")
+            
+            previous_app_name = app_name
 
 # ── 9. 진입점 ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -248,12 +257,21 @@ if __name__ == "__main__":
     print(f"  로그 저장 위치: {LOG_FILE.resolve()}")
     print("=" * 70)
 
-    # 백그라운드 스레드 시작
-    monitor_thread = threading.Thread(target=poll_active_app, daemon=True)
-    monitor_thread.start()
-
     try:
-        with Listener(on_click=on_click, on_scroll=on_scroll) as listener:
-            listener.join()
+        update_active_app_and_window()
+        previous_app_name = current_app_name
+
+        from CoreFoundation import CFRunLoopRunInMode, kCFRunLoopDefaultMode
+        
+        # Listener는 백그라운드 스레드에서 실행됨
+        listener = Listener(on_click=on_click, on_scroll=on_scroll)
+        listener.start()
+
+        # 메인 스레드에서는 런루프를 계속 돌려 NSWorkspace 알림을 정상적으로 수신하고 앱 전환을 감지함
+        while True:
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, False)
+            poll_active_app()
+            time.sleep(0.01)
+            
     except KeyboardInterrupt:
         print("\n[INFO] 프로그램을 안전하게 종료합니다.")
