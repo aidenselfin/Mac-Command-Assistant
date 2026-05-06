@@ -9,6 +9,7 @@ from ApplicationServices import (
     AXUIElementCreateSystemWide,
     AXUIElementCreateApplication,
     AXUIElementCopyAttributeValue,
+    AXUIElementPerformAction,
     AXValueGetValue,
     kAXValueCGSizeType,
     kAXValueCGPointType
@@ -22,10 +23,15 @@ class OverlayView(AppKit.NSView):
         self = objc.super(OverlayView, self).initWithFrame_(frame)
         if self:
             self.window_groups = []
+            self.active_pid = None
         return self
 
-    def setRects_(self, window_groups):
+    def isFlipped(self):
+        return True
+
+    def setRects_activePid_(self, window_groups, active_pid):
         self.window_groups = window_groups
+        self.active_pid = active_pid
         self.setNeedsDisplay_(True)
 
     def drawRect_(self, dirtyRect):
@@ -36,36 +42,87 @@ class OverlayView(AppKit.NSView):
         if not hasattr(self, 'window_groups') or not self.window_groups:
             return
 
-        screen_h = AppKit.NSScreen.mainScreen().frame().size.height
-
         # Z-Order가 큰 것(Back)부터 작은 것(Front) 순으로 정렬하여 렌더링
         sorted_groups = sorted(self.window_groups, key=lambda g: g['z_index'], reverse=True)
 
+        # 색상 및 스타일 정의
+        active_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 1.0) # #FFE600
+        inactive_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 0.4)
+        tag_bg_color = active_color
+        tag_text_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(0.102, 0.102, 0.102, 1.0) # #1A1A1A
+
+        shadow = AppKit.NSShadow.alloc().init()
+        shadow.setShadowOffset_(AppKit.NSMakeSize(0, -2.0))
+        shadow.setShadowBlurRadius_(4.0)
+        shadow.setShadowColor_(AppKit.NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.25))
+
+        font = AppKit.NSFont.fontWithName_size_("Menlo-Bold", 12.0)
+        if font is None:
+            font = AppKit.NSFont.fontWithName_size_("Monaco", 12.0)
+        if font is None:
+            font = AppKit.NSFont.userFixedPitchFontOfSize_(12.0)
+
+        text_attrs = {
+            AppKit.NSFontAttributeName: font,
+            AppKit.NSForegroundColorAttributeName: tag_text_color,
+            AppKit.NSKernAttributeName: 0.5
+        }
+
         for group in sorted_groups:
             top_x, top_y, top_w, top_h = group['top_rect']
-            top_converted_y = screen_h - top_y - top_h
-            ns_top_rect = AppKit.NSMakeRect(top_x, top_converted_y, top_w, top_h)
+            ns_top_rect = AppKit.NSMakeRect(top_x, top_y, top_w, top_h)
             
-            # 2. DestinationOut으로 현재 창 영역만큼 배경 투명도 증가 (뒤에 그려진 선들을 흐리게 만듦)
+            # 2. DestinationOut으로 현재 창 영역만큼 배경 투명도 증가
             AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
             AppKit.NSGraphicsContext.currentContext().setCompositingOperation_(AppKit.NSCompositingOperationDestinationOut)
-            # 투명도를 줄이는 비율 (0.6을 주면, 뒤에 있는 테두리가 40% 정도만 남게 됨)
             AppKit.NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.6).set() 
             AppKit.NSRectFill(ns_top_rect)
             AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
 
-            # 3. 현재 창의 내부 패널 테두리 그리기
-            AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 1.0, 0.0, 0.8).set()
-            path = AppKit.NSBezierPath.bezierPath()
-            path.setLineWidth_(4.0)
+            is_active_group = (group.get('pid') == self.active_pid)
+            line_width = 1.5 if is_active_group else 1.0
+            border_color = active_color if is_active_group else inactive_color
 
-            for rect in group['panes']:
-                x, y, w, h = rect
-                converted_y = screen_h - y - h
-                ns_rect = AppKit.NSMakeRect(x, converted_y, w, h)
-                path.appendBezierPathWithRect_(ns_rect)
-            
-            path.stroke()
+            # 3. 현재 창의 내부 패널 테두리 그리기
+            for pane in group['panes']:
+                x, y, w, h = pane['rect']
+                ns_rect = AppKit.NSMakeRect(x, y, w, h)
+                
+                # Inside Stroke 처리 (Inset)
+                inset_rect = AppKit.NSInsetRect(ns_rect, line_width / 2.0, line_width / 2.0)
+                path = AppKit.NSBezierPath.bezierPathWithRect_(inset_rect)
+                path.setLineWidth_(line_width)
+                border_color.set()
+                path.stroke()
+
+                # 4. 오버레이 태그 그리기
+                tag_str = pane.get('tag', '?')
+                ns_str = AppKit.NSString.stringWithString_(tag_str)
+                tag_size = ns_str.sizeWithAttributes_(text_attrs)
+
+                pad_x, pad_y = 6.0, 2.0
+                tag_rect_w = tag_size.width + pad_x * 2.0
+                tag_rect_h = tag_size.height + pad_y * 2.0
+                tag_x = x - 4.0
+                tag_y = y - 4.0
+                tag_rect = AppKit.NSMakeRect(tag_x, tag_y, tag_rect_w, tag_rect_h)
+
+                # 태그 배경과 그림자
+                AppKit.NSGraphicsContext.currentContext().saveGraphicsState()
+                shadow.set()
+                tag_path = AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(tag_rect, 4.0, 4.0)
+                tag_bg_color.set()
+                tag_path.fill()
+                AppKit.NSGraphicsContext.currentContext().restoreGraphicsState()
+
+                # 텍스트 그리기 (수직/수평 중앙 정렬)
+                text_rect = AppKit.NSMakeRect(
+                    tag_x + pad_x, 
+                    tag_y + pad_y, 
+                    tag_size.width, 
+                    tag_size.height
+                )
+                ns_str.drawInRect_withAttributes_(text_rect, text_attrs)
 
 class OverlayController(AppKit.NSObject):
     def init(self):
@@ -104,15 +161,63 @@ class OverlayController(AppKit.NSObject):
         
     def doToggle(self):
         if self.is_showing:
-            self.window.orderOut_(None)
-            self.is_showing = False
-            print("[INFO] 오버레이 숨김")
+            # Fade Out
+            AppKit.NSAnimationContext.beginGrouping()
+            AppKit.NSAnimationContext.currentContext().setDuration_(0.15)
+            AppKit.NSAnimationContext.currentContext().setTimingFunction_(
+                Quartz.CAMediaTimingFunction.functionWithName_(Quartz.kCAMediaTimingFunctionEaseInEaseOut)
+            )
+            self.window.animator().setAlphaValue_(0.0)
+            AppKit.NSAnimationContext.endGrouping()
+            
+            # 애니메이션 후 창 닫기
+            self.performSelector_withObject_afterDelay_("finishFadeOut", None, 0.15)
         else:
             rects = self.get_target_rects()
-            self.view.setRects_(rects)
-            self.window.orderFront_(None) # 포커스 뺏지 않음
+            active_app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+            active_pid = active_app.processIdentifier() if active_app else None
+            
+            self.view.setRects_activePid_(rects, active_pid)
+            
+            self.window.setAlphaValue_(0.0)
+            self.window.orderFront_(None)
+            
+            # Fade In
+            AppKit.NSAnimationContext.beginGrouping()
+            AppKit.NSAnimationContext.currentContext().setDuration_(0.15)
+            AppKit.NSAnimationContext.currentContext().setTimingFunction_(
+                Quartz.CAMediaTimingFunction.functionWithName_(Quartz.kCAMediaTimingFunctionEaseInEaseOut)
+            )
+            self.window.animator().setAlphaValue_(1.0)
+            AppKit.NSAnimationContext.endGrouping()
+            
             self.is_showing = True
             print(f"[INFO] 오버레이 표시 (감지된 영역 수: {len(rects)})")
+
+    def finishFadeOut(self):
+        self.window.orderOut_(None)
+        self.is_showing = False
+        print("[INFO] 오버레이 숨김")
+
+    @objc.python_method
+    def handle_tag_global(self, tag_char):
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("doHandleTag:", tag_char, False)
+
+    def doHandleTag_(self, tag_char):
+        if not self.is_showing: return
+        for group in self.view.window_groups:
+            for pane in group['panes']:
+                if pane.get('tag') == tag_char:
+                    element = pane['element']
+                    pid = group['pid']
+                    
+                    app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+                    if app:
+                        app.activateWithOptions_(AppKit.NSApplicationActivateIgnoringOtherApps)
+                    
+                    AXUIElementPerformAction(element, "AXRaise")
+                    self.doToggle()
+                    return
 
     @objc.python_method
     def get_target_rects(self):
@@ -178,14 +283,15 @@ class OverlayController(AppKit.NSObject):
                         if w > 100 and h > 100 and (x < sw and y < sh and x + w > 0 and y + h > 0):
                             # 중복 검사: 위치와 크기가 15픽셀 이내로 비슷한 경우 병합(무시)
                             is_dup = False
-                            for (rx, ry, rw, rh) in panes_list:
+                            for pane in panes_list:
+                                rx, ry, rw, rh = pane['rect']
                                 if abs(x - rx) < 15 and abs(y - ry) < 15 and abs(w - rw) < 15 and abs(h - rh) < 15:
                                     is_dup = True
                                     break
                             
                             if not is_dup:
                                 print(f"[DEBUG] 패널 감지됨 ({role}) -> 위치: x={x}, y={y} / 크기: w={w}, h={h}")
-                                panes_list.append((x, y, w, h))
+                                panes_list.append({'rect': (x, y, w, h), 'element': element})
             
             err, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
             if err == 0 and children:
@@ -230,14 +336,26 @@ class OverlayController(AppKit.NSObject):
                                 find_panes(window, 0, panes, top_rect)
                                 
                                 if not panes:
-                                    panes.append((ax_x, ax_y, ax_w, ax_h))
+                                    panes.append({'rect': (ax_x, ax_y, ax_w, ax_h), 'element': window})
                                     
                                 window_groups.append({
                                     'z_index': best_match['z_index'],
                                     'top_rect': top_rect,
-                                    'panes': panes
+                                    'panes': panes,
+                                    'pid': pid
                                 })
                     
+        window_groups.sort(key=lambda g: g['z_index'])
+        
+        chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        tag_index = 0
+        
+        for group in window_groups:
+            for pane in group['panes']:
+                tag_str = chars[tag_index] if tag_index < 26 else chars[tag_index//26 - 1] + chars[tag_index%26]
+                pane['tag'] = tag_str
+                tag_index += 1
+
         return window_groups
 
 def on_activate_h():
@@ -245,10 +363,23 @@ def on_activate_h():
         overlay_controller.toggle_overlay()
 
 def setup_hotkeys():
-    # 백그라운드 스레드에서 전역 키보드 입력 모니터링
-    with keyboard.GlobalHotKeys({
+    hotkeys_dict = {
         '<cmd>+<ctrl>+k': on_activate_h
-    }) as h:
+    }
+    
+    def make_handler(char):
+        def handler():
+            if overlay_controller and overlay_controller.is_showing:
+                overlay_controller.handle_tag_global(char)
+        return handler
+
+    for char in "abcdefghijklmnopqrstuvwxyz":
+        if char == 'k':
+            continue
+        hotkeys_dict[f'<cmd>+<ctrl>+{char}'] = make_handler(char.upper())
+
+    # 백그라운드 스레드에서 전역 키보드 입력 모니터링
+    with keyboard.GlobalHotKeys(hotkeys_dict) as h:
         h.join()
 
 if __name__ == '__main__':
