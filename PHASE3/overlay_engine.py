@@ -17,6 +17,14 @@ from ApplicationServices import (
 )
 from pynput import keyboard
 
+# Cmd+Ctrl+알파벳 단축키에 대한 물리적 키코드 → 문자 매핑 (QWERTY 기준)
+KEYCODE_TO_CHAR = {
+    0: 'A',  1: 'S',  2: 'D',  3: 'F',  4: 'H',  5: 'G',  6: 'Z',  7: 'X',
+    8: 'C',  9: 'V', 11: 'B', 12: 'Q', 13: 'W', 14: 'E', 15: 'R', 16: 'Y',
+   17: 'T', 31: 'O', 32: 'U', 34: 'I', 35: 'P', 37: 'L', 38: 'J', 40: 'K',
+   45: 'N', 46: 'M',
+}
+
 overlay_controller = None
 OUR_PID = os.getpid()  # 오버레이 자신의 PID (창 감지에서 제외)
 
@@ -65,15 +73,15 @@ class OverlayView(AppKit.NSView):
         active_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 1.0)
         inactive_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 0.4)
 
+        # === Pass 1: 모든 창 테두리 먼저 그리기 ===
         for group in sorted_groups:
             is_active_group = (group.get('pid') == self.active_pid)
             line_width = 1.5 if is_active_group else 1.0
             border_color = active_color if is_active_group else inactive_color
-            
+
             for pane in group['panes']:
                 x, y, w, h = pane['rect']
-                
-                # 창 테두리 그리기
+
                 ns_rect = AppKit.NSMakeRect(x, y, w, h)
                 inset_rect = AppKit.NSInsetRect(ns_rect, line_width / 2.0, line_width / 2.0)
                 path = AppKit.NSBezierPath.bezierPathWithRect_(inset_rect)
@@ -81,7 +89,11 @@ class OverlayView(AppKit.NSView):
                 border_color.set()
                 path.stroke()
 
-                # 오버레이 태그 그리기
+        # === Pass 2: 모든 태그 버튼을 테두리 위(상위 레이어)에 그리기 ===
+        for group in sorted_groups:
+            for pane in group['panes']:
+                x, y, w, h = pane['rect']
+
                 tag_str = pane.get('tag', '?')
                 ns_str = AppKit.NSString.stringWithString_(tag_str)
                 tag_size = ns_str.sizeWithAttributes_(text_attrs)
@@ -100,9 +112,9 @@ class OverlayView(AppKit.NSView):
 
                 # 텍스트 그리기 (수직/수평 중앙 정렬)
                 text_rect = AppKit.NSMakeRect(
-                    tag_x + pad_x, 
-                    tag_y + pad_y, 
-                    tag_size.width, 
+                    tag_x + pad_x,
+                    tag_y + pad_y,
+                    tag_size.width,
                     tag_size.height
                 )
                 ns_str.drawInRect_withAttributes_(text_rect, text_attrs)
@@ -226,13 +238,44 @@ class OverlayController(AppKit.NSObject):
                 if pane.get('tag') == tag_char:
                     element = pane['element']
                     pid = group['pid']
-                    
+                    is_fullscreen = group.get('is_fullscreen', False)
+
                     app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
                     if app:
                         app.activateWithOptions_(AppKit.NSApplicationActivateIgnoringOtherApps)
-                    
-                    AXUIElementPerformAction(element, "AXRaise")
+
+                    if is_fullscreen:
+                        # 전체화면 패널: 패널 중앙을 마우스 클릭으로 포커스
+                        x, y, w, h = pane['rect']
+                        click_x = x + w / 2.0
+                        click_y = y + h / 2.0
+                        print(f"[DEBUG] 전체화면 패널 선택: tag={tag_char}, 클릭 좌표=({click_x:.0f}, {click_y:.0f})")
+                        self._simulate_click_delayed(click_x, click_y)
+                    else:
+                        # 창 모드: 창을 앞으로 올리기 (기존 동작 유지)
+                        AXUIElementPerformAction(element, "AXRaise")
                     return
+
+    @objc.python_method
+    def _simulate_click_delayed(self, x, y, delay=0.08):
+        """앱 활성화 후 Quartz 이벤트로 특정 좌표에 좌클릭 시뮬레이션"""
+        def do_click():
+            time.sleep(delay)  # 앱이 활성화될 때까지 잠깐 대기
+            point = Quartz.CGPointMake(x, y)
+            mouse_down = Quartz.CGEventCreateMouseEvent(
+                None, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft
+            )
+            mouse_up = Quartz.CGEventCreateMouseEvent(
+                None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft
+            )
+            # Cmd+Ctrl 키가 아직 눌린 상태에서 발생하면
+            # macOS가 Ctrl+Click을 우클릭으로 해석함 → 수식키 플래그를 명시적으로 제거
+            Quartz.CGEventSetFlags(mouse_down, 0)
+            Quartz.CGEventSetFlags(mouse_up, 0)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, mouse_down)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, mouse_up)
+            print(f"[DEBUG] 좌클릭 시뮬레이션 완료: ({x:.0f}, {y:.0f})")
+        threading.Thread(target=do_click, daemon=True).start()
 
     @objc.python_method
     def get_target_rects(self, quartz_windows=None, visible_pids=None):
@@ -348,7 +391,8 @@ class OverlayController(AppKit.NSObject):
                                     'z_index': best_match['z_index'],
                                     'top_rect': top_rect,
                                     'panes': panes,
-                                    'pid': pid
+                                    'pid': pid,
+                                    'is_fullscreen': is_fs
                                 })
 
         window_groups.sort(key=lambda g: g['z_index'])
@@ -364,21 +408,54 @@ class OverlayController(AppKit.NSObject):
 
         return window_groups
 
-def setup_hotkeys():
-    hotkeys_dict = {}
-    
-    def make_handler(char):
-        def handler():
-            if overlay_controller:
-                overlay_controller.handle_tag_global(char)
-        return handler
+def setup_event_tap():
+    """
+    Quartz CGEventTap 기반 단축키 인터셉터.
+    pynput.GlobalHotKeys와 달리 이벤트를 완전히 소비(suppress)하므로
+    기존 앱 단축키보다 우리 프로그램이 항상 우선됨.
+    """
+    FLAG_CMD  = Quartz.kCGEventFlagMaskCommand
+    FLAG_CTRL = Quartz.kCGEventFlagMaskControl
+    FLAG_SHIFT = Quartz.kCGEventFlagMaskShift
+    FLAG_ALT  = Quartz.kCGEventFlagMaskAlternate
+    REQUIRED  = FLAG_CMD | FLAG_CTRL  # Cmd + Ctrl 만 눌렸을 때
 
-    for char in "abcdefghijklmnopqrstuvwxyz":
-        hotkeys_dict[f'<cmd>+<ctrl>+{char}'] = make_handler(char.upper())
+    def callback(proxy, event_type, event, refcon):
+        if event_type == Quartz.kCGEventKeyDown:
+            keycode = Quartz.CGEventGetIntegerValueField(
+                event, Quartz.kCGKeyboardEventKeycode
+            )
+            flags = Quartz.CGEventGetFlags(event)
+            # Cmd+Ctrl 이외의 수식키(Shift, Alt)가 없는 경우만 처리
+            relevant = flags & (FLAG_CMD | FLAG_CTRL | FLAG_SHIFT | FLAG_ALT)
+            if relevant == REQUIRED:
+                char = KEYCODE_TO_CHAR.get(keycode)
+                if char and overlay_controller:
+                    overlay_controller.handle_tag_global(char)
+                    return None  # ← 이벤트 소비: 다른 앱에 전달 안 됨
+        return event  # 그 외 이벤트는 그대로 통과
 
-    # 백그라운드 스레드에서 전역 키보드 입력 모니터링
-    with keyboard.GlobalHotKeys(hotkeys_dict) as h:
-        h.join()
+    tap = Quartz.CGEventTapCreate(
+        Quartz.kCGSessionEventTap,       # 세션 레벨 (앱보다 우선)
+        Quartz.kCGHeadInsertEventTap,    # 큐 맨 앞에 삽입 (최우선)
+        Quartz.kCGEventTapOptionDefault, # 이벤트 수정/소비 허용
+        Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
+        callback,
+        None
+    )
+    if tap is None:
+        print("[ERROR] CGEventTap 생성 실패 — 시스템 환경설정 > 개인 정보 보호 및 보안 > 손쉬운 사용에서 터미널(또는 Python)을 허용하세요.")
+        return
+
+    # 메인 CFRunLoop에 등록 (AppHelper.runEventLoop와 같은 루프 공유)
+    source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
+    Quartz.CFRunLoopAddSource(
+        Quartz.CFRunLoopGetMain(),
+        source,
+        Quartz.kCFRunLoopCommonModes
+    )
+    Quartz.CGEventTapEnable(tap, True)
+    print("[INFO] CGEventTap 활성화 완료 — 단축키(Cmd+Ctrl+알파벳)가 우선 처리됩니다.")
 
 if __name__ == '__main__':
     print("=" * 60)
@@ -394,8 +471,8 @@ if __name__ == '__main__':
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
     overlay_controller = OverlayController.alloc().init()
     
-    t = threading.Thread(target=setup_hotkeys, daemon=True)
-    t.start()
+    # CGEventTap을 메인 런루프에 등록 (별도 스레드 불필요)
+    setup_event_tap()
     
     # Ctrl+C 처리를 위해 NSRunLoop를 주기적으로 깨워주는 더미 타이머 추가
     class TimerObj(AppKit.NSObject):
