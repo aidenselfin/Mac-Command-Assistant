@@ -191,21 +191,33 @@ class OverlayController(AppKit.NSObject):
     def start_polling(self):
         def poll():
             last_key = None
+            last_pane_summary = None
             while True:
                 try:
                     quartz_windows, visible_pids, snapshot_key = self.get_quartz_snapshot()
-                    
+
                     if snapshot_key != last_key:
-                        # Tier 2: 변경이 감지된 경우만 AX 딥은 스캔 실행
                         last_key = snapshot_key
                         rects = self.get_target_rects(quartz_windows, visible_pids)
                         with self._lock:
                             self._pending_rects = rects
-                        print(f"[DEBUG] 화면 변경 감지 → 태그 재계산: {sum(len(g['panes']) for g in rects)}개")
+                        # 패널 목록이 실제로 바뀐 경우에만 출력
+                        pane_summary = tuple(
+                            pane.get('name', pane.get('tag', '?'))
+                            for g in rects for pane in g['panes']
+                        )
+                        if pane_summary != last_pane_summary:
+                            last_pane_summary = pane_summary
+                            total = sum(len(g['panes']) for g in rects)
+                            if total > 0:
+                                names = ', '.join(pane_summary)
+                                print(f"[패널] {total}개 인식: {names}")
+                            else:
+                                print("[패널] 없음")
                 except Exception as e:
                     print(f"[ERROR] Polling thread crashed: {e}")
                     import traceback; traceback.print_exc()
-                time.sleep(0.1)  # 0.1초마다 Quartz 스냅샷 (CPU 부하 낙음)
+                time.sleep(0.1)
         threading.Thread(target=poll, daemon=True).start()
 
     @objc.python_method
@@ -220,11 +232,9 @@ class OverlayController(AppKit.NSObject):
             rects = self._pending_rects
             self._pending_rects = None
         if rects is not None:
-            # 결과가 0개여도 즉시 화면을 지우도록 (ghost 방지)
             active_app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
             active_pid = active_app.processIdentifier() if active_app else None
             self.view.setRects_activePid_(rects, active_pid)
-            print(f"[UI] 태그 업데이트 완료: {sum(len(g['panes']) for g in rects)}개")
 
     @objc.python_method
     def handle_tag_global(self, tag_char):
@@ -290,10 +300,69 @@ class OverlayController(AppKit.NSObject):
         window_groups = []
 
         # 2. 재귀 탐색을 통한 패널 영역 추출 (DFS) - 전체화면 앱 전용
-        def find_panes(element, depth, panes_list, top_rect):
-            if depth > 12: return
+        # 패널 이름 도출 함수 (AX 속성 기반, 재시작 후에도 안정적)
+        def get_pane_name(element, role, rect):
+            # 1. AXIdentifier (앱 내부 고유 ID, 가장 안정적)
+            e, val = AXUIElementCopyAttributeValue(element, "AXIdentifier", None)
+            if e == 0 and val:
+                s = str(val).strip()
+                if s:
+                    # 'workbench.parts.sidebar' → 'sidebar'
+                    name = s.split('.')[-1] if '.' in s else s
+                    return name[:24]
+            # 2. AXTitle
+            e, val = AXUIElementCopyAttributeValue(element, "AXTitle", None)
+            if e == 0 and val:
+                s = str(val).strip()
+                if s: return s[:24]
+            # 3. AXDescription
+            e, val = AXUIElementCopyAttributeValue(element, "AXDescription", None)
+            if e == 0 and val:
+                s = str(val).strip()
+                if s: return s[:24]
+            # 4. AXLabel
+            e, val = AXUIElementCopyAttributeValue(element, "AXLabel", None)
+            if e == 0 and val:
+                s = str(val).strip()
+                if s: return s[:24]
+            # 5. AXSubrole
+            e, val = AXUIElementCopyAttributeValue(element, "AXSubrole", None)
+            if e == 0 and val:
+                s = str(val).replace("AX", "").strip()
+                if s: return s[:24]
+            # 6. 위치 기반 이름 (화면 내 상대 위치 → 재시작 후에도 동일)
+            x, y, w, h = rect
+            cx, cy = x + w / 2, y + h / 2
+            h_pos = "Left" if cx < sw * 0.33 else ("Right" if cx > sw * 0.67 else "Center")
+            v_pos = "Top" if cy < sh * 0.33 else ("Bottom" if cy > sh * 0.67 else "")
+            role_short = (role or "Panel").replace("AX", "")
+            return f"{role_short}-{v_pos}{h_pos}"
 
-            # 크기 확인 (크기 정보가 없어도 children 탐색은 계속)
+        def add_as_pane(element, role, x, y, w, h, panes_list):
+            """크기·화면 범위 검사 후 중복이 아니면 패널 목록에 추가"""
+            if w > 100 and h > 100 and (x < sw and y < sh and x + w > 0 and y + h > 0):
+                for pane in panes_list:
+                    rx, ry, rw, rh = pane['rect']
+                    if abs(x - rx) < 15 and abs(y - ry) < 15 and abs(w - rw) < 15 and abs(h - rh) < 15:
+                        return  # 중복
+                name = get_pane_name(element, role, (x, y, w, h))
+                panes_list.append({'rect': (x, y, w, h), 'element': element, 'role': role, 'name': name})
+
+        def get_size_pos(element):
+            """(x, y, w, h) 또는 None 반환"""
+            err_s, sv = AXUIElementCopyAttributeValue(element, "AXSize", None)
+            err_p, pv = AXUIElementCopyAttributeValue(element, "AXPosition", None)
+            if err_s != 0 or err_p != 0 or not sv or not pv:
+                return None
+            ok_s, sz = AXValueGetValue(sv, kAXValueCGSizeType, None)
+            ok_p, pos = AXValueGetValue(pv, kAXValueCGPointType, None)
+            if ok_s and ok_p:
+                return pos.x, pos.y, sz.width, sz.height
+            return None
+
+        def find_panes(element, depth, panes_list, top_rect):
+            if depth > 15: return
+
             err_s, size_val = AXUIElementCopyAttributeValue(element, "AXSize", None)
             sz_width, sz_height = 0, 0
             if err_s == 0 and size_val:
@@ -301,35 +370,79 @@ class OverlayController(AppKit.NSObject):
                 if succ_s:
                     sz_width, sz_height = sz.width, sz.height
 
-            # 크기가 확인되었고 너무 작은 경우에만 이 요소와 하위를 모두 건너뜀
             if sz_width > 0 and sz_height > 0 and (sz_width < 100 or sz_height < 100):
                 return
 
             err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
-            # role이 분할 관련이고 유효한 크기 정보가 있을 때 panes에 추가
-            if err == 0 and role in ["AXSplitGroup", "AXTabGroup", "AXScrollArea", "AXWebArea", "AXGroup"]:
+            if err != 0 or not role:
+                return
+
+            if role in ("AXSplitGroup", "AXTabGroup"):
+                # SplitGroup/TabGroup: 자신은 추가하지 않고 직계 자식을 개별 패널로 추가
+                # → VS Code 사이드바/에디터/터미널이 각각 별도 패널로 분리됨
+                err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
+                if err_c == 0 and children:
+                    for child in children:
+                        err_cr, child_role = AXUIElementCopyAttributeValue(child, "AXRole", None)
+                        if err_cr == 0 and child_role == "AXSplitter":
+                            continue  # 드래그 핸들은 건너뜀
+                        geom = get_size_pos(child)
+                        if geom:
+                            cx, cy, cw, ch = geom
+                            cr = child_role if err_cr == 0 else "?"
+                            add_as_pane(child, cr, cx, cy, cw, ch, panes_list)
+                        # 중첩 SplitGroup은 재귀적으로도 탐색
+                        if err_cr == 0 and child_role in ("AXSplitGroup", "AXTabGroup"):
+                            find_panes(child, depth + 1, panes_list, top_rect)
+                return
+
+            # 그 외 역할: 패널로 추가 후 children 계속 탐색
+            PANEL_ROLES = {"AXScrollArea", "AXWebArea", "AXGroup", "AXTextArea"}
+            if role in PANEL_ROLES:
                 err_p, pos_val = AXUIElementCopyAttributeValue(element, "AXPosition", None)
                 if err_p == 0 and pos_val:
                     succ_p, pos = AXValueGetValue(pos_val, kAXValueCGPointType, None)
                     if succ_p:
-                        w, h = sz_width, sz_height
-                        x, y = pos.x, pos.y
-                        if w > 100 and h > 100 and (x < sw and y < sh and x + w > 0 and y + h > 0):
-                            is_dup = False
-                            for pane in panes_list:
-                                rx, ry, rw, rh = pane['rect']
-                                if abs(x - rx) < 15 and abs(y - ry) < 15 and abs(w - rw) < 15 and abs(h - rh) < 15:
-                                    is_dup = True
-                                    break
-                            if not is_dup:
-                                print(f"[DEBUG] 전체화면 패널 감지됨 ({role}) -> x={x}, y={y}, w={w}, h={h}")
-                                panes_list.append({'rect': (x, y, w, h), 'element': element})
+                        add_as_pane(element, role, pos.x, pos.y, sz_width, sz_height, panes_list)
 
-            # role에 무관하게 항상 children 탐색 (중간 컨테이너 건너뛰지 않음)
             err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
             if err_c == 0 and children:
                 for child in children:
                     find_panes(child, depth + 1, panes_list, top_rect)
+
+        def filter_container_panes(panes):
+            """
+            면적 비율 기반 중복 컨테이너 제거:
+            - 자식 패널이 부모 면적의 70% 이상을 차지하면 → 부모는 중복 래퍼 → 제거
+            - 자식이 부모의 50% 이하 (나란히 배치된 분할 패널) → 부모 유지
+            예) 전체화면 AXGroup (100%) 안에 거의 같은 크기 AXGroup (93%) → 전체화면 제거
+                에디터(50%) + 터미널(50%) 을 감싸는 SplitGroup → 유지
+            """
+            if len(panes) <= 1:
+                return panes
+            margin = 15
+            to_remove = set()
+            for i, a in enumerate(panes):
+                if i in to_remove:
+                    continue
+                ax, ay, aw, ah = a['rect']
+                a_area = aw * ah
+                if a_area == 0:
+                    continue
+                for j, b in enumerate(panes):
+                    if i == j or j in to_remove:
+                        continue
+                    bx, by, bw, bh = b['rect']
+                    # b가 a 안에 완전히 포함되는지 확인
+                    if (ax - margin <= bx and ay - margin <= by and
+                            ax + aw + margin >= bx + bw and ay + ah + margin >= by + bh):
+                        b_area = bw * bh
+                        # b가 a 면적의 70% 이상이면 a는 중복 래퍼 → 제거
+                        if b_area / a_area >= 0.70:
+                            to_remove.add(i)
+                            break
+            filtered = [p for i, p in enumerate(panes) if i not in to_remove]
+            return filtered
 
         # 3. 수집된 PID를 순회하며 창 모드에 따라 다르게 처리
         for pid in visible_pids:
@@ -371,21 +484,19 @@ class OverlayController(AppKit.NSObject):
                                 is_fs = (err_fs == 0 and is_fullscreen == True)
 
                                 if is_fs:
-                                    # [전체화면 모드] window의 children부터 DFS 탐색 시작
-                                    # (window 자체가 아닌 내부 split/group 요소 탐색)
-                                    print(f"[DEBUG] 전체화면 앱 감지 (pid={pid}) → 내부 패널 스캔")
                                     panes = []
                                     err_c, win_children = AXUIElementCopyAttributeValue(window, "AXChildren", None)
                                     if err_c == 0 and win_children:
                                         for child in win_children:
                                             find_panes(child, 0, panes, top_rect)
+                                    panes = filter_container_panes(panes)
                                     if not panes:
-                                        # 내부 패널 못 찾으면 창 전체를 하나로
-                                        panes.append({'rect': (ax_x, ax_y, ax_w, ax_h), 'element': window})
+                                        name = get_pane_name(window, "AXWindow", (ax_x, ax_y, ax_w, ax_h))
+                                        panes.append({'rect': (ax_x, ax_y, ax_w, ax_h), 'element': window, 'name': name})
                                 else:
-                                    # [바탕화면 창 모드] 창 자체에만 태그 부여, 내부 스캔 없음
-                                    print(f"[DEBUG] 창 모드 앱 감지 (pid={pid}) → 위치: x={ax_x}, y={ax_y} / 크기: w={ax_w}, h={ax_h}")
-                                    panes = [{'rect': (ax_x, ax_y, ax_w, ax_h), 'element': window}]
+                                    app_obj = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+                                    app_name = app_obj.localizedName() if app_obj else str(pid)
+                                    panes = [{'rect': (ax_x, ax_y, ax_w, ax_h), 'element': window, 'name': app_name}]
 
                                 window_groups.append({
                                     'z_index': best_match['z_index'],
