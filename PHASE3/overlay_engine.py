@@ -412,31 +412,52 @@ class HotkeyManager:
     def __init__(self, callback_func):
         self.callback = callback_func
         self.tap = None
-        self.FLAG_CMD  = Quartz.kCGEventFlagMaskCommand
-        self.FLAG_CTRL = Quartz.kCGEventFlagMaskControl
-        self.FLAG_SHIFT = Quartz.kCGEventFlagMaskShift
-        self.FLAG_ALT  = Quartz.kCGEventFlagMaskAlternate
-        self.REQUIRED  = self.FLAG_CMD | self.FLAG_CTRL
+        self.r_cmd_down = False
+        self.other_key_pressed = False
+        self.wait_for_alphabet = False
 
     def _event_callback(self, proxy, event_type, event, refcon):
-        if event_type == Quartz.kCGEventKeyDown:
+        if event_type == Quartz.kCGEventFlagsChanged:
             keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
-            flags = Quartz.CGEventGetFlags(event)
-            relevant = flags & (self.FLAG_CMD | self.FLAG_CTRL | self.FLAG_SHIFT | self.FLAG_ALT)
             
-            if relevant == self.REQUIRED:
+            if keycode == 54: # Right Command
+                if not self.r_cmd_down:
+                    self.r_cmd_down = True
+                    self.other_key_pressed = False
+                    self.wait_for_alphabet = False
+                    return None # OS 전달 차단
+                else:
+                    self.r_cmd_down = False
+                    if not self.other_key_pressed:
+                        self.wait_for_alphabet = True
+                    return None # OS 전달 차단
+            else:
+                if self.r_cmd_down:
+                    self.other_key_pressed = True
+
+        elif event_type == Quartz.kCGEventKeyDown:
+            if self.r_cmd_down:
+                self.other_key_pressed = True
+                
+            if self.r_cmd_down or self.wait_for_alphabet:
+                keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
                 char = KEYCODE_TO_CHAR.get(keycode)
                 if char:
+                    self.wait_for_alphabet = False
                     self.callback(char)
-                    return None  # Consume event
+                    return None # OS 전달 차단
+                elif self.wait_for_alphabet:
+                    self.wait_for_alphabet = False
+
         return event
 
     def start(self):
+        mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown) | Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged)
         self.tap = Quartz.CGEventTapCreate(
             Quartz.kCGSessionEventTap,
             Quartz.kCGHeadInsertEventTap,
             Quartz.kCGEventTapOptionDefault,
-            Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
+            mask,
             self._event_callback,
             None
         )
@@ -447,7 +468,7 @@ class HotkeyManager:
         source = Quartz.CFMachPortCreateRunLoopSource(None, self.tap, 0)
         Quartz.CFRunLoopAddSource(Quartz.CFRunLoopGetMain(), source, Quartz.kCFRunLoopCommonModes)
         Quartz.CGEventTapEnable(self.tap, True)
-        print("[INFO] CGEventTap 활성화 완료 — 단축키(Cmd+Ctrl+알파벳)가 우선 처리됩니다.")
+        print("[INFO] CGEventTap 활성화 완료 — 단축키(R-Cmd + 알파벳)가 우선 처리됩니다.")
 
 # ==============================================================================
 # 5. Main Engine Controller
@@ -580,7 +601,7 @@ if __name__ == '__main__':
     print("=" * 60)
     print("  Smart-Homerow Phase 3: 상시 모니터링형 Overlay Engine 시작")
     print("  모든 창과 패널에 알파벳 단축키 태그가 항상 표시됩니다.")
-    print("  이동 단축키: Cmd + Ctrl + [알파벳]")
+    print("  이동 단축키: Right Command + [알파벳] (또는 R-Cmd 탭 후 알파벳)")
     print("  종료하려면 터미널에서 Ctrl+C 를 누르세요.")
     print("=" * 60)
     
