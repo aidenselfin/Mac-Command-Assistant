@@ -2,8 +2,8 @@ import sys
 import os
 import threading
 import time
+import signal
 import objc
-from pathlib import Path
 import AppKit
 import Quartz
 from ApplicationServices import (
@@ -15,9 +15,13 @@ from ApplicationServices import (
     kAXValueCGSizeType,
     kAXValueCGPointType
 )
-from pynput import keyboard
+from PyObjCTools import AppHelper
 
-# Cmd+Ctrl+알파벳 단축키에 대한 물리적 키코드 → 문자 매핑 (QWERTY 기준)
+# ==============================================================================
+# 1. Configuration & Constants
+# ==============================================================================
+OUR_PID = os.getpid()
+
 KEYCODE_TO_CHAR = {
     0: 'A',  1: 'S',  2: 'D',  3: 'F',  4: 'H',  5: 'G',  6: 'Z',  7: 'X',
     8: 'C',  9: 'V', 11: 'B', 12: 'Q', 13: 'W', 14: 'E', 15: 'R', 16: 'Y',
@@ -25,12 +29,12 @@ KEYCODE_TO_CHAR = {
    45: 'N', 46: 'M',
 }
 
-overlay_controller = None
-OUR_PID = os.getpid()  # 오버레이 자신의 PID (창 감지에서 제외)
-
-class OverlayView(AppKit.NSView):
+# ==============================================================================
+# 2. UI Component (OverlayView)
+# ==============================================================================
+class OverlayWindowView(AppKit.NSView):
     def initWithFrame_(self, frame):
-        self = objc.super(OverlayView, self).initWithFrame_(frame)
+        self = objc.super(OverlayWindowView, self).initWithFrame_(frame)
         if self:
             self.window_groups = []
             self.active_pid = None
@@ -45,7 +49,7 @@ class OverlayView(AppKit.NSView):
         self.setNeedsDisplay_(True)
 
     def drawRect_(self, dirtyRect):
-        # 1. 투명 배경으로 화면 지우기
+        # 배경 투명화
         AppKit.NSColor.clearColor().set()
         AppKit.NSRectFill(dirtyRect)
 
@@ -54,13 +58,10 @@ class OverlayView(AppKit.NSView):
 
         sorted_groups = sorted(self.window_groups, key=lambda g: g['z_index'], reverse=True)
 
-        # 색상 및 스타일 정의
-        tag_bg_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 1.0) # #FFE600
-        tag_text_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(0.102, 0.102, 0.102, 1.0) # #1A1A1A
+        tag_bg_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 1.0)
+        tag_text_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(0.102, 0.102, 0.102, 1.0)
 
         font = AppKit.NSFont.fontWithName_size_("Menlo-Bold", 12.0)
-        if font is None:
-            font = AppKit.NSFont.fontWithName_size_("Monaco", 12.0)
         if font is None:
             font = AppKit.NSFont.userFixedPitchFontOfSize_(12.0)
 
@@ -73,7 +74,7 @@ class OverlayView(AppKit.NSView):
         active_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 1.0)
         inactive_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.902, 0.0, 0.4)
 
-        # === Pass 1: 모든 창 테두리 먼저 그리기 ===
+        # 1. 테두리 그리기
         for group in sorted_groups:
             is_active_group = (group.get('pid') == self.active_pid)
             line_width = 1.5 if is_active_group else 1.0
@@ -81,7 +82,6 @@ class OverlayView(AppKit.NSView):
 
             for pane in group['panes']:
                 x, y, w, h = pane['rect']
-
                 ns_rect = AppKit.NSMakeRect(x, y, w, h)
                 inset_rect = AppKit.NSInsetRect(ns_rect, line_width / 2.0, line_width / 2.0)
                 path = AppKit.NSBezierPath.bezierPathWithRect_(inset_rect)
@@ -89,81 +89,33 @@ class OverlayView(AppKit.NSView):
                 border_color.set()
                 path.stroke()
 
-        # === Pass 2: 모든 태그 버튼을 테두리 위(상위 레이어)에 그리기 ===
+        # 2. 태그 그리기
         for group in sorted_groups:
             for pane in group['panes']:
                 x, y, w, h = pane['rect']
-
                 tag_str = pane.get('tag', '?')
                 ns_str = AppKit.NSString.stringWithString_(tag_str)
                 tag_size = ns_str.sizeWithAttributes_(text_attrs)
 
                 pad_x, pad_y = 6.0, 2.0
-                tag_rect_w = tag_size.width + pad_x * 2.0
-                tag_rect_h = tag_size.height + pad_y * 2.0
-                tag_x = x - 4.0
-                tag_y = y - 4.0
-                tag_rect = AppKit.NSMakeRect(tag_x, tag_y, tag_rect_w, tag_rect_h)
-
-                # 태그 배경
+                tag_rect = AppKit.NSMakeRect(x - 4.0, y - 4.0, tag_size.width + pad_x * 2.0, tag_size.height + pad_y * 2.0)
                 tag_path = AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(tag_rect, 4.0, 4.0)
                 tag_bg_color.set()
                 tag_path.fill()
 
-                # 텍스트 그리기 (수직/수평 중앙 정렬)
-                text_rect = AppKit.NSMakeRect(
-                    tag_x + pad_x,
-                    tag_y + pad_y,
-                    tag_size.width,
-                    tag_size.height
-                )
+                text_rect = AppKit.NSMakeRect(x - 4.0 + pad_x, y - 4.0 + pad_y, tag_size.width, tag_size.height)
                 ns_str.drawInRect_withAttributes_(text_rect, text_attrs)
 
-class OverlayController(AppKit.NSObject):
-    def init(self):
-        self = objc.super(OverlayController, self).init()
-        if self:
-            self.window = None
-            self.view = None
-            self._pending_rects = None
-            self._lock = threading.Lock()
-            self.setupWindow()
-            self.start_polling()
-            self.start_ui_timer()
-        return self
-
-    def setupWindow(self):
+# ==============================================================================
+# 3. Accessibility Scanner
+# ==============================================================================
+class AccessibilityScanner:
+    def __init__(self):
         screen_frame = AppKit.NSScreen.mainScreen().frame()
-        
-        # 전체 화면 덮는 투명 창
-        self.window = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            screen_frame,
-            AppKit.NSWindowStyleMaskBorderless,
-            AppKit.NSBackingStoreBuffered,
-            False
-        )
-        self.window.setOpaque_(False)
-        self.window.setBackgroundColor_(AppKit.NSColor.clearColor())
-        # 마우스 클릭이 뒤에 있는 앱으로 그대로 통과하도록 설정
-        self.window.setIgnoresMouseEvents_(True)
-        # 항상 위
-        self.window.setLevel_(AppKit.NSFloatingWindowLevel)
-        # Space 전환 시 오버레이가 제자리에 고정되도록 (ghost 방지)
-        self.window.setCollectionBehavior_(
-            AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces |
-            AppKit.NSWindowCollectionBehaviorStationary |
-            AppKit.NSWindowCollectionBehaviorIgnoresCycle
-        )
-        
-        self.view = OverlayView.alloc().initWithFrame_(screen_frame)
-        self.window.setContentView_(self.view)
-        
-        self.window.setAlphaValue_(1.0)
-        self.window.orderFrontRegardless()
+        self.sw = screen_frame.size.width
+        self.sh = screen_frame.size.height
 
-    @objc.python_method
     def get_quartz_snapshot(self):
-        """Tier 1: 쿼리 Quartz 창 목록만 읽는 저렴한 스캔 (AX API 호출 없음)"""
         options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
         window_list = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID)
         
@@ -182,10 +134,361 @@ class OverlayController(AppKit.NSObject):
                     x, y = bounds.get('X', 0), bounds.get('Y', 0)
                     quartz_windows.append({'rect': (x, y, w, h), 'pid': pid, 'z_index': i})
                     visible_pids.add(pid)
-        
-        # 변경 감지를 위한 hashable key (pid + 좌표 + z_order)
+                    
         snapshot_key = frozenset((qw['pid'], qw['rect'], qw['z_index']) for qw in quartz_windows)
         return quartz_windows, visible_pids, snapshot_key
+
+    def get_specific_pane_name(self, element):
+        def extract_last_part(s):
+            return s.split('.')[-1] if '.' in s else s
+
+        e, val = AXUIElementCopyAttributeValue(element, "AXIdentifier", None)
+        if e == 0 and val and str(val).strip(): return extract_last_part(str(val).strip())[:24]
+
+        e, val = AXUIElementCopyAttributeValue(element, "AXDOMIdentifier", None)
+        if e == 0 and val and str(val).strip(): return extract_last_part(str(val).strip())[:24]
+
+        e, val = AXUIElementCopyAttributeValue(element, "AXDescription", None)
+        if e == 0 and val and str(val).strip(): return str(val).strip()[:24]
+
+        e, val = AXUIElementCopyAttributeValue(element, "AXTitle", None)
+        if e == 0 and val and str(val).strip(): return str(val).strip()[:24]
+
+        # Universal class list parsing
+        e, val = AXUIElementCopyAttributeValue(element, "AXDOMClassList", None)
+        if e == 0 and val and isinstance(val, (list, tuple)) and len(val) > 0:
+            ignore_words = {"part", "container", "wrapper", "flex", "box", "view", "content", "panel", "pane", "layout", "grid", "split"}
+            for c in val:
+                parts = str(c).lower().replace('_', '-').split('-')
+                for p in parts:
+                    if p and p not in ignore_words:
+                        return p.capitalize()[:24]
+
+        e, val = AXUIElementCopyAttributeValue(element, "AXLabel", None)
+        if e == 0 and val and str(val).strip(): return str(val).strip()[:24]
+
+        e, val = AXUIElementCopyAttributeValue(element, "AXSubrole", None)
+        if e == 0 and val and str(val).strip(): return str(val).replace("AX", "").strip()[:24]
+
+        return None
+
+    def search_name_in_children(self, element, depth=0):
+        if depth > 4: return None
+        name = self.get_specific_pane_name(element)
+        if name: return name
+        
+        err, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
+        if err == 0 and children:
+            for child in children:
+                found = self.search_name_in_children(child, depth + 1)
+                if found: return found
+        return None
+
+    def get_size_pos(self, element):
+        err_s, sv = AXUIElementCopyAttributeValue(element, "AXSize", None)
+        err_p, pv = AXUIElementCopyAttributeValue(element, "AXPosition", None)
+        if err_s == 0 and err_p == 0 and sv and pv:
+            ok_s, sz = AXValueGetValue(sv, kAXValueCGSizeType, None)
+            ok_p, pos = AXValueGetValue(pv, kAXValueCGPointType, None)
+            if ok_s and ok_p:
+                return pos.x, pos.y, sz.width, sz.height
+        return None
+
+    def add_as_pane(self, element, role, x, y, w, h, panes_list):
+        if w > 100 and h > 100 and (x < self.sw and y < self.sh and x + w > 0 and y + h > 0):
+            specific_name = self.search_name_in_children(element, 0)
+            for pane in panes_list:
+                rx, ry, rw, rh = pane['rect']
+                if abs(x - rx) < 15 and abs(y - ry) < 15 and abs(w - rw) < 15 and abs(h - rh) < 15:
+                    if specific_name and not pane.get('specific_name'):
+                        pane['specific_name'] = specific_name
+                        pane['element'] = element
+                        pane['role'] = role
+                    return
+            panes_list.append({
+                'rect': (x, y, w, h), 'element': element, 'role': role, 'specific_name': specific_name
+            })
+
+    def find_panes(self, element, depth, panes_list):
+        if depth > 15: return
+        
+        geom = self.get_size_pos(element)
+        if geom:
+            x, y, w, h = geom
+            if w < 100 or h < 100: return
+
+        err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
+        if err != 0 or not role: return
+
+        if role in ("AXSplitGroup", "AXTabGroup"):
+            err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
+            if err_c == 0 and children:
+                for child in children:
+                    err_cr, child_role = AXUIElementCopyAttributeValue(child, "AXRole", None)
+                    if err_cr == 0 and child_role == "AXSplitter": continue
+                    c_geom = self.get_size_pos(child)
+                    if c_geom:
+                        cx, cy, cw, ch = c_geom
+                        cr = child_role if err_cr == 0 else "?"
+                        self.add_as_pane(child, cr, cx, cy, cw, ch, panes_list)
+                    if err_cr == 0 and child_role in ("AXSplitGroup", "AXTabGroup"):
+                        self.find_panes(child, depth + 1, panes_list)
+            return
+
+        PANEL_ROLES = {"AXScrollArea", "AXWebArea", "AXGroup", "AXTextArea"}
+        if role in PANEL_ROLES and geom:
+            self.add_as_pane(element, role, geom[0], geom[1], geom[2], geom[3], panes_list)
+
+        err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
+        if err_c == 0 and children:
+            for child in children:
+                self.find_panes(child, depth + 1, panes_list)
+
+    def resolve_overlaps(self, panes):
+        if not panes: return []
+        margin = 15
+
+        for p in panes:
+            x, y, w, h = p['rect']
+            p['area'] = w * h
+            p['children'] = []
+            p['keep'] = True
+
+        panes.sort(key=lambda p: p['area'])
+        for i, child in enumerate(panes):
+            cx, cy, cw, ch = child['rect']
+            parent = None
+            for j in range(i + 1, len(panes)):
+                pot_parent = panes[j]
+                px, py, pw, ph = pot_parent['rect']
+                if (px - margin <= cx and py - margin <= cy and
+                    px + pw + margin >= cx + cw and py + ph + margin >= cy + ch):
+                    parent = pot_parent
+                    break
+            if parent:
+                parent['children'].append(child)
+
+        panes.sort(key=lambda p: p['area'], reverse=True)
+        for p in panes:
+            if not p['keep'] or not p['children']: continue
+            children_area = sum(c['area'] for c in p['children'] if c['keep'])
+            if children_area / p['area'] > 0.30:
+                p['keep'] = False
+            else:
+                def drop_descendants(node):
+                    node['keep'] = False
+                    for c in node['children']: drop_descendants(c)
+                for c in p['children']: drop_descendants(c)
+
+        kept_panes = [p for p in panes if p['keep']]
+        final_panes = []
+        for p in kept_panes:
+            px, py, pw, ph = p['rect']
+            conflict = False
+            for fp in final_panes:
+                fx, fy, fw, fh = fp['rect']
+                ix, iy = max(px, fx), max(py, fy)
+                iw, ih = min(px+pw, fx+fw) - ix, min(py+ph, fy+fh) - iy
+                if iw > 0 and ih > 0:
+                    if (iw * ih) > 0.3 * min(p['area'], fp['area']):
+                        conflict = True
+                        p_name, fp_name = bool(p.get('specific_name')), bool(fp.get('specific_name'))
+                        if (p_name and not fp_name) or (p_name == fp_name and p['area'] > fp['area']):
+                            fp.update(p)
+                        break
+            if not conflict:
+                final_panes.append(p)
+        return final_panes
+
+    def get_target_rects(self, quartz_windows, visible_pids):
+        window_groups = []
+        for pid in visible_pids:
+            app_element = AXUIElementCreateApplication(pid)
+            err, windows = AXUIElementCopyAttributeValue(app_element, "AXWindows", None)
+            if err != 0 or not windows: continue
+
+            matched_windows = []
+            for window in windows:
+                err_m, is_minimized = AXUIElementCopyAttributeValue(window, "AXMinimized", None)
+                if err_m == 0 and is_minimized: continue
+
+                geom = self.get_size_pos(window)
+                if not geom: continue
+                ax_x, ax_y, ax_w, ax_h = geom
+
+                best_match = None
+                best_diff = 99999
+                for qw in quartz_windows:
+                    if qw['pid'] == pid:
+                        qx, qy, qw_w, qw_h = qw['rect']
+                        diff = abs(ax_x - qx) + abs(ax_y - qy) + abs(ax_w - qw_w) + abs(ax_h - qw_h)
+                        if diff < best_diff and diff < 50:
+                            best_match = qw
+                            best_diff = diff
+
+                if best_match:
+                    matched_windows.append({
+                        'window': window, 'rect': geom, 'match': best_match
+                    })
+
+            sub_counter = 1
+            for mw in matched_windows:
+                window, geom, best_match = mw['window'], mw['rect'], mw['match']
+                ax_x, ax_y, ax_w, ax_h = geom
+                
+                err_m, is_main_val = AXUIElementCopyAttributeValue(window, "AXMain", None)
+                is_main = (err_m == 0 and is_main_val)
+
+                err_fs, is_fullscreen = AXUIElementCopyAttributeValue(window, "AXFullScreen", None)
+                is_fs = (err_fs == 0 and is_fullscreen == True)
+
+                panes = []
+                if is_fs:
+                    err_c, win_children = AXUIElementCopyAttributeValue(window, "AXChildren", None)
+                    if err_c == 0 and win_children:
+                        for child in win_children:
+                            self.find_panes(child, 0, panes)
+                    panes = self.resolve_overlaps(panes)
+                    
+                    for pane in panes:
+                        if pane.get('specific_name'):
+                            pane['name'] = pane['specific_name']
+                        else:
+                            px, py, pw, ph = pane['rect']
+                            cx, cy = px + pw / 2, py + ph / 2
+                            h_pos = "Left" if cx < self.sw * 0.33 else ("Right" if cx > self.sw * 0.67 else "Center")
+                            v_pos = "Top" if cy < self.sh * 0.33 else ("Bottom" if cy > self.sh * 0.67 else "")
+                            role_short = (pane['role'] or "Panel").replace("AX", "")
+                            pane['name'] = f"{role_short}-{v_pos}{h_pos}"
+
+                    if not panes:
+                        specific_name = self.get_specific_pane_name(window)
+                        if specific_name:
+                            name = specific_name
+                        else:
+                            cx, cy = ax_x + ax_w / 2, ax_y + ax_h / 2
+                            h_pos = "Left" if cx < self.sw * 0.33 else ("Right" if cx > self.sw * 0.67 else "Center")
+                            v_pos = "Top" if cy < self.sh * 0.33 else ("Bottom" if cy > self.sh * 0.67 else "")
+                            name = f"Window-{v_pos}{h_pos}"
+                        panes.append({'rect': geom, 'element': window, 'name': name})
+                else:
+                    app_obj = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+                    app_name = app_obj.localizedName() if app_obj else str(pid)
+                    err_t, title_val = AXUIElementCopyAttributeValue(window, "AXTitle", None)
+                    title = str(title_val).strip() if err_t == 0 and title_val else ""
+                    
+                    base_name = f"{app_name} - {title[:15]}" if title else app_name
+                    if len(matched_windows) > 1:
+                        final_name = f"{base_name} [Main]" if is_main else f"{base_name} [Sub-{sub_counter}]"
+                        if not is_main: sub_counter += 1
+                    else:
+                        final_name = base_name
+
+                    panes = [{'rect': geom, 'element': window, 'name': final_name}]
+
+                window_groups.append({
+                    'z_index': best_match['z_index'],
+                    'top_rect': best_match['rect'],
+                    'panes': panes,
+                    'pid': pid,
+                    'is_fullscreen': is_fs
+                })
+
+        window_groups.sort(key=lambda g: g['z_index'])
+        chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        tag_index = 0
+        for group in window_groups:
+            for pane in group['panes']:
+                tag_str = chars[tag_index] if tag_index < 26 else chars[tag_index//26 - 1] + chars[tag_index%26]
+                pane['tag'] = tag_str
+                tag_index += 1
+
+        return window_groups
+
+# ==============================================================================
+# 4. Hotkey Manager
+# ==============================================================================
+class HotkeyManager:
+    def __init__(self, callback_func):
+        self.callback = callback_func
+        self.tap = None
+        self.FLAG_CMD  = Quartz.kCGEventFlagMaskCommand
+        self.FLAG_CTRL = Quartz.kCGEventFlagMaskControl
+        self.FLAG_SHIFT = Quartz.kCGEventFlagMaskShift
+        self.FLAG_ALT  = Quartz.kCGEventFlagMaskAlternate
+        self.REQUIRED  = self.FLAG_CMD | self.FLAG_CTRL
+
+    def _event_callback(self, proxy, event_type, event, refcon):
+        if event_type == Quartz.kCGEventKeyDown:
+            keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+            flags = Quartz.CGEventGetFlags(event)
+            relevant = flags & (self.FLAG_CMD | self.FLAG_CTRL | self.FLAG_SHIFT | self.FLAG_ALT)
+            
+            if relevant == self.REQUIRED:
+                char = KEYCODE_TO_CHAR.get(keycode)
+                if char:
+                    self.callback(char)
+                    return None  # Consume event
+        return event
+
+    def start(self):
+        self.tap = Quartz.CGEventTapCreate(
+            Quartz.kCGSessionEventTap,
+            Quartz.kCGHeadInsertEventTap,
+            Quartz.kCGEventTapOptionDefault,
+            Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
+            self._event_callback,
+            None
+        )
+        if self.tap is None:
+            print("[ERROR] CGEventTap 생성 실패 — 시스템 설정에서 손쉬운 사용 권한을 허용하세요.")
+            return
+
+        source = Quartz.CFMachPortCreateRunLoopSource(None, self.tap, 0)
+        Quartz.CFRunLoopAddSource(Quartz.CFRunLoopGetMain(), source, Quartz.kCFRunLoopCommonModes)
+        Quartz.CGEventTapEnable(self.tap, True)
+        print("[INFO] CGEventTap 활성화 완료 — 단축키(Cmd+Ctrl+알파벳)가 우선 처리됩니다.")
+
+# ==============================================================================
+# 5. Main Engine Controller
+# ==============================================================================
+class OverlayEngineController(AppKit.NSObject):
+    def init(self):
+        self = objc.super(OverlayEngineController, self).init()
+        if self:
+            self.window = None
+            self.view = None
+            self._pending_rects = None
+            self._lock = threading.Lock()
+            
+            self.scanner = AccessibilityScanner()
+            self.setup_window()
+            self.start_polling()
+            self.start_ui_timer()
+            
+            self.hotkey_mgr = HotkeyManager(self.handle_tag_global)
+            self.hotkey_mgr.start()
+        return self
+
+    def setup_window(self):
+        screen_frame = AppKit.NSScreen.mainScreen().frame()
+        self.window = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            screen_frame, AppKit.NSWindowStyleMaskBorderless, AppKit.NSBackingStoreBuffered, False
+        )
+        self.window.setOpaque_(False)
+        self.window.setBackgroundColor_(AppKit.NSColor.clearColor())
+        self.window.setIgnoresMouseEvents_(True)
+        self.window.setLevel_(AppKit.NSFloatingWindowLevel)
+        self.window.setCollectionBehavior_(
+            AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces |
+            AppKit.NSWindowCollectionBehaviorStationary |
+            AppKit.NSWindowCollectionBehaviorIgnoresCycle
+        )
+        
+        self.view = OverlayWindowView.alloc().initWithFrame_(screen_frame)
+        self.window.setContentView_(self.view)
+        self.window.setAlphaValue_(1.0)
+        self.window.orderFrontRegardless()
 
     @objc.python_method
     def start_polling(self):
@@ -194,35 +497,28 @@ class OverlayController(AppKit.NSObject):
             last_pane_summary = None
             while True:
                 try:
-                    quartz_windows, visible_pids, snapshot_key = self.get_quartz_snapshot()
-
+                    quartz_windows, visible_pids, snapshot_key = self.scanner.get_quartz_snapshot()
                     if snapshot_key != last_key:
                         last_key = snapshot_key
-                        rects = self.get_target_rects(quartz_windows, visible_pids)
+                        rects = self.scanner.get_target_rects(quartz_windows, visible_pids)
                         with self._lock:
                             self._pending_rects = rects
-                        # 패널 목록이 실제로 바뀐 경우에만 출력
-                        pane_summary = tuple(
-                            pane.get('name', pane.get('tag', '?'))
-                            for g in rects for pane in g['panes']
-                        )
+                        
+                        pane_summary = tuple(pane.get('name', pane.get('tag', '?')) for g in rects for pane in g['panes'])
                         if pane_summary != last_pane_summary:
                             last_pane_summary = pane_summary
                             total = sum(len(g['panes']) for g in rects)
                             if total > 0:
-                                names = ', '.join(pane_summary)
-                                print(f"[패널] {total}개 인식: {names}")
+                                print(f"[패널] {total}개 인식: {', '.join(pane_summary)}")
                             else:
                                 print("[패널] 없음")
                 except Exception as e:
                     print(f"[ERROR] Polling thread crashed: {e}")
-                    import traceback; traceback.print_exc()
                 time.sleep(0.1)
         threading.Thread(target=poll, daemon=True).start()
 
     @objc.python_method
     def start_ui_timer(self):
-        # 메인 스레드에서 실행되는 NSTimer로 UI를 안전하게 업데이트
         AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             0.15, self, "refreshUI:", None, True
         )
@@ -255,31 +551,21 @@ class OverlayController(AppKit.NSObject):
                         app.activateWithOptions_(AppKit.NSApplicationActivateIgnoringOtherApps)
 
                     if is_fullscreen:
-                        # 전체화면 패널: 패널 중앙을 마우스 클릭으로 포커스
                         x, y, w, h = pane['rect']
-                        click_x = x + w / 2.0
-                        click_y = y + h / 2.0
-                        print(f"[DEBUG] 전체화면 패널 선택: tag={tag_char}, 클릭 좌표=({click_x:.0f}, {click_y:.0f})")
+                        click_x, click_y = x + w / 2.0, y + h / 2.0
+                        print(f"[DEBUG] 패널 클릭: tag={tag_char}, 좌표=({click_x:.0f}, {click_y:.0f})")
                         self._simulate_click_delayed(click_x, click_y)
                     else:
-                        # 창 모드: 창을 앞으로 올리기 (기존 동작 유지)
                         AXUIElementPerformAction(element, "AXRaise")
                     return
 
     @objc.python_method
     def _simulate_click_delayed(self, x, y, delay=0.08):
-        """앱 활성화 후 Quartz 이벤트로 특정 좌표에 좌클릭 시뮬레이션"""
         def do_click():
-            time.sleep(delay)  # 앱이 활성화될 때까지 잠깐 대기
+            time.sleep(delay)
             point = Quartz.CGPointMake(x, y)
-            mouse_down = Quartz.CGEventCreateMouseEvent(
-                None, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft
-            )
-            mouse_up = Quartz.CGEventCreateMouseEvent(
-                None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft
-            )
-            # Cmd+Ctrl 키가 아직 눌린 상태에서 발생하면
-            # macOS가 Ctrl+Click을 우클릭으로 해석함 → 수식키 플래그를 명시적으로 제거
+            mouse_down = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft)
+            mouse_up = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft)
             Quartz.CGEventSetFlags(mouse_down, 0)
             Quartz.CGEventSetFlags(mouse_up, 0)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, mouse_down)
@@ -287,287 +573,9 @@ class OverlayController(AppKit.NSObject):
             print(f"[DEBUG] 좌클릭 시뮬레이션 완료: ({x:.0f}, {y:.0f})")
         threading.Thread(target=do_click, daemon=True).start()
 
-    @objc.python_method
-    def get_target_rects(self, quartz_windows=None, visible_pids=None):
-        screen_frame = AppKit.NSScreen.mainScreen().frame()
-        sw = screen_frame.size.width
-        sh = screen_frame.size.height
-
-        # 1. 화면에 보이는 창 필터링 (Quartz API)
-        if quartz_windows is None or visible_pids is None:
-            quartz_windows, visible_pids, _ = self.get_quartz_snapshot()
-
-        window_groups = []
-
-        # 2. 재귀 탐색을 통한 패널 영역 추출 (DFS) - 전체화면 앱 전용
-        # 패널 이름 도출 함수 (AX 속성 기반, 재시작 후에도 안정적)
-        def get_pane_name(element, role, rect):
-            # 1. AXIdentifier (앱 내부 고유 ID, 가장 안정적)
-            e, val = AXUIElementCopyAttributeValue(element, "AXIdentifier", None)
-            if e == 0 and val:
-                s = str(val).strip()
-                if s:
-                    # 'workbench.parts.sidebar' → 'sidebar'
-                    name = s.split('.')[-1] if '.' in s else s
-                    return name[:24]
-            # 2. AXTitle
-            e, val = AXUIElementCopyAttributeValue(element, "AXTitle", None)
-            if e == 0 and val:
-                s = str(val).strip()
-                if s: return s[:24]
-            # 3. AXDescription
-            e, val = AXUIElementCopyAttributeValue(element, "AXDescription", None)
-            if e == 0 and val:
-                s = str(val).strip()
-                if s: return s[:24]
-            # 4. AXLabel
-            e, val = AXUIElementCopyAttributeValue(element, "AXLabel", None)
-            if e == 0 and val:
-                s = str(val).strip()
-                if s: return s[:24]
-            # 5. AXSubrole
-            e, val = AXUIElementCopyAttributeValue(element, "AXSubrole", None)
-            if e == 0 and val:
-                s = str(val).replace("AX", "").strip()
-                if s: return s[:24]
-            # 6. 위치 기반 이름 (화면 내 상대 위치 → 재시작 후에도 동일)
-            x, y, w, h = rect
-            cx, cy = x + w / 2, y + h / 2
-            h_pos = "Left" if cx < sw * 0.33 else ("Right" if cx > sw * 0.67 else "Center")
-            v_pos = "Top" if cy < sh * 0.33 else ("Bottom" if cy > sh * 0.67 else "")
-            role_short = (role or "Panel").replace("AX", "")
-            return f"{role_short}-{v_pos}{h_pos}"
-
-        def add_as_pane(element, role, x, y, w, h, panes_list):
-            """크기·화면 범위 검사 후 중복이 아니면 패널 목록에 추가"""
-            if w > 100 and h > 100 and (x < sw and y < sh and x + w > 0 and y + h > 0):
-                for pane in panes_list:
-                    rx, ry, rw, rh = pane['rect']
-                    if abs(x - rx) < 15 and abs(y - ry) < 15 and abs(w - rw) < 15 and abs(h - rh) < 15:
-                        return  # 중복
-                name = get_pane_name(element, role, (x, y, w, h))
-                panes_list.append({'rect': (x, y, w, h), 'element': element, 'role': role, 'name': name})
-
-        def get_size_pos(element):
-            """(x, y, w, h) 또는 None 반환"""
-            err_s, sv = AXUIElementCopyAttributeValue(element, "AXSize", None)
-            err_p, pv = AXUIElementCopyAttributeValue(element, "AXPosition", None)
-            if err_s != 0 or err_p != 0 or not sv or not pv:
-                return None
-            ok_s, sz = AXValueGetValue(sv, kAXValueCGSizeType, None)
-            ok_p, pos = AXValueGetValue(pv, kAXValueCGPointType, None)
-            if ok_s and ok_p:
-                return pos.x, pos.y, sz.width, sz.height
-            return None
-
-        def find_panes(element, depth, panes_list, top_rect):
-            if depth > 15: return
-
-            err_s, size_val = AXUIElementCopyAttributeValue(element, "AXSize", None)
-            sz_width, sz_height = 0, 0
-            if err_s == 0 and size_val:
-                succ_s, sz = AXValueGetValue(size_val, kAXValueCGSizeType, None)
-                if succ_s:
-                    sz_width, sz_height = sz.width, sz.height
-
-            if sz_width > 0 and sz_height > 0 and (sz_width < 100 or sz_height < 100):
-                return
-
-            err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
-            if err != 0 or not role:
-                return
-
-            if role in ("AXSplitGroup", "AXTabGroup"):
-                # SplitGroup/TabGroup: 자신은 추가하지 않고 직계 자식을 개별 패널로 추가
-                # → VS Code 사이드바/에디터/터미널이 각각 별도 패널로 분리됨
-                err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
-                if err_c == 0 and children:
-                    for child in children:
-                        err_cr, child_role = AXUIElementCopyAttributeValue(child, "AXRole", None)
-                        if err_cr == 0 and child_role == "AXSplitter":
-                            continue  # 드래그 핸들은 건너뜀
-                        geom = get_size_pos(child)
-                        if geom:
-                            cx, cy, cw, ch = geom
-                            cr = child_role if err_cr == 0 else "?"
-                            add_as_pane(child, cr, cx, cy, cw, ch, panes_list)
-                        # 중첩 SplitGroup은 재귀적으로도 탐색
-                        if err_cr == 0 and child_role in ("AXSplitGroup", "AXTabGroup"):
-                            find_panes(child, depth + 1, panes_list, top_rect)
-                return
-
-            # 그 외 역할: 패널로 추가 후 children 계속 탐색
-            PANEL_ROLES = {"AXScrollArea", "AXWebArea", "AXGroup", "AXTextArea"}
-            if role in PANEL_ROLES:
-                err_p, pos_val = AXUIElementCopyAttributeValue(element, "AXPosition", None)
-                if err_p == 0 and pos_val:
-                    succ_p, pos = AXValueGetValue(pos_val, kAXValueCGPointType, None)
-                    if succ_p:
-                        add_as_pane(element, role, pos.x, pos.y, sz_width, sz_height, panes_list)
-
-            err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
-            if err_c == 0 and children:
-                for child in children:
-                    find_panes(child, depth + 1, panes_list, top_rect)
-
-        def filter_container_panes(panes):
-            """
-            면적 비율 기반 중복 컨테이너 제거:
-            - 자식 패널이 부모 면적의 70% 이상을 차지하면 → 부모는 중복 래퍼 → 제거
-            - 자식이 부모의 50% 이하 (나란히 배치된 분할 패널) → 부모 유지
-            예) 전체화면 AXGroup (100%) 안에 거의 같은 크기 AXGroup (93%) → 전체화면 제거
-                에디터(50%) + 터미널(50%) 을 감싸는 SplitGroup → 유지
-            """
-            if len(panes) <= 1:
-                return panes
-            margin = 15
-            to_remove = set()
-            for i, a in enumerate(panes):
-                if i in to_remove:
-                    continue
-                ax, ay, aw, ah = a['rect']
-                a_area = aw * ah
-                if a_area == 0:
-                    continue
-                for j, b in enumerate(panes):
-                    if i == j or j in to_remove:
-                        continue
-                    bx, by, bw, bh = b['rect']
-                    # b가 a 안에 완전히 포함되는지 확인
-                    if (ax - margin <= bx and ay - margin <= by and
-                            ax + aw + margin >= bx + bw and ay + ah + margin >= by + bh):
-                        b_area = bw * bh
-                        # b가 a 면적의 70% 이상이면 a는 중복 래퍼 → 제거
-                        if b_area / a_area >= 0.70:
-                            to_remove.add(i)
-                            break
-            filtered = [p for i, p in enumerate(panes) if i not in to_remove]
-            return filtered
-
-        # 3. 수집된 PID를 순회하며 창 모드에 따라 다르게 처리
-        for pid in visible_pids:
-            app_element = AXUIElementCreateApplication(pid)
-            err, windows = AXUIElementCopyAttributeValue(app_element, "AXWindows", None)
-            if err == 0 and windows:
-                for window in windows:
-                    # 최소화된 창은 스킵
-                    err_m, is_minimized = AXUIElementCopyAttributeValue(window, "AXMinimized", None)
-                    if err_m == 0 and is_minimized:
-                        continue
-
-                    err_p, pos_val = AXUIElementCopyAttributeValue(window, "AXPosition", None)
-                    err_s, size_val = AXUIElementCopyAttributeValue(window, "AXSize", None)
-
-                    if err_p == 0 and err_s == 0 and pos_val and size_val:
-                        succ_p, pos = AXValueGetValue(pos_val, kAXValueCGPointType, None)
-                        succ_s, sz = AXValueGetValue(size_val, kAXValueCGSizeType, None)
-
-                        if succ_p and succ_s:
-                            ax_x, ax_y, ax_w, ax_h = pos.x, pos.y, sz.width, sz.height
-
-                            # 매칭되는 Quartz 윈도우 찾기
-                            best_match = None
-                            best_diff = 99999
-                            for qw in quartz_windows:
-                                if qw['pid'] == pid:
-                                    qx, qy, qw_w, qw_h = qw['rect']
-                                    diff = abs(ax_x - qx) + abs(ax_y - qy) + abs(ax_w - qw_w) + abs(ax_h - qw_h)
-                                    if diff < best_diff and diff < 50:
-                                        best_match = qw
-                                        best_diff = diff
-
-                            if best_match:
-                                top_rect = best_match['rect']
-
-                                # 전체화면 여부 확인
-                                err_fs, is_fullscreen = AXUIElementCopyAttributeValue(window, "AXFullScreen", None)
-                                is_fs = (err_fs == 0 and is_fullscreen == True)
-
-                                if is_fs:
-                                    panes = []
-                                    err_c, win_children = AXUIElementCopyAttributeValue(window, "AXChildren", None)
-                                    if err_c == 0 and win_children:
-                                        for child in win_children:
-                                            find_panes(child, 0, panes, top_rect)
-                                    panes = filter_container_panes(panes)
-                                    if not panes:
-                                        name = get_pane_name(window, "AXWindow", (ax_x, ax_y, ax_w, ax_h))
-                                        panes.append({'rect': (ax_x, ax_y, ax_w, ax_h), 'element': window, 'name': name})
-                                else:
-                                    app_obj = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
-                                    app_name = app_obj.localizedName() if app_obj else str(pid)
-                                    panes = [{'rect': (ax_x, ax_y, ax_w, ax_h), 'element': window, 'name': app_name}]
-
-                                window_groups.append({
-                                    'z_index': best_match['z_index'],
-                                    'top_rect': top_rect,
-                                    'panes': panes,
-                                    'pid': pid,
-                                    'is_fullscreen': is_fs
-                                })
-
-        window_groups.sort(key=lambda g: g['z_index'])
-
-        chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        tag_index = 0
-
-        for group in window_groups:
-            for pane in group['panes']:
-                tag_str = chars[tag_index] if tag_index < 26 else chars[tag_index//26 - 1] + chars[tag_index%26]
-                pane['tag'] = tag_str
-                tag_index += 1
-
-        return window_groups
-
-def setup_event_tap():
-    """
-    Quartz CGEventTap 기반 단축키 인터셉터.
-    pynput.GlobalHotKeys와 달리 이벤트를 완전히 소비(suppress)하므로
-    기존 앱 단축키보다 우리 프로그램이 항상 우선됨.
-    """
-    FLAG_CMD  = Quartz.kCGEventFlagMaskCommand
-    FLAG_CTRL = Quartz.kCGEventFlagMaskControl
-    FLAG_SHIFT = Quartz.kCGEventFlagMaskShift
-    FLAG_ALT  = Quartz.kCGEventFlagMaskAlternate
-    REQUIRED  = FLAG_CMD | FLAG_CTRL  # Cmd + Ctrl 만 눌렸을 때
-
-    def callback(proxy, event_type, event, refcon):
-        if event_type == Quartz.kCGEventKeyDown:
-            keycode = Quartz.CGEventGetIntegerValueField(
-                event, Quartz.kCGKeyboardEventKeycode
-            )
-            flags = Quartz.CGEventGetFlags(event)
-            # Cmd+Ctrl 이외의 수식키(Shift, Alt)가 없는 경우만 처리
-            relevant = flags & (FLAG_CMD | FLAG_CTRL | FLAG_SHIFT | FLAG_ALT)
-            if relevant == REQUIRED:
-                char = KEYCODE_TO_CHAR.get(keycode)
-                if char and overlay_controller:
-                    overlay_controller.handle_tag_global(char)
-                    return None  # ← 이벤트 소비: 다른 앱에 전달 안 됨
-        return event  # 그 외 이벤트는 그대로 통과
-
-    tap = Quartz.CGEventTapCreate(
-        Quartz.kCGSessionEventTap,       # 세션 레벨 (앱보다 우선)
-        Quartz.kCGHeadInsertEventTap,    # 큐 맨 앞에 삽입 (최우선)
-        Quartz.kCGEventTapOptionDefault, # 이벤트 수정/소비 허용
-        Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
-        callback,
-        None
-    )
-    if tap is None:
-        print("[ERROR] CGEventTap 생성 실패 — 시스템 환경설정 > 개인 정보 보호 및 보안 > 손쉬운 사용에서 터미널(또는 Python)을 허용하세요.")
-        return
-
-    # 메인 CFRunLoop에 등록 (AppHelper.runEventLoop와 같은 루프 공유)
-    source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-    Quartz.CFRunLoopAddSource(
-        Quartz.CFRunLoopGetMain(),
-        source,
-        Quartz.kCFRunLoopCommonModes
-    )
-    Quartz.CGEventTapEnable(tap, True)
-    print("[INFO] CGEventTap 활성화 완료 — 단축키(Cmd+Ctrl+알파벳)가 우선 처리됩니다.")
-
+# ==============================================================================
+# 6. Main Run Loop
+# ==============================================================================
 if __name__ == '__main__':
     print("=" * 60)
     print("  Smart-Homerow Phase 3: 상시 모니터링형 Overlay Engine 시작")
@@ -576,28 +584,17 @@ if __name__ == '__main__':
     print("  종료하려면 터미널에서 Ctrl+C 를 누르세요.")
     print("=" * 60)
     
-    # AppKit 초기화 및 런루프 시작 (GUI 그리기를 위해 필수)
     app = AppKit.NSApplication.sharedApplication()
-    # Accessory 모드: 독 아이콘 없이 오버레이만 보임
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-    overlay_controller = OverlayController.alloc().init()
     
-    # CGEventTap을 메인 런루프에 등록 (별도 스레드 불필요)
-    setup_event_tap()
+    controller = OverlayEngineController.alloc().init()
     
-    # Ctrl+C 처리를 위해 NSRunLoop를 주기적으로 깨워주는 더미 타이머 추가
     class TimerObj(AppKit.NSObject):
-        def tick_(self, timer):
-            pass
+        def tick_(self, timer): pass
     
     timer_obj = TimerObj.alloc().init()
-    AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-        0.1, timer_obj, "tick:", None, True
-    )
+    AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(0.1, timer_obj, "tick:", None, True)
 
-    import signal
-    import os
-    
     def sigint_handler(sig, frame):
         print("\n[INFO] 프로그램을 안전하게 종료합니다.")
         os._exit(0)
@@ -605,7 +602,6 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, sigint_handler)
 
     try:
-        from PyObjCTools import AppHelper
         AppHelper.runEventLoop(installInterrupt=True)
     except KeyboardInterrupt:
         print("\n[INFO] 프로그램을 안전하게 종료합니다.")
