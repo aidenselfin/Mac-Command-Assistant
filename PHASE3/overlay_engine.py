@@ -11,6 +11,7 @@ from ApplicationServices import (
     AXUIElementCreateApplication,
     AXUIElementCopyAttributeValue,
     AXUIElementPerformAction,
+    AXUIElementCopyElementAtPosition,
     AXValueGetValue,
     kAXValueCGSizeType,
     kAXValueCGPointType
@@ -38,7 +39,15 @@ class OverlayWindowView(AppKit.NSView):
         if self:
             self.window_groups = []
             self.active_pid = None
+            self.temporary_tags = []
         return self
+
+    @objc.python_method
+    def add_temporary_tag(self, x, y, text):
+        sh = AppKit.NSScreen.mainScreen().frame().size.height
+        y = sh - y
+        self.temporary_tags.append({'x': x, 'y': y, 'text': text, 'expire': time.time() + 1.5})
+        self.setNeedsDisplay_(True)
 
     def isFlipped(self):
         return True
@@ -94,6 +103,10 @@ class OverlayWindowView(AppKit.NSView):
             for pane in group['panes']:
                 x, y, w, h = pane['rect']
                 tag_str = pane.get('tag', '?')
+                
+                if pane.get('is_typing_box', False):
+                    tag_str = f"[T] {tag_str}"
+                    
                 ns_str = AppKit.NSString.stringWithString_(tag_str)
                 tag_size = ns_str.sizeWithAttributes_(text_attrs)
 
@@ -106,6 +119,30 @@ class OverlayWindowView(AppKit.NSView):
                 text_rect = AppKit.NSMakeRect(x - 4.0 + pad_x, y - 4.0 + pad_y, tag_size.width, tag_size.height)
                 ns_str.drawInRect_withAttributes_(text_rect, text_attrs)
 
+        # 3. Temporary Tags 렌더링 (단축키 힌트)
+        for tag_data in self.temporary_tags:
+            tx, ty, text = tag_data['x'], tag_data['y'], tag_data['text']
+            ns_str = AppKit.NSString.stringWithString_(text)
+            tag_size = ns_str.sizeWithAttributes_(text_attrs)
+            
+            pad_x, pad_y = 8.0, 4.0
+            tag_rect = AppKit.NSMakeRect(tx - tag_size.width/2 - pad_x, ty - tag_size.height/2 - pad_y, tag_size.width + pad_x*2, tag_size.height + pad_y*2)
+            
+            # 까만 배경, 부드러운 모서리
+            tag_path = AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(tag_rect, 6.0, 6.0)
+            bg_color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(0.1, 0.1, 0.1, 0.95)
+            bg_color.set()
+            tag_path.fill()
+            
+            # 노란색 텍스트
+            temp_text_attrs = {
+                AppKit.NSFontAttributeName: font,
+                AppKit.NSForegroundColorAttributeName: active_color,
+                AppKit.NSKernAttributeName: 0.5
+            }
+            text_rect = AppKit.NSMakeRect(tx - tag_size.width/2, ty - tag_size.height/2, tag_size.width, tag_size.height)
+            ns_str.drawInRect_withAttributes_(text_rect, temp_text_attrs)
+
 # ==============================================================================
 # 3. Accessibility Scanner
 # ==============================================================================
@@ -114,6 +151,42 @@ class AccessibilityScanner:
         screen_frame = AppKit.NSScreen.mainScreen().frame()
         self.sw = screen_frame.size.width
         self.sh = screen_frame.size.height
+
+    def get_shortcut_for_position(self, x, y):
+        import json, os
+        db_path = os.path.join(os.path.dirname(__file__), 'shortcuts_db.json')
+        if not os.path.exists(db_path): return None
+        
+        try:
+            with open(db_path, 'r', encoding='utf-8') as f:
+                db = json.load(f)
+        except:
+            return None
+            
+        workspace = AppKit.NSWorkspace.sharedWorkspace()
+        active_app = workspace.frontmostApplication()
+        if not active_app: return None
+        bundle_id = active_app.bundleIdentifier()
+        
+        if bundle_id not in db: return None
+        
+        system_wide = AXUIElementCreateSystemWide()
+        err, element = AXUIElementCopyElementAtPosition(system_wide, x, y, None)
+        if err != 0 or not element: return None
+        
+        err, title = AXUIElementCopyAttributeValue(element, "AXTitle", None)
+        title_str = str(title).strip().lower() if err == 0 and title else ""
+        
+        err, desc = AXUIElementCopyAttributeValue(element, "AXDescription", None)
+        desc_str = str(desc).strip().lower() if err == 0 and desc else ""
+        
+        if not title_str and not desc_str: return None
+        
+        for key, shortcut in db[bundle_id].items():
+            k_lower = key.lower()
+            if k_lower == title_str or k_lower == desc_str:
+                return shortcut
+        return None
 
     def get_quartz_snapshot(self):
         options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
@@ -194,8 +267,9 @@ class AccessibilityScanner:
                 return pos.x, pos.y, sz.width, sz.height
         return None
 
-    def add_as_pane(self, element, role, x, y, w, h, panes_list):
-        if w > 100 and h > 100 and (x < self.sw and y < self.sh and x + w > 0 and y + h > 0):
+    def add_as_pane(self, element, role, x, y, w, h, panes_list, is_typing_box=False):
+        valid = (w > 20 and h > 10) if is_typing_box else (w > 50 and h > 50)
+        if valid and (x < self.sw and y < self.sh and x + w > 0 and y + h > 0):
             specific_name = self.search_name_in_children(element, 0)
             for pane in panes_list:
                 rx, ry, rw, rh = pane['rect']
@@ -204,21 +278,29 @@ class AccessibilityScanner:
                         pane['specific_name'] = specific_name
                         pane['element'] = element
                         pane['role'] = role
+                        if is_typing_box: pane['is_typing_box'] = True
                     return
             panes_list.append({
-                'rect': (x, y, w, h), 'element': element, 'role': role, 'specific_name': specific_name
+                'rect': (x, y, w, h), 'element': element, 'role': role, 'specific_name': specific_name,
+                'is_typing_box': is_typing_box
             })
 
     def find_panes(self, element, depth, panes_list):
         if depth > 15: return
         
+        err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
+        if err != 0 or not role: return
+
+        TEXT_ROLES = {"AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"}
+        is_typing_box = (role in TEXT_ROLES)
+
         geom = self.get_size_pos(element)
         if geom:
             x, y, w, h = geom
-            if w < 100 or h < 100: return
-
-        err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
-        if err != 0 or not role: return
+            if is_typing_box:
+                if w < 20 or h < 10: return
+            else:
+                if w < 50 or h < 50: return
 
         if role in ("AXSplitGroup", "AXTabGroup"):
             err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
@@ -230,14 +312,15 @@ class AccessibilityScanner:
                     if c_geom:
                         cx, cy, cw, ch = c_geom
                         cr = child_role if err_cr == 0 else "?"
-                        self.add_as_pane(child, cr, cx, cy, cw, ch, panes_list)
+                        c_is_typing_box = cr in {"AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"}
+                        self.add_as_pane(child, cr, cx, cy, cw, ch, panes_list, is_typing_box=c_is_typing_box)
                     if err_cr == 0 and child_role in ("AXSplitGroup", "AXTabGroup"):
                         self.find_panes(child, depth + 1, panes_list)
             return
 
         PANEL_ROLES = {"AXScrollArea", "AXWebArea", "AXGroup", "AXTextArea"}
-        if role in PANEL_ROLES and geom:
-            self.add_as_pane(element, role, geom[0], geom[1], geom[2], geom[3], panes_list)
+        if (role in PANEL_ROLES or is_typing_box) and geom:
+            self.add_as_pane(element, role, geom[0], geom[1], geom[2], geom[3], panes_list, is_typing_box=is_typing_box)
 
         err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
         if err_c == 0 and children:
@@ -272,7 +355,23 @@ class AccessibilityScanner:
         for p in panes:
             if not p['keep'] or not p['children']: continue
             children_area = sum(c['area'] for c in p['children'] if c['keep'])
-            if children_area / p['area'] > 0.30:
+            
+            typing_box_children = [c for c in p['children'] if c['keep'] and c.get('is_typing_box', False)]
+            non_typing_box_children = [c for c in p['children'] if c['keep'] and not c.get('is_typing_box', False)]
+            
+            # 매직 로직: 부모 안에 텍스트 박스가 유일하게 1개 있고 다른 방해 요소가 없다면 가상 히트박스로 승격
+            if len(typing_box_children) == 1 and not non_typing_box_children:
+                p['is_typing_box'] = True
+                p['click_rect'] = typing_box_children[0]['rect']
+                p['element'] = typing_box_children[0]['element']
+                
+                def drop_descendants(node):
+                    node['keep'] = False
+                    for c in node['children']: drop_descendants(c)
+                for c in p['children']: drop_descendants(c)
+                
+            # 텍스트 박스가 여러 개이거나 하위 패널들이 10% 이상 면적을 차지하면 부모 컨테이너 제거
+            elif typing_box_children or (children_area / p['area'] > 0.10):
                 p['keep'] = False
             else:
                 def drop_descendants(node):
@@ -290,11 +389,26 @@ class AccessibilityScanner:
                 ix, iy = max(px, fx), max(py, fy)
                 iw, ih = min(px+pw, fx+fw) - ix, min(py+ph, fy+fh) - iy
                 if iw > 0 and ih > 0:
-                    if (iw * ih) > 0.3 * min(p['area'], fp['area']):
+                    # 두 패널이 충분히 겹칠 경우 (더 작은 패널 면적의 50% 이상)
+                    if (iw * ih) > 0.5 * min(p['area'], fp['area']):
                         conflict = True
                         p_name, fp_name = bool(p.get('specific_name')), bool(fp.get('specific_name'))
-                        if (p_name and not fp_name) or (p_name == fp_name and p['area'] > fp['area']):
+                        p_tb, fp_tb = p.get('is_typing_box', False), fp.get('is_typing_box', False)
+                        
+                        # 0순위: 타이핑 박스 우선
+                        if p_tb and not fp_tb:
                             fp.update(p)
+                        elif not p_tb and fp_tb:
+                            pass
+                        # 1순위: 특정 이름이 있는 패널 우선
+                        elif p_name and not fp_name:
+                            fp.update(p)
+                        elif not p_name and fp_name:
+                            pass
+                        # 2순위: 더 구체적인(크기가 작은) 세부 창 우선
+                        elif p['area'] < fp['area']:
+                            fp.update(p)
+                            
                         break
             if not conflict:
                 final_panes.append(p)
@@ -339,11 +453,12 @@ class AccessibilityScanner:
                 err_m, is_main_val = AXUIElementCopyAttributeValue(window, "AXMain", None)
                 is_main = (err_m == 0 and is_main_val)
 
-                err_fs, is_fullscreen = AXUIElementCopyAttributeValue(window, "AXFullScreen", None)
-                is_fs = (err_fs == 0 and is_fullscreen == True)
+                err_fs, is_fullscreen_val = AXUIElementCopyAttributeValue(window, "AXFullScreen", None)
+                is_mode2 = (err_fs == 0 and is_fullscreen_val == True) # 모드2: 전체화면 모드
 
                 panes = []
-                if is_fs:
+                if is_mode2:
+                    # 모드2 동작 로직: 내부 패널 재귀 탐색
                     err_c, win_children = AXUIElementCopyAttributeValue(window, "AXChildren", None)
                     if err_c == 0 and win_children:
                         for child in win_children:
@@ -372,6 +487,7 @@ class AccessibilityScanner:
                             name = f"Window-{v_pos}{h_pos}"
                         panes.append({'rect': geom, 'element': window, 'name': name})
                 else:
+                    # 모드1: 작은 창 모드 (일반 윈도우)
                     app_obj = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
                     app_name = app_obj.localizedName() if app_obj else str(pid)
                     err_t, title_val = AXUIElementCopyAttributeValue(window, "AXTitle", None)
@@ -391,7 +507,7 @@ class AccessibilityScanner:
                     'top_rect': best_match['rect'],
                     'panes': panes,
                     'pid': pid,
-                    'is_fullscreen': is_fs
+                    'is_mode2': is_mode2
                 })
 
         window_groups.sort(key=lambda g: g['z_index'])
@@ -409,15 +525,22 @@ class AccessibilityScanner:
 # 4. Hotkey Manager
 # ==============================================================================
 class HotkeyManager:
-    def __init__(self, callback_func):
+    def __init__(self, callback_func, on_mouse_click=None):
         self.callback = callback_func
+        self.on_mouse_click = on_mouse_click
         self.tap = None
         self.r_cmd_down = False
         self.other_key_pressed = False
         self.wait_for_alphabet = False
 
     def _event_callback(self, proxy, event_type, event, refcon):
-        if event_type == Quartz.kCGEventFlagsChanged:
+        if event_type == Quartz.kCGEventLeftMouseUp:
+            loc = Quartz.CGEventGetLocation(event)
+            if self.on_mouse_click:
+                self.on_mouse_click(loc.x, loc.y)
+            return event
+            
+        elif event_type == Quartz.kCGEventFlagsChanged:
             keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
             
             if keycode == 54: # Right Command
@@ -452,7 +575,9 @@ class HotkeyManager:
         return event
 
     def start(self):
-        mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown) | Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged)
+        mask = (Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown) | 
+                Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged) |
+                Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseUp))
         self.tap = Quartz.CGEventTapCreate(
             Quartz.kCGSessionEventTap,
             Quartz.kCGHeadInsertEventTap,
@@ -481,15 +606,25 @@ class OverlayEngineController(AppKit.NSObject):
             self.view = None
             self._pending_rects = None
             self._lock = threading.Lock()
+            self._force_rescan = False
             
             self.scanner = AccessibilityScanner()
             self.setup_window()
             self.start_polling()
             self.start_ui_timer()
             
-            self.hotkey_mgr = HotkeyManager(self.handle_tag_global)
+            self.hotkey_mgr = HotkeyManager(self.handle_tag_global, on_mouse_click=self.trigger_rescan)
             self.hotkey_mgr.start()
         return self
+
+    def trigger_rescan(self, click_x=0, click_y=0):
+        self._force_rescan = True
+        threading.Thread(target=self._check_shortcut_hint, args=(click_x, click_y), daemon=True).start()
+
+    def _check_shortcut_hint(self, x, y):
+        shortcut = self.scanner.get_shortcut_for_position(x, y)
+        if shortcut:
+            self.view.add_temporary_tag(x, y, shortcut)
 
     def setup_window(self):
         screen_frame = AppKit.NSScreen.mainScreen().frame()
@@ -516,11 +651,17 @@ class OverlayEngineController(AppKit.NSObject):
         def poll():
             last_key = None
             last_pane_summary = None
+            last_scan_time = time.time()
             while True:
                 try:
                     quartz_windows, visible_pids, snapshot_key = self.scanner.get_quartz_snapshot()
-                    if snapshot_key != last_key:
+                    time_since_last_scan = time.time() - last_scan_time
+                    
+                    if snapshot_key != last_key or self._force_rescan or time_since_last_scan > 1.5:
                         last_key = snapshot_key
+                        self._force_rescan = False
+                        last_scan_time = time.time()
+                        
                         rects = self.scanner.get_target_rects(quartz_windows, visible_pids)
                         with self._lock:
                             self._pending_rects = rects
@@ -545,13 +686,27 @@ class OverlayEngineController(AppKit.NSObject):
         )
 
     def refreshUI_(self, timer):
+        needs_redraw = False
         with self._lock:
             rects = self._pending_rects
             self._pending_rects = None
+            
         if rects is not None:
             active_app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
             active_pid = active_app.processIdentifier() if active_app else None
-            self.view.setRects_activePid_(rects, active_pid)
+            self.view.window_groups = rects
+            self.view.active_pid = active_pid
+            needs_redraw = True
+            
+        current_time = time.time()
+        if hasattr(self.view, 'temporary_tags'):
+            active_tags = [t for t in self.view.temporary_tags if t['expire'] > current_time]
+            if len(active_tags) != len(self.view.temporary_tags):
+                self.view.temporary_tags = active_tags
+                needs_redraw = True
+                
+        if needs_redraw:
+            self.view.setNeedsDisplay_(True)
 
     @objc.python_method
     def handle_tag_global(self, tag_char):
@@ -565,18 +720,22 @@ class OverlayEngineController(AppKit.NSObject):
                 if pane.get('tag') == tag_char:
                     element = pane['element']
                     pid = group['pid']
-                    is_fullscreen = group.get('is_fullscreen', False)
+                    is_mode2 = group.get('is_mode2', False)
 
                     app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
                     if app:
                         app.activateWithOptions_(AppKit.NSApplicationActivateIgnoringOtherApps)
 
-                    if is_fullscreen:
-                        x, y, w, h = pane['rect']
+                    if is_mode2:
+                        # 모드2: 내부 패널 클릭 시뮬레이션
+                        # 대리인(Proxy) 패턴이 적용된 경우 실제 텍스트 박스(click_rect) 좌표를 최우선으로 사용
+                        rect = pane.get('click_rect', pane['rect'])
+                        x, y, w, h = rect
                         click_x, click_y = x + w / 2.0, y + h / 2.0
-                        print(f"[DEBUG] 패널 클릭: tag={tag_char}, 좌표=({click_x:.0f}, {click_y:.0f})")
+                        print(f"[DEBUG] 모드2 패널 클릭: tag={tag_char}, 좌표=({click_x:.0f}, {click_y:.0f})")
                         self._simulate_click_delayed(click_x, click_y)
                     else:
+                        # 모드1: 창 자체를 Raise
                         AXUIElementPerformAction(element, "AXRaise")
                     return
 
