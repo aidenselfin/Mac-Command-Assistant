@@ -1,8 +1,0 @@
-- `[x]` `shortcuts_db.json` 생성 (VS Code, Chrome 단축키 샘플)
-- `[x]` `overlay_engine.py` 수정
-  - `HotkeyManager`에서 `on_mouse_click`에 좌표 전달
-  - `AccessibilityScanner`에 힛 테스팅 및 DB 쿼리 로직(`get_shortcut_hint`) 추가
-  - `OverlayEngineController`에 `_check_shortcut_hint` 백그라운드 스레드 생성
-  - `OverlayWindowView`에 임시 태그(`temporary_tags`) 렌더링 및 소멸 로직 추가
-- `[x]` `dev_plan.md` 업데이트 (학습 유도 기능 구현 완료 체크)
-- `[x]` 검증 및 `walkthrough.md` 작성

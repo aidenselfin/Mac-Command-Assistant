@@ -1,0 +1,20 @@
+# Runtime artifacts
+PHASE1/logs/*
+!PHASE1/logs/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Backup and editor files
+*~
+*.bak
+*.swp
+.vscode/
