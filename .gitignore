@@ -3,6 +3,7 @@ PHASE1/logs/*
 !PHASE1/logs/.gitkeep
 
 # Python
+Final/.venv/
 __pycache__/
 *.py[cod]
 *.pyo

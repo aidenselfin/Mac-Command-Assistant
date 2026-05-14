@@ -1,0 +1,14 @@
+{
+  "debug": false,
+  "log_level": "INFO",
+  "logger_enabled": true,
+  "learning_enabled": true,
+  "overlay_enabled": true,
+  "comments": {
+    "debug": "디버그 모드 활성화 (상세 로그 출력)",
+    "log_level": "로그 레벨 (DEBUG, INFO, WARN, ERROR)",
+    "logger_enabled": "마우스/키보드 이벤트 로깅 활성화",
+    "learning_enabled": "학습 분석 엔진 활성화",
+    "overlay_enabled": "오버레이 UI 활성화"
+  }
+}
