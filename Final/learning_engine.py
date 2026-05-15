@@ -37,9 +37,14 @@ def resolve_shortcuts_db_path() -> Path:
 SHORTCUTS_DB = resolve_shortcuts_db_path()
 
 # 학습 알고리즘 파라미터
-ACCEPTANCE_RATE_THRESHOLD_LOW = 0.30  # 30% 이하: 사용자 관심 없음, 덜 표시
-ACCEPTANCE_RATE_THRESHOLD_HIGH = 0.70  # 70% 이상: 이미 습득함, 표시 안 함
-ADOPTION_RATE_THRESHOLD = 0.50  # 50% 이상: 단축키 사용 습관 형성
+ACCEPTANCE_RATE_THRESHOLD_LOW = 0.30   # 30% 이하: 사용자 관심 없음, 덜 표시
+ACCEPTANCE_RATE_THRESHOLD_HIGH = 0.80  # 80% 이상: 숙련 후보 (추가 조건 충족 시 표시 중단)
+ADOPTION_RATE_THRESHOLD = 0.50         # 50% 이상: 단축키 사용 습관 형성
+
+# 숙련 판단 최소 조건
+MIN_SHOWN_FOR_MASTERY = 20   # 최소 20회 이상 힌트를 봐야 숙련 판단 가능
+MIN_USED_FOR_MASTERY = 10    # 최소 10회 이상 실제로 사용해야 숙련 판단 가능
+MASTERY_STREAK_REQUIRED = 5  # 최근 N번의 힌트 표시 중 단축키를 사용한 횟수가 이 이상이어야 숙련
 
 # ── 3. SQLite DB 초기화 ───────────────────────────────────────────────────────
 class LearningDatabase:
@@ -65,6 +70,8 @@ class LearningDatabase:
                     times_shown INTEGER DEFAULT 0,
                     times_used INTEGER DEFAULT 0,
                     acceptance_rate REAL DEFAULT 0.0,
+                    consecutive_uses INTEGER DEFAULT 0,
+                    recent_window TEXT DEFAULT '[]',
                     first_shown TIMESTAMP,
                     last_shown TIMESTAMP,
                     first_used TIMESTAMP,
@@ -73,6 +80,15 @@ class LearningDatabase:
                     UNIQUE(app_bundle, element_name, shortcut)
                 )
             """)
+            # 기존 테이블에 새 컬럼 추가 (이미 있으면 무시)
+            for col, definition in [
+                ("consecutive_uses", "INTEGER DEFAULT 0"),
+                ("recent_window", "TEXT DEFAULT '[]'"),
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE shortcut_usage ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
             
             # 2. user_proficiency 테이블: 사용자 숙련도
             cursor.execute("""
@@ -125,16 +141,28 @@ class LearningDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 now = datetime.now().isoformat()
-                
+
+                # 기존 recent_window 읽기
                 cursor.execute("""
-                    INSERT INTO shortcut_usage 
-                    (app_bundle, element_name, shortcut, times_shown, first_shown, last_shown)
-                    VALUES (?, ?, ?, 1, ?, ?)
+                    SELECT recent_window FROM shortcut_usage
+                    WHERE app_bundle = ? AND element_name = ? AND shortcut = ?
+                """, (app_bundle, element_name, shortcut))
+                row = cursor.fetchone()
+                window = json.loads(row[0]) if row and row[0] else []
+                # 이번 힌트 표시 → 0 추가 (아직 사용 안 함), 최근 10개만 유지
+                window.append(0)
+                window = window[-10:]
+
+                cursor.execute("""
+                    INSERT INTO shortcut_usage
+                    (app_bundle, element_name, shortcut, times_shown, first_shown, last_shown, recent_window)
+                    VALUES (?, ?, ?, 1, ?, ?, ?)
                     ON CONFLICT(app_bundle, element_name, shortcut) DO UPDATE SET
                         times_shown = times_shown + 1,
-                        last_shown = ?
-                """, (app_bundle, element_name, shortcut, now, now, now))
-                
+                        last_shown = ?,
+                        recent_window = ?
+                """, (app_bundle, element_name, shortcut, now, now, json.dumps(window), now, json.dumps(window)))
+
                 conn.commit()
     
     def record_shortcut_used(self, app_bundle: str, element_name: str, shortcut: str) -> None:
@@ -143,41 +171,41 @@ class LearningDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 now = datetime.now().isoformat()
-                
+
+                # 기존 recent_window, consecutive_uses 읽기
                 cursor.execute("""
-                    INSERT INTO shortcut_usage 
-                    (app_bundle, element_name, shortcut, times_used, first_used, last_used)
-                    VALUES (?, ?, ?, 1, ?, ?)
+                    SELECT recent_window, consecutive_uses FROM shortcut_usage
+                    WHERE app_bundle = ? AND element_name = ? AND shortcut = ?
+                """, (app_bundle, element_name, shortcut))
+                row = cursor.fetchone()
+                window = json.loads(row[0]) if row and row[0] else []
+                consecutive = row[1] if row and row[1] else 0
+
+                # 마지막 항목이 0(이번 힌트 표시 후 사용)이면 1로 업데이트, 없으면 그냥 consecutive만 올림
+                if window and window[-1] == 0:
+                    window[-1] = 1
+                consecutive += 1
+
+                cursor.execute("""
+                    INSERT INTO shortcut_usage
+                    (app_bundle, element_name, shortcut, times_used, first_used, last_used,
+                     consecutive_uses, recent_window)
+                    VALUES (?, ?, ?, 1, ?, ?, 1, ?)
                     ON CONFLICT(app_bundle, element_name, shortcut) DO UPDATE SET
                         times_used = times_used + 1,
-                        last_used = ?
-                """, (app_bundle, element_name, shortcut, now, now, now))
-                
-                # acceptance_rate 계산
-                self._update_acceptance_rate(app_bundle, element_name, shortcut)
-                
-                conn.commit()
-    
-    def _update_acceptance_rate(self, app_bundle: str, element_name: str, shortcut: str) -> None:
-        """acceptance_rate 재계산"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT times_shown, times_used FROM shortcut_usage 
-                WHERE app_bundle = ? AND element_name = ? AND shortcut = ?
-            """, (app_bundle, element_name, shortcut))
-            
-            row = cursor.fetchone()
-            if row:
-                times_shown, times_used = row
-                acceptance_rate = times_used / times_shown if times_shown > 0 else 0.0
-                
+                        last_used = ?,
+                        consecutive_uses = ?,
+                        recent_window = ?
+                """, (app_bundle, element_name, shortcut, now, now, json.dumps(window),
+                      now, consecutive, json.dumps(window)))
+
+                # acceptance_rate 갱신
                 cursor.execute("""
-                    UPDATE shortcut_usage SET acceptance_rate = ?
+                    UPDATE shortcut_usage
+                    SET acceptance_rate = CAST(times_used AS REAL) / MAX(times_shown, 1)
                     WHERE app_bundle = ? AND element_name = ? AND shortcut = ?
-                """, (acceptance_rate, app_bundle, element_name, shortcut))
-                
+                """, (app_bundle, element_name, shortcut))
+
                 conn.commit()
     
     def get_top_shortcuts(self, app_bundle: str, limit: int = 5) -> List[Dict]:
@@ -209,30 +237,46 @@ class LearningDatabase:
         """
         표시할 단축키 필터링 (학습 알고리즘 적용)
         - acceptance_rate < 30%: 의도적으로 덜 표시
-        - acceptance_rate 30-70%: 계속 표시
-        - acceptance_rate > 70%: 습득 완료, 표시 안 함
+        - acceptance_rate 30-80%: 계속 표시
+        - 숙련 완료 (노출 20+, 사용 10+, 최근 창 80%+ 사용): 표시 안 함
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            
-            # 1. 습득 완료한 것은 제외
+
+            # 숙련 판단 조건을 SQL로 표현:
+            # NOT (times_shown >= 20 AND times_used >= 10 AND acceptance_rate >= 0.8)
             cursor.execute("""
-                SELECT element_name, shortcut, acceptance_rate
+                SELECT element_name, shortcut, acceptance_rate,
+                       times_shown, times_used, recent_window
                 FROM shortcut_usage
-                WHERE app_bundle = ? AND acceptance_rate < ?
+                WHERE app_bundle = ?
+                  AND NOT (
+                      times_shown >= ?
+                      AND times_used >= ?
+                      AND acceptance_rate >= ?
+                  )
                 ORDER BY times_used DESC, acceptance_rate DESC
                 LIMIT ?
-            """, (app_bundle, ACCEPTANCE_RATE_THRESHOLD_HIGH, limit))
-            
+            """, (app_bundle, MIN_SHOWN_FOR_MASTERY, MIN_USED_FOR_MASTERY,
+                  ACCEPTANCE_RATE_THRESHOLD_HIGH, limit))
+
             rows = cursor.fetchall()
-            return [
-                {
-                    "element": row[0],
-                    "shortcut": row[1],
-                    "priority": "high" if row[2] >= ACCEPTANCE_RATE_THRESHOLD_LOW else "medium"
-                }
-                for row in rows
-            ]
+            result = []
+            for row in rows:
+                element, shortcut, ar, shown, used, window_raw = row
+                # 최근 창 기반 추가 필터: 창이 꽉 차고 연속 사용 비율이 높으면 제외
+                try:
+                    window = json.loads(window_raw) if window_raw else []
+                except Exception:
+                    window = []
+                if len(window) >= 8 and sum(window) >= MASTERY_STREAK_REQUIRED:
+                    continue  # 숙련 처리
+                result.append({
+                    "element": element,
+                    "shortcut": shortcut,
+                    "priority": "high" if ar >= ACCEPTANCE_RATE_THRESHOLD_LOW else "medium"
+                })
+            return result
     
     def get_user_proficiency(self, app_bundle: str) -> Optional[Dict]:
         """사용자 숙련도 조회"""
@@ -417,29 +461,49 @@ class LearningAdvisor:
         """이 단축키 힌트를 표시해야 하는가?"""
         with sqlite3.connect(self.db.db_path) as conn:
             cursor = conn.cursor()
-            
+
             cursor.execute("""
-                SELECT acceptance_rate, times_shown FROM shortcut_usage
+                SELECT acceptance_rate, times_shown, times_used,
+                       consecutive_uses, recent_window
+                FROM shortcut_usage
                 WHERE app_bundle = ? AND element_name = ? AND shortcut = ?
             """, (app_bundle, element_name, shortcut))
-            
+
             row = cursor.fetchone()
             if not row:
                 # 처음 본 단축키 → 항상 표시
                 return True
-            
-            acceptance_rate, times_shown = row
-            
-            # 습득 완료 (> 70%) → 표시 안 함
-            if acceptance_rate > ACCEPTANCE_RATE_THRESHOLD_HIGH:
-                return False
-            
-            # 사용자 관심 없음 (< 30%) → 50% 확률로만 표시
-            if acceptance_rate < ACCEPTANCE_RATE_THRESHOLD_LOW:
+
+            acceptance_rate, times_shown, times_used, consecutive_uses, recent_window_raw = row
+
+            # ── 숙련 판단 (모든 조건을 동시에 만족해야 함) ──────────────────────
+            # 조건 1: 최소 노출 횟수 (20회 미만이면 절대 숙련 판단 안 함)
+            if times_shown < MIN_SHOWN_FOR_MASTERY:
+                pass  # 숙련 판단 건너뜀
+            # 조건 2: 최소 실사용 횟수 (10회 미만이면 숙련 아님)
+            elif times_used < MIN_USED_FOR_MASTERY:
+                pass
+            else:
+                # 조건 3: 최근 10회 창에서 MASTERY_STREAK_REQUIRED번 이상 사용
+                try:
+                    window = json.loads(recent_window_raw) if recent_window_raw else []
+                except Exception:
+                    window = []
+                recent_used = sum(window)
+                recent_total = len(window)
+
+                # 최근 창이 충분히 찼고(8개 이상), 그 중 MASTERY_STREAK_REQUIRED개 이상 사용
+                if (recent_total >= 8
+                        and recent_used >= MASTERY_STREAK_REQUIRED
+                        and acceptance_rate >= ACCEPTANCE_RATE_THRESHOLD_HIGH):
+                    return False  # ← 이 조건을 전부 충족해야 숙련 처리
+
+            # ── 관심 없는 단축키 (30% 미만) → 빈도를 줄여 표시 ──────────────
+            if acceptance_rate < ACCEPTANCE_RATE_THRESHOLD_LOW and times_shown >= 5:
                 import random
-                return random.random() > 0.5
-            
-            # 학습 중 (30-70%) → 항상 표시
+                return random.random() > 0.4  # 60% 확률로 표시 (완전히 숨기지 않음)
+
+            # 그 외 (학습 중이거나 데이터 부족) → 항상 표시
             return True
 
 # ── 6. 메인 진입점 ──────────────────────────────────────────────────────────

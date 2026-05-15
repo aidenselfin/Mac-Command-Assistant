@@ -281,9 +281,10 @@ def on_key_press(key):
     try:
         app_name, window_title = get_active_app_and_window()
         
-        # 키 이름 추출
+        # 키 이름 추출 (key.char는 특수키일 때 None일 수 있음)
         try:
-            key_name = key.char if hasattr(key, 'char') else str(key).replace("Key.", "")
+            key_name = (key.char if hasattr(key, 'char') and key.char is not None
+                        else str(key).replace("Key.", ""))
         except AttributeError:
             key_name = str(key).replace("Key.", "")
         
@@ -315,10 +316,11 @@ def on_key_release(key):
     
     try:
         try:
-            key_name = key.char if hasattr(key, 'char') else str(key).replace("Key.", "")
+            key_name = (key.char if hasattr(key, 'char') and key.char is not None
+                        else str(key).replace("Key.", ""))
         except AttributeError:
             key_name = str(key).replace("Key.", "")
-        
+
         current_keys_pressed.discard(key_name)
         
     except Exception as e:

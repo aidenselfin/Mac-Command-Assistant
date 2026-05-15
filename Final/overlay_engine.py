@@ -65,8 +65,7 @@ class OverlayWindowView(AppKit.NSView):
 
     @objc.python_method
     def add_temporary_tag(self, x, y, text):
-        sh = AppKit.NSScreen.mainScreen().frame().size.height
-        y = sh - y
+        # CGEvent 좌표계는 y=0이 화면 상단(flipped NSView와 동일) — 추가 변환 불필요
         self.temporary_tags.append({'x': x, 'y': y, 'text': text, 'expire': time.time() + 1.5})
         self.setNeedsDisplay_(True)
 
@@ -274,28 +273,35 @@ class AccessibilityScanner:
         workspace = AppKit.NSWorkspace.sharedWorkspace()
         active_app = workspace.frontmostApplication()
         if not active_app:
+            print(f"[HINT-DBG] 활성 앱 없음")
             return None
 
         bundle_id = active_app.bundleIdentifier()
         if not bundle_id or bundle_id not in self.shortcuts_db:
+            print(f"[HINT-DBG] DB에 없는 앱: {bundle_id}")
             return None
 
         system_wide = AXUIElementCreateSystemWide()
         err, element = AXUIElementCopyElementAtPosition(system_wide, x, y, None)
         if err != 0 or not element:
+            print(f"[HINT-DBG] AX 요소 없음 at ({x:.0f}, {y:.0f}), err={err}")
             return None
 
         candidates_norm = self._collect_ax_match_strings(element)
+        print(f"[HINT-DBG] {bundle_id} | AX 후보: {candidates_norm}")
         if not candidates_norm:
             return None
 
         picked = self._pick_best_shortcut(bundle_id, candidates_norm)
         if not picked:
+            print(f"[HINT-DBG] DB 매칭 실패 — 위 후보를 shortcuts_db.json 키와 비교하세요")
             return None
         shortcut, element_key = picked
+        print(f"[HINT-DBG] 매칭 성공: '{element_key}' → {shortcut}")
 
         if self.learning_advisor and LEARNING_ENABLED:
             if not self.learning_advisor.should_show_hint(bundle_id, element_key, shortcut):
+                print(f"[HINT-DBG] 학습 완료로 힌트 억제: {shortcut}")
                 return None
 
         if self.learning_db and LEARNING_ENABLED:
@@ -563,7 +569,7 @@ class AccessibilityScanner:
                 is_main = (err_m == 0 and is_main_val)
 
                 err_fs, is_fullscreen_val = AXUIElementCopyAttributeValue(window, "AXFullScreen", None)
-                is_mode2 = (err_fs == 0 and is_fullscreen_val == True)
+                is_mode2 = (err_fs == 0 and bool(is_fullscreen_val))
 
                 panes = []
                 if is_mode2:

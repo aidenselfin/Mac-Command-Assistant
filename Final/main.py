@@ -253,14 +253,13 @@ class Phase2Manager:
 
 # ── PHASE 3: 오버레이 UI ────────────────────────────────────────────────────
 class Phase3Manager:
-    """PHASE3: 오버레이 UI 관리"""
-    
+    """PHASE3: 오버레이 UI 관리 — AppKit은 반드시 메인 스레드에서 실행해야 함"""
+
     def __init__(self):
         self.running = False
-        self.app = None
-        
-    def start(self):
-        """PHASE3 시작"""
+
+    def run_on_main_thread(self):
+        """메인 스레드에서 직접 호출 — AppKit 이벤트 루프를 실행하며 블로킹됨"""
         if not config.overlay_enabled:
             phase3_logger.info("오버레이 UI 비활성화됨")
             return
@@ -268,43 +267,40 @@ class Phase3Manager:
         if not phase3_is_available():
             phase3_logger.warn("PHASE3 모듈 사용 불가")
             return
-        
+
         try:
-            def run_ui():
-                try:
-                    self.app = AppKit.NSApplication.sharedApplication()
-                    self.app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-                    
-                    from overlay_engine import OverlayEngineController
-                    controller = OverlayEngineController.alloc().init()
-                    
-                    class TimerObj(AppKit.NSObject):
-                        def tick_(self, timer): pass
-                    
-                    timer_obj = TimerObj.alloc().init()
-                    AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                        0.1, timer_obj, "tick:", None, True
-                    )
-                    
-                    from PyObjCTools import AppHelper
-                    phase3_logger.info("PHASE3 오버레이 UI 시작")
-                    AppHelper.runEventLoop(installInterrupt=False)
-                    
-                except Exception as e:
-                    phase3_logger.error(f"PHASE3 UI 오류: {e}")
-            
+            import AppKit
+            from overlay_engine import OverlayEngineController
+            from PyObjCTools import AppHelper
+
+            self.app = AppKit.NSApplication.sharedApplication()
+            self.app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+
+            self._overlay_controller = OverlayEngineController.alloc().init()
+
+            class _TimerObj(AppKit.NSObject):
+                def tick_(self, timer): pass
+
+            timer_obj = _TimerObj.alloc().init()
+            AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                0.1, timer_obj, "tick:", None, True
+            )
+
             self.running = True
-            self.thread = threading.Thread(target=run_ui, daemon=True, name="PHASE3-Overlay")
-            self.thread.start()
-        
+            phase3_logger.info("PHASE3 오버레이 UI 시작")
+            AppHelper.runEventLoop(installInterrupt=False)  # 메인 스레드에서 블로킹
+
         except Exception as e:
-            phase3_logger.error(f"PHASE3 초기화 오류: {e}")
-    
+            phase3_logger.error(f"PHASE3 UI 오류: {e}")
+
     def stop(self):
-        """PHASE3 종료"""
+        """AppKit 이벤트 루프 종료"""
         self.running = False
-        if hasattr(self, 'thread'):
-            self.thread.join(timeout=2.0)
+        try:
+            from PyObjCTools import AppHelper
+            AppHelper.stopEventLoop()
+        except Exception:
+            pass
 
 # ── 메인 제어기 ────────────────────────────────────────────────────────────
 class SmartHomerowController:
@@ -317,25 +313,20 @@ class SmartHomerowController:
         self.running = False
         
     def start(self):
-        """모든 PHASE 시작"""
+        """PHASE1·2를 백그라운드 스레드로 시작 (PHASE3는 main()에서 메인 스레드로 실행)"""
         self.running = True
-        
+
         main_logger.info("=" * 70)
         main_logger.info(f"Smart-Homerow v{VERSION} — Integrated Main Process")
         main_logger.info("=" * 70)
-        
-        # 순서대로 시작
+
         self.phase1.start()
         time.sleep(0.5)
-        
+
         self.phase2.start()
         time.sleep(0.5)
-        
-        self.phase3.start()
-        time.sleep(0.5)
-        
-        main_logger.info("모든 PHASE 시작 완료")
-        main_logger.info("Ctrl+C를 누르면 프로그램을 종료합니다.")
+
+        main_logger.info("PHASE1·2 시작 완료 — PHASE3 오버레이 준비 중")
     
     def stop(self):
         """모든 PHASE 종료"""
@@ -367,7 +358,11 @@ def main():
     
     # 설정 로드
     config.load_from_file()
-    
+
+    # 파일에서 읽은 log_level을 이미 생성된 Logger 객체에 반영
+    for _lg in (main_logger, phase1_logger, phase2_logger, phase3_logger):
+        _lg.log_level = config.log_level
+
     # 로그 디렉토리 생성
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     
@@ -424,16 +419,22 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # 제어기 생성 및 시작
+    # 제어기 생성 및 PHASE1·2 시작 (백그라운드)
     controller = SmartHomerowController()
     controller.start()
-    
-    # 무한 루프 (시그널 대기)
-    try:
-        while controller.running:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        signal_handler(signal.SIGINT, None)
+
+    if config.overlay_enabled and phase3_is_available():
+        # PHASE3는 AppKit 요구사항상 메인 스레드에서 직접 실행 (블로킹)
+        main_logger.info("Ctrl+C를 누르면 프로그램을 종료합니다.")
+        controller.phase3.run_on_main_thread()
+    else:
+        # 오버레이 없이 실행 — 시그널 대기 루프
+        main_logger.info("오버레이 없이 실행 중. Ctrl+C를 누르면 종료합니다.")
+        try:
+            while controller.running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            signal_handler(signal.SIGINT, None)
 
 if __name__ == "__main__":
     controller = None
