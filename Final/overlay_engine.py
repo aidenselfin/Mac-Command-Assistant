@@ -61,6 +61,7 @@ class OverlayWindowView(AppKit.NSView):
             self.window_groups = []
             self.active_pid = None
             self.temporary_tags = []
+            self.button_hints = []   # [{'rect':(x,y,w,h), 'shortcut':str, 'label':str}]
         return self
 
     @objc.python_method
@@ -128,6 +129,36 @@ class OverlayWindowView(AppKit.NSView):
                     tag_path.fill()
                     text_rect = AppKit.NSMakeRect(x - 4.0 + pad_x, y - 4.0 + pad_y, tag_size.width, tag_size.height)
                     ns_str.drawInRect_withAttributes_(text_rect, text_attrs)
+
+        # ── 버튼 단축키 힌트 (파란 뱃지) ──────────────────────────────────
+        button_hints = getattr(self, "button_hints", None) or []
+        if button_hints:
+            hint_font = AppKit.NSFont.fontWithName_size_("Menlo-Bold", 10.0)
+            if hint_font is None:
+                hint_font = AppKit.NSFont.userFixedPitchFontOfSize_(10.0)
+            hint_bg   = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08, 0.47, 0.95, 0.92)
+            hint_text = AppKit.NSColor.whiteColor()
+            hint_text_attrs = {
+                AppKit.NSFontAttributeName: hint_font,
+                AppKit.NSForegroundColorAttributeName: hint_text,
+            }
+            for hint in button_hints:
+                hx, hy, hw, hh = hint['rect']
+                shortcut_str = hint['shortcut']
+                ns_str = AppKit.NSString.stringWithString_(shortcut_str)
+                s_size = ns_str.sizeWithAttributes_(hint_text_attrs)
+                pad_x, pad_y = 4.0, 2.0
+                badge_w = s_size.width + pad_x * 2
+                badge_h = s_size.height + pad_y * 2
+                # 버튼 우측 상단 모서리에 배치
+                bx = hx + hw - badge_w - 2
+                by = hy + 2
+                badge_rect = AppKit.NSMakeRect(bx, by, badge_w, badge_h)
+                badge_path = AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(badge_rect, 3.0, 3.0)
+                hint_bg.set()
+                badge_path.fill()
+                text_rect = AppKit.NSMakeRect(bx + pad_x, by + pad_y, s_size.width, s_size.height)
+                ns_str.drawInRect_withAttributes_(text_rect, hint_text_attrs)
 
         text_attrs_base = {
             AppKit.NSFontAttributeName: font,
@@ -201,32 +232,53 @@ class AccessibilityScanner:
         t = str(val).strip()
         return t if t else None
 
+    # 라벨로 쓰기에 너무 일반적인 단어들 — 매칭에서 제외
+    _SKIP_GENERIC_LABELS = frozenset({
+        "application", "group", "window", "dialog", "toolbar",
+        "image", "button", "text", "checkbox", "radio button",
+        "pop up button", "menu button", "link", "list item",
+        "scroll area", "web area", "tab group", "split group",
+        "table", "outline", "row", "column", "cell",
+    })
+
     def _collect_ax_match_strings(self, element):
-        """Accessibility에서 단축키 DB와 비교할 문자열 후보를 모은다."""
-        skip_norm = frozenset(
-            {
-                "application",
-                "group",
-                "window",
-                "dialog",
-                "toolbar",
-                "image",
-                "button",
-                "text",
-            }
-        )
+        """
+        AX 요소에서 단축키 DB/메뉴 맵과 비교할 라벨 후보를 수집한다.
+        AXTitle/AXDescription/AXHelp/AXLabel 외에 자식 텍스트 노드도 확인.
+        """
         out = []
-        for attr in ("AXTitle", "AXDescription", "AXHelp", "AXLabel", "AXRoleDescription"):
+        for attr in ("AXTitle", "AXDescription", "AXHelp", "AXLabel",
+                     "AXRoleDescription", "AXValue", "AXPlaceholderValue"):
             raw = self._ax_attr_string(element, attr)
             if not raw:
                 continue
             n = self._normalize_ax_label(raw)
-            if not n or n in skip_norm:
+            if not n or n in self._SKIP_GENERIC_LABELS or len(n) > 80:
                 continue
             if n.startswith("<") and n.endswith(">"):
                 continue
             out.append(n)
-        seen = set()
+
+        # 자식 AXStaticText / AXImage 에서 추가 라벨 수집
+        # (아이콘 버튼처럼 자식 텍스트에 라벨이 있는 경우 대응)
+        try:
+            err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
+            if err_c == 0 and children and len(children) <= 8:
+                for child in children[:8]:
+                    err_r, crole = AXUIElementCopyAttributeValue(child, "AXRole", None)
+                    if err_r != 0:
+                        continue
+                    if str(crole) in ("AXStaticText", "AXImage"):
+                        for attr in ("AXTitle", "AXDescription", "AXValue"):
+                            raw = self._ax_attr_string(child, attr)
+                            if raw:
+                                n = self._normalize_ax_label(raw)
+                                if n and n not in self._SKIP_GENERIC_LABELS and len(n) <= 80:
+                                    out.append(n)
+        except Exception:
+            pass
+
+        seen: set = set()
         uniq = []
         for x in out:
             if x not in seen:
@@ -312,7 +364,248 @@ class AccessibilityScanner:
 
         return shortcut
 
-    # 나머지 메서드들은 기존과 동일 (생략)
+    # ──────────────────────────────────────────────────────────────────────────
+    # 버튼 단축키 힌트 스캔
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # 단축키 힌트를 표시할 인터랙티브 역할
+    INTERACTIVE_ROLES = frozenset({
+        "AXButton", "AXMenuItem", "AXMenuBarItem", "AXLink",
+        "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
+        "AXToolbarButton", "AXTab", "AXDisclosureTriangle",
+        "AXToggleButton", "AXComboBox",
+    })
+    # 자식 탐색도 불필요한 완전 리프 역할
+    LEAF_SKIP_ROLES = frozenset({
+        "AXStaticText", "AXSeparator", "AXScrollBar",
+        "AXValueIndicator", "AXColorWell",
+    })
+
+    # ── 메뉴바 단축키 직접 추출 ──────────────────────────────────────────────
+
+    # AXMenuItemCmdModifiers 비트마스크
+    _MOD_SHIFT   = 0x01
+    _MOD_OPTION  = 0x02
+    _MOD_CONTROL = 0x04
+    _MOD_NO_CMD  = 0x08   # 이 비트가 켜지면 Cmd 없음 (Function key 등)
+
+    # AXMenuItemCmdGlyph → 표시 문자 (자주 쓰이는 것만)
+    _GLYPH_MAP = {
+        2: "Tab", 3: "Esc", 4: "Delete", 5: "Fwd Delete",
+        6: "Return", 8: "↑", 9: "↓", 10: "←", 11: "→",
+        12: "PgUp", 13: "PgDn", 14: "Home", 15: "End",
+        16: "Space", 23: "F1", 24: "F2", 25: "F3", 26: "F4",
+        27: "F5", 28: "F6", 29: "F7", 30: "F8",
+    }
+
+    def _format_menu_shortcut(self, char: str, modifiers: int) -> str:
+        """AX modifier 비트마스크 + 키 문자를 'Cmd + Shift + S' 형식으로 변환."""
+        if not char:
+            return ""
+        parts = []
+        no_cmd = bool(modifiers & self._MOD_NO_CMD)
+        if not no_cmd:
+            parts.append("Cmd")
+        if modifiers & self._MOD_CONTROL:
+            parts.append("Ctrl")
+        if modifiers & self._MOD_OPTION:
+            parts.append("Alt")
+        if modifiers & self._MOD_SHIFT:
+            parts.append("Shift")
+
+        # 특수 문자 처리
+        _special = {
+            '\x08': 'Delete', '\x7f': 'Delete', '\r': 'Return', '\t': 'Tab',
+            '\x1b': 'Esc', ' ': 'Space',
+            '': '↑', '': '↓', '': '←', '': '→',
+            '': 'Delete', '': 'Home', '': 'End',
+            '': 'PgUp', '': 'PgDn',
+        }
+        display = _special.get(char, char.upper() if len(char) == 1 else char)
+        parts.append(display)
+        return " + ".join(parts)
+
+    def scan_menu_bar_shortcuts(self, active_pid: int) -> dict:
+        """
+        앱 메뉴바를 AX API로 직접 스캔해 {normalized_label: shortcut_str} 반환.
+        shortcuts_db.json 없이도 모든 macOS 네이티브 앱에서 동작.
+        """
+        app_element = AXUIElementCreateApplication(active_pid)
+        result: dict = {}
+        try:
+            err, menubar = AXUIElementCopyAttributeValue(app_element, "AXMenuBar", None)
+            if err != 0 or not menubar:
+                return result
+            err_c, top_menus = AXUIElementCopyAttributeValue(menubar, "AXChildren", None)
+            if err_c != 0 or not top_menus:
+                return result
+            for menu in top_menus:
+                self._collect_menu_shortcuts(menu, result, depth=0)
+        except Exception as e:
+            print(f"[MENU-SCAN] 오류: {e}")
+        return result
+
+    def _collect_menu_shortcuts(self, element, result: dict, depth: int):
+        """AXMenuItem 트리를 재귀적으로 순회해 단축키를 수집한다."""
+        if depth > 6:
+            return
+        try:
+            err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
+            if err != 0:
+                return
+            role_str = str(role) if role else ""
+
+            if role_str == "AXMenuItem":
+                err_c, cmd_char = AXUIElementCopyAttributeValue(
+                    element, "AXMenuItemCmdChar", None)
+                char = str(cmd_char).strip() if err_c == 0 and cmd_char else ""
+
+                # cmd char가 없으면 glyph로 대체
+                if not char:
+                    err_g, glyph = AXUIElementCopyAttributeValue(
+                        element, "AXMenuItemCmdGlyph", None)
+                    if err_g == 0 and glyph:
+                        char = self._GLYPH_MAP.get(int(glyph), "")
+
+                if char:
+                    err_m, cmd_mods = AXUIElementCopyAttributeValue(
+                        element, "AXMenuItemCmdModifiers", None)
+                    mods = int(cmd_mods) if err_m == 0 and cmd_mods is not None else 0
+                    shortcut = self._format_menu_shortcut(char, mods)
+                    if shortcut:
+                        err_t, title = AXUIElementCopyAttributeValue(element, "AXTitle", None)
+                        if err_t == 0 and title and str(title).strip():
+                            norm = self._normalize_ax_label(str(title).strip())
+                            if norm and norm not in self._SKIP_GENERIC_LABELS:
+                                result[norm] = shortcut
+
+            # 자식(서브메뉴 포함) 탐색
+            err_c2, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
+            if err_c2 == 0 and children:
+                for child in children:
+                    self._collect_menu_shortcuts(child, result, depth + 1)
+        except Exception:
+            pass
+
+    # ── 버튼 단축키 스캔 메인 ────────────────────────────────────────────────
+
+    def scan_button_shortcuts(self, active_pid: int) -> list:
+        """
+        1) 앱 메뉴바를 직접 AX 스캔해 {label: shortcut} 맵 추출 (모든 앱)
+        2) shortcuts_db.json 로 보완
+        3) 화면 AX 트리에서 인터랙티브 요소 라벨과 매칭 → 힌트 목록 반환
+        반환: [{'rect': (x,y,w,h), 'shortcut': str, 'label': str}]
+        """
+        workspace = AppKit.NSWorkspace.sharedWorkspace()
+        active_app = workspace.frontmostApplication()
+        if not active_app:
+            return []
+        bundle_id = active_app.bundleIdentifier() or ""
+
+        # ── 1. 메뉴바 실시간 스캔 ──
+        menu_map = self.scan_menu_bar_shortcuts(active_pid)
+
+        # ── 2. shortcuts_db.json 보완 ──
+        db_map = self.shortcuts_db.get(bundle_id, {})
+        combined: dict = {}
+        for k, v in db_map.items():
+            if isinstance(k, str) and isinstance(v, str):
+                combined[self._normalize_ax_label(k)] = v
+        combined.update(menu_map)   # 메뉴바 결과가 DB를 덮어씀 (더 정확)
+
+        if not combined:
+            return []
+
+        # ── 3. UI 트리 스캔 ──
+        app_element = AXUIElementCreateApplication(active_pid)
+        results: list = []
+        try:
+            self._find_interactive_shortcuts(
+                app_element, combined, bundle_id, results, depth=0)
+        except Exception as e:
+            print(f"[BTN-SCAN] 스캔 오류: {e}")
+
+        if results:
+            print(f"[BTN-HINT] {bundle_id}: 메뉴바 {len(menu_map)}개, "
+                  f"DB {len(db_map)}개 → 버튼 힌트 {len(results)}개")
+        return results
+
+    def _find_interactive_shortcuts(
+            self, element, combined: dict, bundle_id: str,
+            results: list, depth: int):
+        """AX 트리를 재귀 순회해 단축키가 있는 인터랙티브 요소를 수집한다."""
+        if depth > 15 or len(results) >= 150:
+            return
+
+        try:
+            err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
+        except Exception:
+            return
+        if err != 0 or not role:
+            return
+        role_str = str(role)
+
+        # 완전 리프 → 자식도 없음
+        if role_str in self.LEAF_SKIP_ROLES:
+            return
+
+        if role_str in self.INTERACTIVE_ROLES:
+            candidates = self._collect_ax_match_strings(element)
+            if candidates:
+                shortcut, matched_key = self._match_combined(candidates, combined)
+                if shortcut and matched_key:
+                    show = True
+                    if self.learning_advisor and LEARNING_ENABLED:
+                        show = self.learning_advisor.should_show_hint(
+                            bundle_id, matched_key, shortcut)
+                    if show:
+                        geom = self.get_size_pos(element)
+                        if geom:
+                            x, y, w, h = geom
+                            if w >= 8 and h >= 8:
+                                results.append({
+                                    'rect': (x, y, w, h),
+                                    'shortcut': shortcut,
+                                    'label': candidates[0],
+                                })
+
+        # 자식 탐색
+        try:
+            err_c, children = AXUIElementCopyAttributeValue(element, "AXChildren", None)
+        except Exception:
+            return
+        if err_c == 0 and children:
+            for child in children:
+                self._find_interactive_shortcuts(
+                    child, combined, bundle_id, results, depth + 1)
+
+    def _match_combined(self, candidates: list, combined: dict):
+        """
+        라벨 후보 리스트를 combined 맵에서 검색한다.
+        1순위: 정확 일치
+        2순위: 포함 관계 (substring, 양방향, 3자 이상)
+        긴 키를 우선해 'save all'이 'save'보다 먼저 걸리도록 정렬.
+        반환: (shortcut, matched_key) 또는 (None, None)
+        """
+        # 1순위: 정확 일치
+        for cand in candidates:
+            if cand in combined:
+                return combined[cand], cand
+
+        # 2순위: 부분 일치 (긴 키 우선)
+        sorted_keys = sorted(combined.keys(), key=len, reverse=True)
+        for key in sorted_keys:
+            if len(key) < 3:
+                continue
+            for cand in candidates:
+                if len(cand) < 3:
+                    continue
+                if key in cand or cand in key:
+                    return combined[key], key
+
+        return None, None
+
+    # ──────────────────────────────────────────────────────────────────────────
     def get_quartz_snapshot(self):
         options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
         window_list = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID)
@@ -754,8 +1047,12 @@ class OverlayEngineController(AppKit.NSObject):
             self.window = None
             self.view = None
             self._pending_rects = None
+            self._pending_button_hints = None   # 버튼 단축키 힌트
             self._lock = threading.Lock()
             self._force_rescan = False
+            self._last_btn_scan_bundle = None   # 앱 전환 감지
+            self._last_btn_scan_time  = 0.0     # 주기적 재스캔용
+            self._btn_scan_running    = False   # 동시에 하나만 실행
             
             # Learning 초기화
             if LEARNING_ENABLED:
@@ -778,6 +1075,20 @@ class OverlayEngineController(AppKit.NSObject):
     def trigger_rescan(self, click_x=0, click_y=0):
         self._force_rescan = True
         threading.Thread(target=self._check_shortcut_hint, args=(click_x, click_y), daemon=True).start()
+
+    @objc.python_method
+    def _run_button_scan(self, pid: int, bundle: str):
+        """버튼 단축키 스캔을 별도 스레드에서 실행 — 폴링 루프를 블로킹하지 않음."""
+        self._btn_scan_running = True
+        try:
+            hints = self.scanner.scan_button_shortcuts(pid)
+            with self._lock:
+                self._pending_button_hints = hints
+            print(f"[BTN-HINT] {bundle}: {len(hints)}개 힌트")
+        except Exception as e:
+            print(f"[BTN-HINT] 스캔 오류: {e}")
+        finally:
+            self._btn_scan_running = False
 
     def _check_shortcut_hint(self, x, y):
         try:
@@ -838,7 +1149,28 @@ class OverlayEngineController(AppKit.NSObject):
                         rects = self.scanner.get_target_rects(quartz_windows, visible_pids)
                         with self._lock:
                             self._pending_rects = rects
-                        
+
+                        # ── 버튼 단축키 힌트 스캔 (비동기, 앱 전환 또는 5초마다) ──
+                        try:
+                            active_app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+                            cur_bundle = active_app.bundleIdentifier() if active_app else None
+                            cur_pid    = active_app.processIdentifier() if active_app else None
+                            now = time.time()
+                            needs_btn_scan = (
+                                cur_bundle != self._last_btn_scan_bundle or
+                                (now - self._last_btn_scan_time) > 5.0
+                            )
+                            if needs_btn_scan and cur_pid and not self._btn_scan_running:
+                                self._last_btn_scan_bundle = cur_bundle
+                                self._last_btn_scan_time   = now
+                                threading.Thread(
+                                    target=self._run_button_scan,
+                                    args=(cur_pid, cur_bundle),
+                                    daemon=True
+                                ).start()
+                        except Exception as _be:
+                            print(f"[BTN-HINT] 스캔 트리거 오류: {_be}")
+
                         pane_summary = tuple(pane.get('name', pane.get('tag', '?')) for g in rects for pane in g['panes'])
                         if pane_summary != last_pane_summary:
                             last_pane_summary = pane_summary
@@ -861,14 +1193,23 @@ class OverlayEngineController(AppKit.NSObject):
     def refreshUI_(self, timer):
         needs_redraw = False
         with self._lock:
-            rects = self._pending_rects
-            self._pending_rects = None
-            
+            rects        = self._pending_rects
+            button_hints = self._pending_button_hints
+            self._pending_rects        = None
+            self._pending_button_hints = None
+
         if rects is not None:
             active_app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
             active_pid = active_app.processIdentifier() if active_app else None
             self.view.window_groups = rects
             self.view.active_pid = active_pid
+            # 화면에 창이 없으면 버튼 힌트도 즉시 지움
+            if not rects and self.view.button_hints:
+                self.view.button_hints = []
+            needs_redraw = True
+
+        if button_hints is not None:
+            self.view.button_hints = button_hints
             needs_redraw = True
             
         current_time = time.time()
