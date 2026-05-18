@@ -624,13 +624,49 @@ class AccessibilityScanner:
                 })
 
         window_groups.sort(key=lambda g: g['z_index'])
-        chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        tag_index = 0
+
+        # ── 앱 이름 첫 글자 기반 고정 태그 배정 ────────────────────────
+        # 각 그룹(앱)마다 앱 이름의 첫 글자를 키로 사용.
+        # 충돌 시 앱 이름의 나머지 글자 → 미사용 A-Z 순으로 대체.
+        used_keys: set = set()
+        _fallback_chars = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+        def _app_key_candidates(pid: int) -> list:
+            """pid → 앱 이름에서 뽑은 키 후보 리스트 (대문자, 영문 우선)"""
+            try:
+                app_obj = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+                name = (app_obj.localizedName() or "") if app_obj else ""
+            except Exception:
+                name = ""
+            seen: set = set()
+            candidates: list = []
+            # 영문 알파벳 우선 (앱 이름 순서대로)
+            for ch in name.upper():
+                if ch.isalpha() and ch.isascii() and ch not in seen:
+                    candidates.append(ch)
+                    seen.add(ch)
+            # 비ASCII(한글 등) 앱 이름은 영문 변환 불가 → 전체 A-Z 후보로 채움
+            for ch in _fallback_chars:
+                if ch not in seen:
+                    candidates.append(ch)
+            return candidates
+
         for group in window_groups:
-            for pane in group['panes']:
-                tag_str = chars[tag_index] if tag_index < 26 else chars[tag_index//26 - 1] + chars[tag_index%26]
-                pane['tag'] = tag_str
-                tag_index += 1
+            candidates = _app_key_candidates(group['pid'])
+            base_key = next((c for c in candidates if c not in used_keys), None)
+            if base_key is None:
+                # 26자 초과 시 index 기반 2글자 태그
+                base_key = f"Z{len(used_keys) - 25}"
+            used_keys.add(base_key)
+
+            panes = group['panes']
+            if len(panes) == 1:
+                # 단일 패널: 앱 키 그대로
+                panes[0]['tag'] = base_key
+            else:
+                # 복수 패널(mode2 등): 첫 번째만 단순 키, 나머지는 키+숫자
+                for j, pane in enumerate(panes):
+                    pane['tag'] = base_key if j == 0 else f"{base_key}{j + 1}"
 
         return window_groups
 
