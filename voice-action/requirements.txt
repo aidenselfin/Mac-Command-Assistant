@@ -1,0 +1,7 @@
+anthropic>=0.25.0
+faster-whisper>=1.0.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+pynput>=1.7.6
+pyobjc-framework-Cocoa>=10.0
+pyobjc-framework-AVFoundation>=10.0

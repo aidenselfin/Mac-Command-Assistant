@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>사용자 사용 흐름 & 프로그램 작동 흐름</title>
+<style>
+  body { font-family: -apple-system, "SF Pro", "Apple SD Gothic Neo", sans-serif; margin: 30px; background: #fafafa; color: #222; }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  h2 { font-size: 17px; margin-top: 36px; border-left: 4px solid #3b82f6; padding-left: 10px; }
+  p.lead { color: #555; font-size: 13px; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 24px; font-size: 13px; }
+  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; vertical-align: top; text-align: left; }
+  th { background: #f3f4f6; font-weight: 600; }
+  tr:nth-child(even) td { background: #fbfbfd; }
+  .step { white-space: nowrap; font-weight: 600; color: #2563eb; }
+  .user { background: #eff6ff !important; }
+  .system { background: #f0fdf4 !important; }
+  .ui { background: #fef3c7 !important; }
+  code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .legend { font-size: 12px; margin-bottom: 8px; }
+  .legend span { display: inline-block; padding: 2px 8px; border-radius: 4px; margin-right: 8px; }
+</style>
+</head>
+<body>
+
+<h1>음성 명령 시스템 — 사용자 흐름 & 프로그램 작동 흐름</h1>
+<p class="lead">UI 계획서 + Story Board 기반으로 정리한 단계별 표. 각 행은 사용자 행동 → UI 피드백 → 시스템 내부 처리 순서로 매칭됨.</p>
+
+<div class="legend">
+  <span class="user">사용자 행동</span>
+  <span class="ui">UI 피드백</span>
+  <span class="system">시스템 내부 처리</span>
+</div>
+
+<h2>0. 공통 5단계 (모든 시나리오 공유)</h2>
+<table>
+<thead><tr><th>단계</th><th>사용자 행동</th><th>UI 피드백 (메뉴바 / 토스트)</th><th>시스템 내부 처리</th></tr></thead>
+<tbody>
+<tr><td class="step">① 트리거</td><td class="user">R-cmd 꾹 누름</td><td class="ui">메뉴바 <b>빨강 ●</b> "듣는 중…" + 하단 토스트 파형</td><td class="system">마이크 활성화, 오디오 캡처 시작</td></tr>
+<tr><td class="step">② 발화</td><td class="user">음성 명령 말함 → 손 뗌</td><td class="ui">메뉴바 <b>노랑 ●</b> "받아쓰는 중…"</td><td class="system">faster-whisper / Apple STT → 텍스트 변환</td></tr>
+<tr><td class="step">③ 해석</td><td class="user">대기</td><td class="ui">메뉴바 <b>파랑 ●</b> "생각 중…" + 토스트에 인식 문장 표시</td><td class="system">LLM이 action / target / params JSON 반환</td></tr>
+<tr><td class="step">④ 실행</td><td class="user">대기 / 결과 확인</td><td class="ui">메뉴바 <b>초록 ●</b> "실행 중…"</td><td class="system">osascript / CGEvent / AXUIElement / CLI 호출</td></tr>
+<tr><td class="step">⑤ 완료</td><td class="user">작업 이어서 진행</td><td class="ui">토스트 "✓ 완료 (소요 시간)" → 1.5초 후 페이드아웃, 메뉴바 회색 ●</td><td class="system">로그 저장, 패턴 분석 큐에 적재</td></tr>
+</tbody>
+</table>
+
+<h2>시나리오 1 — 공부 모드 시작 (창 배치)</h2>
+<table>
+<thead><tr><th>단계</th><th>사용자 행동</th><th>UI 피드백</th><th>시스템 내부 처리</th></tr></thead>
+<tbody>
+<tr><td class="step">1</td><td class="user">R-cmd 길게 누름</td><td class="ui">메뉴바 빨강 ● + 파형 토스트</td><td class="system">마이크 ON</td></tr>
+<tr><td class="step">2</td><td class="user">"기계학습 공부 모드 시작" 발화</td><td class="ui">노랑 ● → 파랑 ● ("기계학습 공부 모드 시작")</td><td class="system">STT → LLM: <code>action: restore_layout, mode: "기계학습공부"</code></td></tr>
+<tr><td class="step">3</td><td class="user">—</td><td class="ui">초록 ● "실행 중…"</td><td class="system">프리셋 로드 → <code>open -a "zoom.us"</code>, <code>open -a "Google Chrome"</code></td></tr>
+<tr><td class="step">4</td><td class="user">—</td><td class="ui">화면에서 Zoom·Chrome 차례로 배치되는 모습</td><td class="system">osascript <code>set bounds of window 1 to {0,23,960,1080}</code> / <code>{960,23,1920,1080}</code>, Chrome에 Notion URL open location</td></tr>
+<tr><td class="step">5</td><td class="user">바로 공부 시작</td><td class="ui">토스트 "✓ 기계학습 공부 모드 적용 (1.8초)"</td><td class="system">대기 상태 복귀</td></tr>
+</tbody>
+</table>
+
+<h2>시나리오 2 — 파일 정리</h2>
+<table>
+<thead><tr><th>단계</th><th>사용자 행동</th><th>UI 피드백</th><th>시스템 내부 처리</th></tr></thead>
+<tbody>
+<tr><td class="step">1</td><td class="user">"다운로드 폴더 열어줘"</td><td class="ui">상태 인디케이터 진행</td><td class="system"><code>open ~/Downloads</code></td></tr>
+<tr><td class="step">2</td><td class="user">"PDF 파일들 보여줘"</td><td class="ui">화면에 파일 목록 번호 오버레이 [1][2][3]…</td><td class="system"><code>find ~/Downloads -name "*.pdf"</code> → AX 오버레이 렌더링</td></tr>
+<tr><td class="step">3</td><td class="user">"1번이랑 2번 Documents로 이동"</td><td class="ui">토스트 진행 표시</td><td class="system"><code>mv ~/Downloads/A.pdf ~/Documents/</code> ×2</td></tr>
+<tr><td class="step">4</td><td class="user">"3번 삭제해줘" → "응"</td><td class="ui">확인 다이얼로그 "삭제할까요?"</td><td class="system">Finder move to trash (osascript)</td></tr>
+<tr><td class="step">5</td><td class="user">"2026 강의자료 폴더 만들고 강의 관련 파일 옮겨줘"</td><td class="ui">대상 파일 후보 오버레이 + 확인</td><td class="system"><code>mkdir</code> + LLM 키워드 매칭 후 <code>mv</code></td></tr>
+</tbody>
+</table>
+
+<h2>시나리오 3 — 이메일 작성·전송</h2>
+<table>
+<thead><tr><th>단계</th><th>사용자 행동</th><th>UI 피드백</th><th>시스템 내부 처리</th></tr></thead>
+<tbody>
+<tr><td class="step">1</td><td class="user">"메일 앱 열어줘"</td><td class="ui">초록 ● + 토스트</td><td class="system"><code>open -a "Mail"</code></td></tr>
+<tr><td class="step">2</td><td class="user">"새 메일 써줘"</td><td class="ui">새 작성 창 등장</td><td class="system">osascript <code>keystroke "n" using command down</code></td></tr>
+<tr><td class="step">3</td><td class="user">"받는 사람 professor@kaist.ac.kr" / "제목 과제 제출합니다"</td><td class="ui">필드 포커스 변경 표시</td><td class="system">AXUIElement로 To/Subject 포커스 → <code>voice_type()</code> (pbcopy + Cmd+V)</td></tr>
+<tr><td class="step">4</td><td class="user">"본문 써줘" + 연속 발화</td><td class="ui">받아쓰기 중 토스트 (실시간 텍스트)</td><td class="system">본문 AX 포커스 → STT 실시간 입력</td></tr>
+<tr><td class="step">5</td><td class="user">"과제 파일 첨부" → "보내줘"</td><td class="ui">전송 확인 + 완료 토스트</td><td class="system"><code>mdfind</code> 검색 → 첨부 → <code>Cmd+Shift+D</code></td></tr>
+</tbody>
+</table>
+
+<h2>시나리오 4 — 웹 검색 & 정보 수집</h2>
+<table>
+<thead><tr><th>단계</th><th>사용자 행동</th><th>UI 피드백</th><th>시스템 내부 처리</th></tr></thead>
+<tbody>
+<tr><td class="step">1</td><td class="user">"크롬에서 트랜스포머 논문 검색"</td><td class="ui">초록 ●, Chrome 활성화</td><td class="system">osascript <code>open location "scholar.google.com/scholar?q=transformer"</code></td></tr>
+<tr><td class="step">2</td><td class="user">"번호 보여줘" → "1번 새 탭"</td><td class="ui">링크 옆 [1][2][3] 오버레이</td><td class="system">AXUIElement 트리 탐색 → Cmd+클릭 시뮬레이션</td></tr>
+<tr><td class="step">3</td><td class="user">"아래로 스크롤" / "Abstract 찾아줘"</td><td class="ui">스크롤 모션, Cmd+F 검색바</td><td class="system">PageDown CGEvent, Cmd+F 후 텍스트 입력</td></tr>
+<tr><td class="step">4</td><td class="user">"다음 탭" / "이 탭 닫아줘"</td><td class="ui">탭 전환 시각화</td><td class="system"><code>Cmd+Shift+}</code>, <code>Cmd+W</code></td></tr>
+<tr><td class="step">5</td><td class="user">"오른쪽에 메모 앱" + 받아쓰기</td><td class="ui">화면 좌우 분할</td><td class="system"><code>open -a Notes</code> + bounds 배치 + <code>voice_type</code></td></tr>
+</tbody>
+</table>
+
+<h2>시나리오 5 — 미디어 제어 (유튜브)</h2>
+<table>
+<thead><tr><th>단계</th><th>사용자 행동</th><th>UI 피드백</th><th>시스템 내부 처리</th></tr></thead>
+<tbody>
+<tr><td class="step">1</td><td class="user">R-cmd 누름 (손 자유롭지 않음)</td><td class="ui">빨강 ● + 파형</td><td class="system">마이크 ON</td></tr>
+<tr><td class="step">2</td><td class="user">"재생목록 세 번째 영상 틀어줘"</td><td class="ui">파랑 ● "생각 중…"</td><td class="system">LLM: <code>action: click_list_item, index: 3</code></td></tr>
+<tr><td class="step">3</td><td class="user">—</td><td class="ui">초록 ● + 클릭 위치 시각 효과</td><td class="system">AXUIElement → AXList[2] 좌표(AXPosition+AXSize) 계산</td></tr>
+<tr><td class="step">4</td><td class="user">영상 시청</td><td class="ui">완료 토스트</td><td class="system">CGEvent <code>mouse_move + mouse_click</code></td></tr>
+<tr><td class="step">5</td><td class="user">"일시 정지" / "10초 앞" / "볼륨 올려" / "전체화면"</td><td class="ui">각 명령 후 토스트</td><td class="system">Space / → / ↑ / F 키 CGEvent 시뮬레이션</td></tr>
+</tbody>
+</table>
+
+<h2>창 포커스 이동 (UI 2.3 — 알파벳 태그)</h2>
+<table>
+<thead><tr><th>단계</th><th>사용자 행동</th><th>UI 피드백</th><th>시스템 내부 처리</th></tr></thead>
+<tbody>
+<tr><td class="step">1</td><td class="user">R-cmd 짧게 1회 클릭</td><td class="ui">모든 창 좌상단에 노란 [A][B][C] 라벨</td><td class="system">NSWorkspace로 visible window 열거 → 오버레이 렌더</td></tr>
+<tr><td class="step">2</td><td class="user">'C' 키 입력</td><td class="ui">오버레이 사라짐, C 창 포커스</td><td class="system">해당 window AXRaise</td></tr>
+<tr><td class="step">3</td><td class="user">(또는) ESC / 3초 무입력</td><td class="ui">오버레이 해제</td><td class="system">상태 초기화</td></tr>
+</tbody>
+</table>
+
+<h2>오류 처리 흐름</h2>
+<table>
+<thead><tr><th>오류 유형</th><th>사용자 상황</th><th>UI 피드백</th><th>시스템 처리</th></tr></thead>
+<tbody>
+<tr><td>마이크 권한 없음</td><td class="user">R-cmd 눌렀으나 녹음 X</td><td class="ui">주황 ● "실패" + 토스트 "마이크 권한 필요"</td><td class="system">클릭 시 시스템 설정 → 개인정보보호 패널 open</td></tr>
+<tr><td>STT 인식 실패</td><td class="user">발화했으나 빈 텍스트</td><td class="ui">토스트 "다시 말씀해주세요"</td><td class="system">자동 재녹음 X — R-cmd 재입력 대기</td></tr>
+<tr><td>LLM 매칭 실패</td><td class="user">이해 불가 명령</td><td class="ui">토스트 "이해하지 못했습니다: '&lt;원문&gt;'" + 최근 명령 제안</td><td class="system">최근 명령 히스토리 fetch</td></tr>
+<tr><td>앱 실행 실패</td><td class="user">앱 미설치 등</td><td class="ui">토스트 "Zoom을 찾을 수 없습니다" + 설정 링크</td><td class="system">NSWorkspace 결과 nil 처리</td></tr>
+</tbody>
+</table>
+
+<h2>백그라운드 (항상 동작)</h2>
+<table>
+<thead><tr><th>기능</th><th>사용자 가시성</th><th>시스템 처리</th></tr></thead>
+<tbody>
+<tr><td>사용 패턴 수집</td><td class="user">없음 (설정 → 로그 탭에서 열람 가능)</td><td class="system">앱 실행/창 배치/명령 시퀀스 로깅</td></tr>
+<tr><td>모드 자동 학습</td><td class="user">새 모드 제안 토스트 "이 패턴을 '공부 모드'로 저장할까요?"</td><td class="system">반복 패턴 감지 후 프리셋 후보 생성</td></tr>
+<tr><td>로그 자동 정리</td><td class="user">없음</td><td class="system">일정 기간 경과 로그 삭제 (용량 관리)</td></tr>
+</tbody>
+</table>
+
+</body>
+</html>

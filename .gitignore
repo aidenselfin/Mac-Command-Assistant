@@ -1,3 +1,6 @@
+# Secrets
+voice-action/config.json
+
 # Runtime artifacts
 PHASE1/logs/*
 !PHASE1/logs/.gitkeep
