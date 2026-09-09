@@ -1,120 +1,169 @@
-# Voice-Action AI — 음성 기반 지능형 파일 관리 에이전트
+# 🎙️ Voice-Action AI v2.0 MVP (Voice-to-MCP)
 
-> **범위 안내:** 현재 버전(v1.0)은 **파일 및 시스템 정리**에 집중 구현. 이후 웹 서칭, 문서 자동화, 이커머스, 미디어 제어 등으로 태스크 타입을 확장할 수 있도록 아키텍처를 설계함.
+> **"말 한마디로 표준 MCP 도구를 안정적으로 실행하는 지능형 macOS 음성 에이전트"**  
+> Voice-Action v2.0 MVP는 **음성 입력(Push-to-Talk) ➔ 로컬 STT ➔ 단일 LLM 플래너 ➔ 표준 MCP(Filesystem) 도구 실행 ➔ Rich CLI 피드백**의 전체 파이프라인을 엔드투엔드로 검증하는 초경량 시스템입니다.
 
----
-
-## 1. Background & Pain Points
-
-- **파일 정리의 만성적 피로:** 다운로드 폴더에 쌓이는 파일, 프로젝트별로 흩어진 문서, 중복 파일 처리 등은 누구나 겪는 반복 노동입니다. 사용자는 "정리해야지"를 알면서도 GUI 조작이 번거로워 미루게 됩니다.
-- **단순 음성 비서의 한계:** "소리 키워줘" 수준의 단순한 음성 명령 시스템(예: Siri, Apple Voice Control)은 사용자의 파일 구조와 맥락을 이해하지 못하며, "프로젝트별로 분류해줘" 같은 복합 워크플로우를 처리하기에 부족합니다.
-- **기존 자동화 도구의 진입 장벽:** Automator, Shell Script 등 기존 도구는 사전 설정이 필요하고 비개발자에게 진입 장벽이 높습니다. 자연어 한 마디로 즉시 실행되는 파일 관리 도구가 부재합니다.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-green.svg)](https://modelcontextprotocol.io/)
+[![Whisper](https://img.shields.io/badge/STT-faster--whisper-orange.svg)](https://github.com/SYSTRAN/faster-whisper)
+[![Tests](https://img.shields.io/badge/tests-8%20passed-brightgreen.svg)]()
 
 ---
 
-## 2. Market Research & Prior Art
+## 📌 1. 핵심 가설 & 단순화 원칙 (MVP Scope)
 
-| 비교 대상 | 특징 | 한계 |
-|---|---|---|
-| **Open Interpreter / Agent-E** | 자연어로 OS 전반 제어 | 비전 모델 의존 → 높은 레이턴시·토큰 비용, 파일 작업 특화 없음 |
-| **Hazel / Automator** | macOS 파일 자동화 도구 | 규칙 기반 사전 설정 필수, 자연어 불가 |
-| **Siri / Apple Voice Control** | 음성 명령 | 복합 명령 처리 불가 |
+기존 v2.0 전체 아키텍처(로컬 Edge SLM 라우터, 다중 도메인 Lazy Loading, 4단계 리스크 가드, PySide6 반투명 HUD 등)에서 초기 디버깅 난이도를 낮추고 핵심 사용자 가치를 검증하기 위해 **철저한 가지치기(De-scoping)**를 적용했습니다.
 
-**기존 OS 자동화 프로젝트의 공통 한계:**
-- 스크린샷 기반의 비전 모델(Vision Model)을 주로 사용하여 레이턴시가 길고 LLM 토큰 비용 낭비가 심함.
-- 무한 루프를 도는 폴링(Polling) 방식으로 인해 유휴 상태에서도 CPU/RAM 자원을 크게 소모.
-- 광범위한 OS 제어 범위를 목표로 하여 오히려 파일 정리 같은 실용 태스크에서의 완성도가 낮음.
+```mermaid
+flowchart LR
+    A["🎙️ 음성 입력\n(R-cmd 홀드)"] --> B["⚡ 로컬 STT\n(faster-whisper)"]
+    B --> C["🤖 단일 LLM\n(OpenAI / Anthropic / OpenRouter)"]
+    C --> D["🔌 Python MCP Client\n(stdio 통신)"]
+    D --> E["📁 Filesystem MCP Server\n(파일 읽기/생성/조회/수정)"]
+    E --> F["💻 Rich 터미널 피드백\n(Console Log)"]
+```
 
-**본 프로젝트의 차별점:**
-- **파일 관리 특화:** 전체 OS 제어를 지향하지 않고, 파일 정리·분류·중복 제거라는 명확한 범위에 집중하여 완성도를 높임.
-- **파일 시스템 직접 접근:** 비전 모델을 배제하고 Python `os`/`shutil` 및 파일 트리 분석으로 정보를 수집하여 빠르고 토큰 효율적인 처리.
-- **단일 LLM 호출 설계:** 복잡한 ReAct 루프 없이 파일 트리 컨텍스트를 한 번에 LLM에 전달하고 전체 이동 계획을 JSON으로 응답받아 일괄 실행.
-- **한국어 자연어 인터페이스:** R-cmd 핫키로 음성 명령을 트리거하여 개발자가 아닌 일반 사용자도 즉시 사용 가능.
-
----
-
-## 3. Core Technology
-
-- **음성 인식 (STT):** `faster-whisper` 기반의 로컬 처리로 지연 없는 STT 파이프라인. VAD(Voice Activity Detection)를 통해 사용자의 발화 시작과 끝을 자동 감지.
-- **명령 해석 (LLM Action Parser):** `Claude Haiku`를 활용한 의도 분석. 사용자의 자연어 명령을 현재 파일 트리 컨텍스트와 결합하여 정형화된 JSON 액션 플랜으로 변환. (단일 호출로 전체 파일 이동 계획을 한 번에 수립)
-- **파일 시스템 분석 (File Tree Scanner):** Python `os`, `pathlib`, `shutil`을 통해 대상 디렉토리의 파일 목록, 크기, 수정일, 중복 해시를 수집하여 LLM에 전달할 컨텍스트 스냅샷(`.fs.snap`) 생성.
-- **파일 실행기 (File Executor):** LLM이 반환한 JSON 플랜(`[{action, src, dst}]`)을 받아 실제 파일 이동/이름 변경/삭제를 수행. 불가역 명령(삭제)은 `confirm` 게이트를 거쳐 사용자 확인 후 실행.
-- *(향후 확장)* **OS 제어 모듈:** 웹 서칭, 문서 작업, 앱 창 관리 등 다른 태스크 타입 추가 시 `macOS Accessibility API (AXUIElement)`, `osascript`, `CGEvent` 기반의 OS Executor를 추가 모듈로 연결.
+| 영역 | v2.0 종합 계획서 (Full Spec) | **v2.0 초경량 MVP (현재 구현)** | 단순화 사유 |
+| :--- | :--- | :--- | :--- |
+| **1. 라우팅 레이어** | Apple Silicon MLX 로컬 SLM 멀티라벨 라우터 | **완전 생략 (No Router)** | 도메인 분류 없이 텍스트를 LLM으로 직결 |
+| **2. LLM 추론 엔진** | 3단계 자동 폴백 (Claude ➔ DeepSeek ➔ GPT) | **단일 LLM Tool Calling** | OpenAI / Anthropic / OpenRouter 단일 호출 |
+| **3. MCP 타깃 범위** | 다중 MCP (Filesystem + Playwright + AXUI) | **단일 표준 MCP (`@modelcontextprotocol/server-filesystem`)** | 로컬 파일시스템 제어로 부작용 최소화 및 검증 집중 |
+| **4. 안전성 & Undo** | 4단계 가드, 모달 승인, SQLite Undo 저널 | **콘솔 로그 즉시 실행** | 즉각적인 피드백 루프 검증 |
+| **5. UI / UX** | PySide6 Qt 반투명 다크모드 Floating HUD | **Rich 라이브러리 기반 컬러 터미널 CLI** | UI 스레드 충돌 없이 안정적 개발/디버깅 가능 |
+| **6. 인터페이스** | Push-to-Talk 음성 전용 | **음성 / 단일 텍스트 명령 / 대화형 CLI 지원** | 마이크가 없는 환경이나 자동화 테스트에서도 즉시 검증 |
 
 ---
 
-## 4. System Pipeline
+## 🧩 2. 시스템 아키텍처 & 프로젝트 구조
 
-시스템은 크게 3단계의 아키텍처로 작동합니다.
-
-1. **Input (Listen):** 사용자가 지정된 트리거(R-cmd)를 누르고 발화하면, 실시간으로 녹음 및 STT 변환이 이루어짐.
-2. **Context & Parsing (Think):**
-   - File Tree Scanner가 대상 디렉토리를 스캔하여 파일 목록·크기·중복 해시 등의 컨텍스트 스냅샷을 생성.
-   - LLM이 음성 텍스트와 파일 컨텍스트를 단일 호출로 분석하여 전체 파일 이동 계획을 `[{action, src, dst, reason}]` 형태의 JSON으로 일괄 반환. (ReAct 루프 없음)
-3. **Execution (Act):**
-   - File Executor가 JSON 플랜을 받아 순차적으로 파일 이동/이름 변경 수행. 삭제 등 불가역 명령은 `confirm` 게이트를 통해 사용자 확인 후 실행.
-   - 실행 로그를 저장하여 실패 시 이전 상태로 롤백 가능.
-
-> **설계 원칙:** 현재는 파일 정리 태스크를 단일 호출로 해결. 향후 웹 서칭·구매 대행처럼 중간 상태를 확인해야 하는 태스크를 추가할 때 ReAct(다중 호출) 방식을 해당 태스크 타입에만 적용하는 **하이브리드 구조**로 확장.
-
----
-
-## 5. User Scenario
-
-### 현재 구현: 파일 및 시스템 정리
-
-**시나리오:** *"다운로드 폴더에서 중복된 파일을 찾아 삭제하고 프로젝트별로 분류해줘"*
-
-| 단계 | 동작 |
-|---|---|
-| 1. 트리거 | R-cmd 누르고 음성 명령 발화 |
-| 2. STT | faster-whisper가 로컬에서 텍스트로 변환 |
-| 3. 스캔 | 다운로드 폴더 파일 트리·중복 해시 수집 |
-| 4. LLM 호출 (1회) | 파일 목록 + 명령어를 함께 전달 → 전체 이동/삭제 플랜 JSON 반환 |
-| 5. 확인 게이트 | 삭제 대상 파일 목록을 사용자에게 표시, 승인 후 실행 |
-| 6. 실행 | 플랜대로 파일 이동·분류·중복 삭제 일괄 처리 |
-
-### 향후 확장 태스크 타입 (v2+)
-
-| # | 태스크 타입 | 핵심 변경점 |
-|---|---|---|
-| 2 | **웹 서칭 및 데이터 수집 (리서치형)** | 브라우저 DOM 접근 + ReAct 루프 |
-| 3 | **오피스 및 문서 작업 자동화 (생산성형)** | AXUIElement로 앱 내 UI 요소 접근 |
-| 4 | **이커머스 및 예약 (구매 대행형)** | 높은 정확도 요구 → 단계별 사용자 확인 게이트 강화 |
-| 5 | **미디어 및 커뮤니케이션 (소통형)** | osascript, CGEvent로 앱 제어 |
+```
+Mac-Command-Assistant/
+├── voice-action/
+│   ├── config.py             # 다중 프로바이더(OpenAI/Anthropic/OpenRouter), MCP 디렉토리 설정
+│   ├── config.example.json   # 설정 템플릿
+│   ├── audio.py              # sounddevice 기반 16kHz 모노 오디오 버퍼링 (v1 재사용)
+│   ├── stt.py                # faster-whisper 온디바이스 로컬 STT (v1 재사용)
+│   ├── mcp_client.py         # ★ 공식 Python MCP SDK 기반 stdio 어댑터 & 스키마 변환
+│   ├── planner.py            # ★ 단일 LLM Function Calling 오케스트레이션 루프
+│   ├── main.py               # ★ Rich 콘솔 인터페이스 & Push-to-Talk 이벤트 루프
+│   ├── requirements.txt      # 프로젝트 의존성
+│   └── tests/                # pytest 테스트 슈트
+│       ├── test_config.py        # 설정 파일 및 환경변수 로딩 테스트
+│       ├── test_mcp_client.py    # MCP stdio 연결 및 파일 작업 도구 테스트
+│       ├── test_planner.py       # LLM Tool Calling 루프 모의 테스트
+│       └── test_scenarios.py     # PRD 검증 시나리오 1/2/3 E2E 테스트
+└── README.md
+```
 
 ---
 
-## 6. Performance & Optimization
+## 🚀 3. 빠른 시작 (Getting Started)
 
-- **병렬 파이프라인:** 사용자 발화 종료와 동시에 STT와 파일 트리 스캔을 병렬로 실행하여 합류.
-- **컨텍스트 압축 (Token Minimization):** 전체 파일 정보 대신 파일명·크기·해시 등 핵심 메타데이터만 담은 `.fs.snap` 포맷 사용.
-- **프롬프트 캐싱:** 시스템 지시문(명령셋, JSON 스키마 등)을 캐싱하여 매 호출 시 입력 토큰 비용 90% 절감.
-- **단일 LLM 호출:** 파일 정리의 전체 플랜을 한 번에 생성하므로 ReAct 루프 방식 대비 왕복 지연 없음.
-- **로컬 STT:** faster-whisper를 온디바이스에서 구동하여 네트워크 지연 없이 음성 인식 수행.
-- **액션 큐(Action Queue):** 명령을 큐에 적재하여 사용자 입력과 충돌 없이 백그라운드 워커가 순차 실행.
+### 사전 요구사항 (Prerequisites)
+- **macOS** (Apple Silicon 또는 Intel)
+- **Python 3.10+**
+- **Node.js (v18+) & npx** (`npx -y @modelcontextprotocol/server-filesystem` 구동용)
 
-### LLM 학습 및 성능 최적화 로드맵
-
-1. **데이터 증류 (Distillation):** 초기에는 Claude Haiku로 구동하며, 사용자가 승인한 케이스만 정답 데이터로 자동 저장. 누적 후 3B급 소형 모델(예: Qwen 2.5 3B)로 교체하여 API 비용 0원 및 오프라인 동작 달성.
-2. **파인튜닝:** LoRA / QLoRA를 활용한 경량 파인튜닝으로 로컬 모델 성능 극대화.
-
----
-
-## 7. Future Roadmap
-
-- **태스크 타입 확장 (v2):** 라우터 모듈을 추가하여 사용자 명령을 태스크 타입으로 자동 분류하고, 각 타입에 맞는 실행 모듈로 분기.
-- **롤백 메커니즘 고도화:** 파일 이동·이름 변경 실행 로그를 기록하여 실패 또는 사용자 취소 시 이전 상태로 즉시 복원하는 Undo 기능 구현.
-- **개인화된 분류 규칙 학습:** 사용자가 반복적으로 같은 방식으로 파일을 분류하는 패턴을 학습하여, 다음번 정리 시 해당 규칙을 우선 적용.
-
----
-
-## Getting Started
-
+### 1) 설치
 ```bash
+# 1. 저장소 이동
 cd voice-action
+
+# 2. 가상환경 생성 및 활성화
+python3 -m venv venv
+source venv/bin/activate
+
+# 3. 의존성 설치
 pip install -r requirements.txt
-cp config.example.json config.json
-# config.json에 Anthropic API 키 입력
+```
+
+### 2) 설정 파일 작성 (`config.json`)
+`config.example.json`을 복사하여 `config.json`을 생성하거나 환경변수를 설정합니다.
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "openai_api_key": "YOUR_OPENAI_API_KEY",
+  "allowed_directories": [
+    "~/Desktop",
+    "~/Documents/test_workspace"
+  ],
+  "whisper_model": "small",
+  "hotkey": "cmd_r"
+}
+```
+> *(Anthropic 사용 시 `"provider": "anthropic"`, `"model": "claude-3-5-sonnet-20241022"`, `"anthropic_api_key": "..."` 로 설정)*
+
+---
+
+## 🎮 4. 사용 방법 (Usage)
+
+### ① Push-to-Talk 음성 모드 (기본)
+```bash
 python main.py
 ```
+- **조작법**: 오른쪽 커맨드(`R-cmd`) 키를 누른 상태에서 말하고, 발화가 끝나면 키를 뗍니다.
+- **상태 흐름**:
+  `[대기 중...]` ➔ `[🔴 녹음 중 (R-cmd)...]` ➔ `[⚡ STT 변환 완료]` ➔ `[🤖 LLM 플래닝 중...]` ➔ `[🔌 MCP 실행 로그]` ➔ `[✅ 완료 요약]`
+
+### ② 단일 텍스트 명령 모드 (마이크 없이 즉시 테스트)
+```bash
+python main.py --text "바탕화면에 있는 파일 목록 보여줘"
+python main.py --text "테스트 폴더에 오늘 날짜로 메모장 파일 하나 만들어줘"
+```
+
+### ③ 대화형 터미널 콘솔 모드 (Interactive REPL)
+```bash
+python main.py --interactive
+```
+
+### ④ 환경 및 설정 진단
+```bash
+python main.py --check
+```
+
+---
+
+## 🧪 5. 검증 및 테스트 시나리오 (Test & Verification)
+
+PRD 제5장에 정의된 3대 핵심 검증 시나리오를 포함한 자동화 테스트를 실행합니다.
+
+```bash
+pytest tests/ -v
+```
+
+### 📋 검증 시나리오 결과
+1. **조회 테스트**: *"바탕화면에 있는 파일 목록 보여줘"*  
+   ➔ `list_directory` 도구 자동 호출 ➔ 디렉토리 내 파일 목록 반환 (`PASSED`)
+2. **생성 테스트**: *"테스트 폴더에 오늘 날짜로 메모장 파일 하나 만들어줘"*  
+   ➔ `write_file` 도구 자동 호출 ➔ 대상 디렉토리에 메모 파일 실제 생성 (`PASSED`)
+3. **복합 내용 작성 테스트**: *"README.md 파일 읽고 요약해서 summary.txt로 저장해줘"*  
+   ➔ `read_text_file` ➔ 요약 추론 ➔ `write_file` 순차 호출 및 완료 (`PASSED`)
+
+```
+============================== 8 passed in 4.20s ===============================
+```
+
+---
+
+## 🗺️ 6. 향후 로드맵 (Post-MVP)
+
+1. **Playwright MCP 연동**: 웹 검색 및 페이지 스크랩/브라우저 조작 도구 확장
+2. **PySide6 미니멀 플로팅 HUD**: 터미널을 보지 않고도 바탕화면에서 상태를 볼 수 있는 최소 오버레이 UI
+3. **로컬 Edge Router (SLM)**: 다중 MCP 도메인 확장 시 도구 스키마를 선별하는 온디바이스 라우터 도입
+4. **Risk Guard & Undo**: 파일 삭제/수정 등 비가역 명령에 대한 확인창 및 롤백 저널 지원
+
+---
+
+## 👥 7. 멀티에이전트 개발 체계
+
+| 에이전트 역할 | 담당 영역 및 산출물 |
+| :--- | :--- |
+| **총괄 (Orchestrator)** | 시스템 설계, 모듈 인터페이스 정의, 컴포넌트 통합 조율 |
+| **Audio & STT Dev** | `audio.py`, `stt.py` (Push-to-Talk 캡처 및 로컬 Whisper 트랜스크립션) |
+| **MCP Client Dev** | `mcp_client.py` (공식 Python MCP SDK stdio 클라이언트, 스키마 변환) |
+| **LLM Planner Dev** | `planner.py` (OpenAI / Anthropic Tool Calling 오케스트레이션 루프) |
+| **CLI Core Dev** | `config.py`, `main.py` (Rich 기반 컬러 터미널 대시보드 및 이벤트 파이프라인) |
+| **테스터 (QA Agent)** | `tests/` (8개 단위/통합/시나리오 테스트 슈트 구축 및 검증) |
+| **문서 & Git Agent** | `README.md`, `requirements.txt`, 설정 가이드 작성 및 Git 형상 관리 |
