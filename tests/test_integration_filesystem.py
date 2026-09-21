@@ -22,6 +22,7 @@ from voice_action.mcp_client import (
     MCPStartupError,
     ToolRejectedError,
 )
+from voice_action.mcp_manager import MCPManager
 from voice_action.planner import Clarification, Completed, ModelTurn, Planner, ToolCall
 
 pytestmark = pytest.mark.integration
@@ -52,6 +53,7 @@ async def processes(monkeypatch):
 
 async def test_real_mcp_planner_listing_and_root_boundary(config, tmp_path, processes):
     mcp = MCPClient(config)
+    manager = MCPManager({"filesystem": mcp})
     model = AsyncMock()
     model.generate.side_effect = [
         ModelTurn(
@@ -59,7 +61,7 @@ async def test_real_mcp_planner_listing_and_root_boundary(config, tmp_path, proc
             [
                 ToolCall(
                     "listing",
-                    "list_directory",
+                    "filesystem__list_directory",
                     json.dumps(
                         {
                             "path": str(config.allowed_directories[0]),
@@ -71,13 +73,13 @@ async def test_real_mcp_planner_listing_and_root_boundary(config, tmp_path, proc
         ModelTurn("조회 완료", []),
     ]
     output = []
-    async with mcp.connect():
+    async with manager.connect():
         assert len(processes) == 1
         session = mcp._session
         assert [tool.name for tool in mcp.tools] == ["list_directory"]
-        assert await Planner(config, mcp, model, output.append).run("파일 목록") == Completed(
-            "조회 완료"
-        )
+        assert await Planner(config, manager, model, output.append).run(
+            "파일 목록"
+        ) == Completed("조회 완료")
         assert any("한글 메모.txt" in line for line in output)
         with pytest.raises(ToolRejectedError):
             await mcp.call_tool("list_directory", {"path": str(tmp_path)})
@@ -264,7 +266,7 @@ raise SystemExit(main.main())
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    child_pid = None
+    child_pids = []
     try:
         output = b""
         with selectors.DefaultSelector() as selector:
@@ -278,8 +280,8 @@ raise SystemExit(main.main())
                     output += chunk
         for line in output.splitlines():
             if line.startswith(b"[MCP-PID]"):
-                child_pid = int(line.split()[-1])
-        assert b"[READY]" in output and child_pid is not None
+                child_pids.append(int(line.split()[-1]))
+        assert b"[READY]" in output and len(child_pids) == 2
         if exit_mode == "sigint":
             process.send_signal(signal.SIGINT)
             tail, errors = process.communicate(timeout=10)
@@ -289,13 +291,14 @@ raise SystemExit(main.main())
                 timeout=10,
             )
         assert process.returncode == (130 if exit_mode == "sigint" else 0), errors.decode()
-        with pytest.raises(ProcessLookupError):
-            os.kill(child_pid, 0)
+        for child_pid in child_pids:
+            with pytest.raises(ProcessLookupError):
+                os.kill(child_pid, 0)
     finally:
         if process.poll() is None:
             process.kill()
             process.communicate()
-        if child_pid is not None:
+        for child_pid in child_pids:
             try:
                 os.kill(child_pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -346,6 +349,7 @@ async def test_real_search_read_only_candidate_flow(config, processes):
     candidate = root / "회의록-유일.md"
     await asyncio.to_thread(candidate.write_text, "결정 사항: 금요일 배포", encoding="utf-8")
     mcp = MCPClient(config, allowed_tools={"search_files", "read_text_file"})
+    manager = MCPManager({"filesystem": mcp})
     model = AsyncMock()
     model.generate.side_effect = [
         ModelTurn(
@@ -353,7 +357,7 @@ async def test_real_search_read_only_candidate_flow(config, processes):
             [
                 ToolCall(
                     "search",
-                    "search_files",
+                    "filesystem__search_files",
                     json.dumps(
                         {"path": str(root), "pattern": "*회의록*"},
                         ensure_ascii=False,
@@ -366,7 +370,7 @@ async def test_real_search_read_only_candidate_flow(config, processes):
             [
                 ToolCall(
                     "read",
-                    "read_text_file",
+                    "filesystem__read_text_file",
                     json.dumps({"path": str(candidate)}, ensure_ascii=False),
                 )
             ],
@@ -374,11 +378,20 @@ async def test_real_search_read_only_candidate_flow(config, processes):
         ModelTurn("금요일 배포로 요약했습니다.", []),
     ]
 
-    async with mcp.connect():
-        names = {tool.name for tool in await mcp.list_tools()}
-        assert names == {"search_files", "read_text_file"}
-        assert names.isdisjoint({"write_file", "delete_file", "move_file"})
-        outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+    async with manager.connect():
+        names = {tool.name for tool in await manager.list_tools()}
+        assert names == {
+            "filesystem__search_files",
+            "filesystem__read_text_file",
+        }
+        assert names.isdisjoint(
+            {
+                "filesystem__write_file",
+                "filesystem__delete_file",
+                "filesystem__move_file",
+            }
+        )
+        outcome = await Planner(config, manager, model).run("회의록 요약해줘")
 
     assert outcome == Completed("금요일 배포로 요약했습니다.")
 
@@ -388,20 +401,21 @@ async def test_real_multiple_search_candidates_stop_before_read(config, processe
     for name in ("회의록-1.md", "회의록-2.md"):
         await asyncio.to_thread((root / name).write_text, name, encoding="utf-8")
     mcp = MCPClient(config, allowed_tools={"search_files", "read_text_file"})
+    manager = MCPManager({"filesystem": mcp})
     model = AsyncMock()
     model.generate.return_value = ModelTurn(
         None,
         [
             ToolCall(
                 "search",
-                "search_files",
+                "filesystem__search_files",
                 json.dumps({"path": str(root), "pattern": "*회의록*"}, ensure_ascii=False),
             )
         ],
     )
 
-    async with mcp.connect():
-        outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+    async with manager.connect():
+        outcome = await Planner(config, manager, model).run("회의록 요약해줘")
 
     assert isinstance(outcome, Clarification)
     assert len(outcome.options) == 2

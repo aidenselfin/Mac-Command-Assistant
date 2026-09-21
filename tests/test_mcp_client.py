@@ -37,6 +37,28 @@ def client(config):
     return mcp
 
 
+def write_client(config):
+    mcp = MCPClient(config, allowed_tools={"write_file"})
+    mcp.tools = [
+        ToolDefinition(
+            "write_file",
+            "Write",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+        )
+    ]
+    mcp._session = AsyncMock()
+    mcp._roots = config.allowed_directories
+    return mcp
+
+
 @pytest.mark.parametrize(
     "name,args",
     [
@@ -61,6 +83,36 @@ async def test_symlink_escape(config, tmp_path):
     mcp = client(config)
     with pytest.raises(ToolRejectedError, match="허용 경로 밖"):
         await mcp.call_tool("list_directory", {"path": str(link)})
+    mcp._session.call_tool.assert_not_awaited()
+
+
+async def test_write_normalization_reuses_schema_and_canonical_root_boundary(
+    config, tmp_path
+):
+    mcp = write_client(config)
+    root = config.allowed_directories[0]
+    nested = root / "nested"
+    nested.mkdir()
+    target = nested / ".." / "new.txt"
+
+    normalized = await mcp.normalize_tool_arguments(
+        "write_file", {"path": str(target), "content": "exact"}
+    )
+
+    assert normalized == {"path": str(root / "new.txt"), "content": "exact"}
+    with pytest.raises(ToolRejectedError):
+        await mcp.normalize_tool_arguments(
+            "write_file", {"path": str(tmp_path / "outside.txt"), "content": "x"}
+        )
+    with pytest.raises(ToolRejectedError, match="regular file"):
+        await mcp.normalize_tool_arguments(
+            "write_file", {"path": str(root), "content": "x"}
+        )
+    with pytest.raises(ToolRejectedError, match="부모"):
+        await mcp.normalize_tool_arguments(
+            "write_file",
+            {"path": str(root / "missing" / "new.txt"), "content": "x"},
+        )
     mcp._session.call_tool.assert_not_awaited()
 
 

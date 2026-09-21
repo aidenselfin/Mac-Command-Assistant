@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 import pytest
 
 from voice_action.planner import (
+    ApprovalRequired,
     Clarification,
     ClarificationContext,
     Completed,
@@ -28,12 +29,19 @@ class ScriptedPlanner:
         self,
         run_actions: list[RunAction],
         resume_actions: list[ResumeAction] | None = None,
+        approve_actions: list[RunAction] | None = None,
+        undo_actions: list[RunAction] | None = None,
     ):
         self.run_actions = run_actions
         self.resume_actions = resume_actions or []
+        self.approve_actions = approve_actions or []
+        self.undo_actions = undo_actions or []
         self.observer: PlannerEventObserver | None = None
         self.run_inputs: list[str] = []
         self.resume_inputs: list[tuple[ClarificationContext, str]] = []
+        self.approve_inputs = []
+        self.reject_inputs = []
+        self.undo_count = 0
 
     def set_event_observer(self, observer: PlannerEventObserver | None) -> None:
         self.observer = observer
@@ -58,6 +66,28 @@ class ScriptedPlanner:
             return await action(self, context, selection)
         return action
 
+    async def approve(self, context):
+        self.approve_inputs.append(context)
+        action = self.approve_actions.pop(0)
+        if isinstance(action, BaseException):
+            raise action
+        if callable(action):
+            return await action(self, context)
+        return action
+
+    def reject(self, context):
+        self.reject_inputs.append(context)
+        return Completed("파일 쓰기를 거절했습니다. 파일은 변경하지 않았습니다.")
+
+    async def undo_last_write(self):
+        self.undo_count += 1
+        action = self.undo_actions.pop(0)
+        if isinstance(action, BaseException):
+            raise action
+        if callable(action):
+            return await action(self, "undo")
+        return action
+
     def event(
         self,
         event_type: PlannerEventType,
@@ -78,6 +108,18 @@ def clarification() -> Clarification:
         "요약할 회의록을 선택해 주세요.",
         options,
         ClarificationContext("회의록 요약해줘", "file_candidate", options, 1),
+    )
+
+
+def approval(path="/allowed/summary.txt") -> ApprovalRequired:
+    return ApprovalRequired(
+        "filesystem__write_file",
+        path,
+        "create",
+        7,
+        "summary",
+        False,
+        object(),
     )
 
 
@@ -128,6 +170,43 @@ async def test_multi_tool_command_transitions_from_structured_events():
         RuntimeState.DONE,
         RuntimeState.IDLE,
     ]
+
+
+async def test_typed_state_and_planner_event_observers_preserve_emit_contract():
+    async def run(planner, _text):
+        planner.event(
+            PlannerEventType.TOOL_STARTED, 1, "filesystem__read_text_file"
+        )
+        planner.event(
+            PlannerEventType.TOOL_FINISHED, 1, "filesystem__read_text_file"
+        )
+        return Completed("완료")
+
+    planner = ScriptedPlanner([run])
+    transitions = []
+    events = []
+    logs = []
+    controller = RuntimeController(
+        planner,
+        emit=logs.append,
+        state_observer=transitions.append,
+        planner_event_observer=events.append,
+    )
+
+    assert await controller.submit("읽기") == Completed("완료")
+
+    assert [event.tool_name for event in events] == [
+        "filesystem__read_text_file",
+        "filesystem__read_text_file",
+    ]
+    assert [transition.current for transition in transitions] == [
+        RuntimeState.PLANNING,
+        RuntimeState.EXECUTING_TOOL,
+        RuntimeState.PLANNING,
+        RuntimeState.DONE,
+        RuntimeState.IDLE,
+    ]
+    assert logs[1].startswith("[STATE] PLANNING -> EXECUTING_TOOL")
 
 
 async def test_clarification_number_suffix_resumes_pending_plan():
@@ -236,6 +315,138 @@ async def test_cancel_while_waiting_never_calls_resume():
     ]
 
 
+async def test_approval_state_executes_saved_call_and_submit_stays_busy():
+    pending = approval()
+
+    async def approve_action(planner, context):
+        assert context is pending.context
+        planner.event(PlannerEventType.TOOL_STARTED, 1, "filesystem__write_file")
+        planner.event(PlannerEventType.TOOL_FINISHED, 1, "filesystem__write_file")
+        planner.event(PlannerEventType.PLANNING_STARTED, 2)
+        return Completed("저장 완료")
+
+    planner = ScriptedPlanner([pending], approve_actions=[approve_action])
+    controller = RuntimeController(planner)
+
+    assert await controller.submit("저장") is pending
+    assert controller.state is RuntimeState.WAITING_APPROVAL
+    assert controller.pending is None
+    assert controller.pending_approval is pending
+    assert await controller.submit("새 명령") == Busy(
+        "다른 명령을 처리 중입니다.", RuntimeState.WAITING_APPROVAL
+    )
+    assert await controller.approve_pending() == Completed("저장 완료")
+
+    assert state_path(controller) == [
+        RuntimeState.IDLE,
+        RuntimeState.PLANNING,
+        RuntimeState.WAITING_APPROVAL,
+        RuntimeState.RESUMING_PLAN,
+        RuntimeState.EXECUTING_TOOL,
+        RuntimeState.PLANNING,
+        RuntimeState.DONE,
+        RuntimeState.IDLE,
+    ]
+    assert planner.run_inputs == ["저장"]
+    assert len(planner.approve_inputs) == 1
+
+
+async def test_reject_pending_finishes_without_approval_execution():
+    pending = approval()
+    planner = ScriptedPlanner([pending])
+    controller = RuntimeController(planner)
+
+    assert await controller.submit("저장") is pending
+    outcome = await controller.reject_pending()
+
+    assert isinstance(outcome, Completed)
+    assert "거절" in outcome.text
+    assert planner.approve_inputs == []
+    assert planner.reject_inputs == [pending.context]
+    assert state_path(controller)[-3:] == [
+        RuntimeState.WAITING_APPROVAL,
+        RuntimeState.DONE,
+        RuntimeState.IDLE,
+    ]
+
+
+async def test_approval_can_pause_again_for_second_write():
+    first, second = approval("/allowed/one.txt"), approval("/allowed/two.txt")
+    planner = ScriptedPlanner([first], approve_actions=[second, Completed("완료")])
+    controller = RuntimeController(planner)
+
+    assert await controller.submit("두 파일") is first
+    assert await controller.approve_pending() is second
+    assert controller.state is RuntimeState.WAITING_APPROVAL
+    assert await controller.approve_pending() == Completed("완료")
+    assert len(planner.approve_inputs) == 2
+
+
+async def test_undo_from_idle_uses_done_transition_without_planning():
+    planner = ScriptedPlanner([], undo_actions=[Completed("생성한 파일을 되돌렸습니다.")])
+    controller = RuntimeController(planner)
+
+    outcome = await controller.undo_last_write()
+
+    assert outcome == Completed("생성한 파일을 되돌렸습니다.")
+    assert planner.undo_count == 1
+    assert state_path(controller) == [
+        RuntimeState.IDLE,
+        RuntimeState.DONE,
+        RuntimeState.IDLE,
+    ]
+
+
+async def test_undo_conflict_uses_error_transition_without_planning():
+    planner = ScriptedPlanner(
+        [], undo_actions=[Error("파일이 write 후 변경되어 되돌리지 않았습니다.")]
+    )
+    controller = RuntimeController(planner)
+
+    outcome = await controller.undo_last_write()
+
+    assert isinstance(outcome, Error)
+    assert state_path(controller) == [
+        RuntimeState.IDLE,
+        RuntimeState.ERROR,
+        RuntimeState.IDLE,
+    ]
+
+
+async def test_undo_is_busy_during_active_command():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked(_planner, _text):
+        entered.set()
+        await release.wait()
+        return Completed("완료")
+
+    planner = ScriptedPlanner([blocked])
+    controller = RuntimeController(planner)
+    command = asyncio.create_task(controller.submit("실행"))
+    await entered.wait()
+
+    assert await controller.undo_last_write() == Busy(
+        "다른 명령을 처리 중입니다.", RuntimeState.PLANNING
+    )
+    assert planner.undo_count == 0
+    release.set()
+    await command
+
+
+@pytest.mark.parametrize("pending", [clarification(), approval()])
+async def test_undo_is_busy_during_pending_input(pending):
+    planner = ScriptedPlanner([pending])
+    controller = RuntimeController(planner)
+    await controller.submit("대기")
+
+    outcome = await controller.undo_last_write()
+
+    assert isinstance(outcome, Busy)
+    assert planner.undo_count == 0
+
+
 def test_voice_compatibility_states_are_declared():
     assert {state.name for state in RuntimeState} == {
         "IDLE",
@@ -244,6 +455,7 @@ def test_voice_compatibility_states_are_declared():
         "PLANNING",
         "EXECUTING_TOOL",
         "WAITING_USER_INPUT",
+        "WAITING_APPROVAL",
         "RESUMING_PLAN",
         "DONE",
         "ERROR",

@@ -7,6 +7,8 @@ dependencies = [
     "mcp>=1.26,<2",
     "openai>=2,<3",
     "jsonschema>=4,<5",
+    "pyobjc-framework-ApplicationServices>=10,<13; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10,<13; sys_platform == 'darwin'",
     "python-dotenv>=1,<2",
     "rich>=14,<15",
 ]

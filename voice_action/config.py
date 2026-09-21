@@ -41,7 +41,7 @@ def load_config(
     env.update(dotenv_values(cwd / ".voice-action/config.env", interpolate=False))
     env.update(os.environ if environ is None else environ)
     data: dict[str, Any] = {
-        "provider": "openrouter" if env.get("OPENROUTER_API_KEY") else "openai",
+        "provider": "groq" if env.get("GROQ_API_KEY") else "openai",
         "allowed_directories": ["./voice-action-test"],
     }
     for file in (home / ".voice-action/config.json", cwd / "config.json"):
@@ -79,10 +79,10 @@ def load_config(
             data[key] = value
     data.update({k: v for k, v in (overrides or {}).items() if v is not None})
     provider = data["provider"]
-    if provider not in ("openai", "openrouter"):
-        raise ConfigError("지원 provider: openai, openrouter")
-    data.setdefault("model", "openai/gpt-4o-mini" if provider == "openrouter" else "gpt-4o-mini")
-    key_name = "OPENAI_API_KEY" if provider == "openai" else "OPENROUTER_API_KEY"
+    if provider not in ("openai", "groq"):
+        raise ConfigError("지원 provider: openai, groq")
+    data.setdefault("model", "openai/gpt-oss-20b" if provider == "groq" else "gpt-4o-mini")
+    key_name = "GROQ_API_KEY" if provider == "groq" else "OPENAI_API_KEY"
     api_key = env.get(key_name)
     if not isinstance(api_key, str) or not api_key.strip():
         raise ConfigError(f"{key_name} 환경변수가 필요합니다.")
@@ -121,8 +121,8 @@ def load_config(
             raise ConfigError(f"{key}는 양수{' 정수' if kind is int else ''}여야 합니다.") from exc
         numbers[key] = number
     base_url = data.get("base_url")
-    if base_url is None and provider == "openrouter":
-        base_url = "https://openrouter.ai/api/v1"
+    if base_url is None and provider == "groq":
+        base_url = "https://api.groq.com/openai/v1"
     if base_url is not None:
         if not isinstance(base_url, str):
             raise ConfigError("base_url은 URL 문자열이어야 합니다.")

@@ -1,6 +1,10 @@
 {
   "private": true,
+  "scripts": {
+    "playwright:install": "playwright install chromium"
+  },
   "dependencies": {
-    "@modelcontextprotocol/server-filesystem": "2026.8.31"
+    "@modelcontextprotocol/server-filesystem": "2026.8.31",
+    "@playwright/mcp": "0.0.81"
   }
 }

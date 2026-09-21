@@ -1,6 +1,6 @@
 {
-  "provider": "openrouter",
-  "model": "openai/gpt-4o-mini",
+  "provider": "groq",
+  "model": "openai/gpt-oss-20b",
   "allowed_directories": ["./voice-action-test"],
   "max_tool_rounds": 5,
   "llm_timeout_seconds": 60,

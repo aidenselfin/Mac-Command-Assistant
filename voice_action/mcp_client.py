@@ -226,6 +226,43 @@ class MCPClient:
             raise ToolRejectedError("허용 경로 밖 접근입니다.")
         return path
 
+    def _normalize_arguments(self, name: str, arguments: dict) -> dict:
+        tool = next((tool for tool in self.tools if tool.name == name), None)
+        if name not in self._allowlist or tool is None:
+            raise MCPToolNotFoundError("허용되지 않은 도구입니다.")
+        if self._session is None or self._failed:
+            raise MCPConnectionError("MCP 연결이 종료되었거나 사용할 수 없습니다.")
+        try:
+            Draft202012Validator(tool.schema).validate(arguments)
+        except ValidationError as exc:
+            raise ToolRejectedError("잘못된 도구 인자입니다.") from exc
+
+        creating = name == "write_file"
+        path = self._validate_path(arguments.get("path"), creating=creating)
+        if creating:
+            content = arguments.get("content")
+            if not isinstance(content, str):
+                raise ToolRejectedError("write_file content는 문자열이어야 합니다.")
+            if path.exists():
+                if not path.is_file():
+                    raise ToolRejectedError("쓰기 대상은 regular file이어야 합니다.")
+            else:
+                try:
+                    parent = path.parent.resolve(strict=True)
+                except (OSError, RuntimeError) as exc:
+                    raise ToolRejectedError(
+                        "쓰기 대상의 부모 디렉터리가 존재하지 않습니다."
+                    ) from exc
+                if not parent.is_dir() or not any(
+                    parent.is_relative_to(root) for root in self._roots
+                ):
+                    raise ToolRejectedError("쓰기 대상의 부모가 허용 디렉터리가 아닙니다.")
+        return {**deepcopy(arguments), "path": str(path)}
+
+    async def normalize_tool_arguments(self, name: str, arguments: dict) -> dict:
+        """Validate and canonicalize arguments without executing the MCP tool."""
+        return await asyncio.to_thread(self._normalize_arguments, name, arguments)
+
     async def validate_result_path(self, raw_path: str) -> Path:
         """Revalidate a server-returned candidate as a file inside an allowed root."""
         if self._session is None or self._failed:
@@ -237,21 +274,10 @@ class MCPClient:
 
     async def call_tool(self, name: str, arguments: dict) -> ToolResult:
         async with self._call_lock:
-            tool = next((tool for tool in self.tools if tool.name == name), None)
-            if name not in self._allowlist or tool is None:
-                raise MCPToolNotFoundError("허용되지 않은 도구입니다.")
-            if self._session is None or self._failed:
-                raise MCPConnectionError("MCP 연결이 종료되었거나 사용할 수 없습니다.")
-            try:
-                Draft202012Validator(tool.schema).validate(arguments)
-            except ValidationError as exc:
-                raise ToolRejectedError("잘못된 도구 인자입니다.") from exc
-            path = await asyncio.to_thread(
-                self._validate_path, arguments.get("path"), creating=name == "write_file"
-            )
+            normalized = await self.normalize_tool_arguments(name, arguments)
             try:
                 async with asyncio.timeout(self.config.mcp_timeout_seconds):
-                    result = await self._session.call_tool(name, {**arguments, "path": str(path)})
+                    result = await self._session.call_tool(name, normalized)
             except TimeoutError as exc:
                 self._failed = True
                 raise MCPToolTimeoutError(

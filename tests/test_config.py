@@ -27,14 +27,14 @@ def test_precedence(tmp_path):
     assert load_config(cwd=tmp_path, home=home, environ=env).model == "home"
 
 
-def test_local_openrouter_env(tmp_path):
+def test_local_groq_env(tmp_path):
     (tmp_path / "voice-action-test").mkdir()
     (tmp_path / ".voice-action").mkdir()
-    (tmp_path / ".voice-action/config.env").write_text("OPENROUTER_API_KEY=local-secret\n")
+    (tmp_path / ".voice-action/config.env").write_text("GROQ_API_KEY=local-secret\n")
     config = load_config(cwd=tmp_path, home=tmp_path / "home", environ={})
-    assert config.provider == "openrouter"
-    assert config.model == "openai/gpt-4o-mini"
-    assert config.base_url == "https://openrouter.ai/api/v1"
+    assert config.provider == "groq"
+    assert config.model == "openai/gpt-oss-20b"
+    assert config.base_url == "https://api.groq.com/openai/v1"
     assert config.api_key == "local-secret"
 
 
@@ -79,7 +79,7 @@ def test_legacy_global_secrets_are_ignored(tmp_path):
     config = load_config(
         cwd=tmp_path,
         home=home,
-        environ={"OPENROUTER_API_KEY": "current-secret"},
+        environ={"GROQ_API_KEY": "current-secret"},
     )
     assert config.api_key == "current-secret"
     assert legacy.read_text() == original
