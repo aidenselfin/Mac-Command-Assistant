@@ -13,7 +13,7 @@ LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케
 2026-09-21 기준 검증 결과:
 
 ```text
-pytest: 215 passed in 27.50s
+pytest: 228 passed in 28.89s
 ruff:   All checks passed!
 ```
 
@@ -466,14 +466,74 @@ uv run --locked ruff check .
 
 통합 테스트는 실제 Node MCP subprocess와 Chromium을 시작하고 임시 디렉터리에 파일을 생성합니다. 실제 Groq/OpenAI API key나 외부 인터넷은 필요하지 않습니다. Playwright 통합 테스트는 loopback 포트를 열 수 있는 환경이어야 합니다.
 
-실제 모델과 네트워크까지 포함한 수동 smoke test:
+실제 모델과 네트워크까지 포함한 수동 smoke test는 아래의 **격리된 수동 검증
+절차**를 사용하십시오. 기존 `voice-action-test`, 기존 `.voice-action/undo.sqlite3`,
+기존 transcript 로그를 수동 확인에 재사용하거나 변경하지 마십시오.
+
+### 격리된 수동 검증 절차
+
+실제 provider의 자연어 응답은 비결정적입니다. 아래 절차의 판정 기준은 최종 문구가
+아니라 **파일 부작용, 승인 대기, 도구 호출 순서**입니다. API key와 네트워크가
+필요한 선택적 절차이며, 자동화된 전체 테스트의 필수 통과 조건은 아닙니다.
 
 ```sh
-uv run --locked python main.py \
-  --text "voice-action-test 폴더 파일 목록 보여줘"
+PROJECT="$(pwd)"
+TMP_ROOT="$(mktemp -d /tmp/voice-action-manual-root.XXXXXX)"
+TMP_WORKDIR="$(mktemp -d /tmp/voice-action-manual-work.XXXXXX)"
+TMP_LOG="$TMP_WORKDIR/transcript.jsonl"
+printf '%s\n' '원본 문서입니다.' > "$TMP_ROOT/source.txt"
+printf '%s\n' '덮어쓰기 전 내용' > "$TMP_ROOT/overwrite.txt"
+printf '%s\n' '후보 A' > "$TMP_ROOT/회의록-1.md"
+printf '%s\n' '후보 B' > "$TMP_ROOT/회의록-2.md"
 ```
 
-이 smoke test에는 유효한 API key와 provider 네트워크 연결이 필요합니다.
+이후 각 명령은 아래 형식으로 실행합니다. `TMP_WORKDIR`에서 실행하므로 Undo
+journal은 `$TMP_WORKDIR/.voice-action/undo.sqlite3`에만 생성되고, 기존 journal은
+사용하지 않습니다.
+
+```sh
+cd "$TMP_WORKDIR"
+PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/main.py" \
+  --interactive --allowed-directory "$TMP_ROOT"
+```
+
+대화형 세션에서 다음 시나리오를 **서로 분리해** 확인합니다.
+
+| 시나리오 | 입력 및 판정할 안전 불변식 |
+|---|---|
+| 목록 | `파일 목록 보여줘`; `filesystem__list_directory`만 자동 실행됩니다. |
+| 읽기 | `source.txt 내용을 읽어줘`; 허용 root 안 파일만 읽습니다. |
+| 파일 요약 | `source.txt를 요약해줘`; 읽기 후 최종 응답을 확인합니다. |
+| 다중 후보 clarification | `회의록 요약해줘`; 읽기 전에 두 후보의 선택 대기가 나타나야 합니다. |
+| create 승인 대기 | `source.txt를 요약해 create.txt에 저장해줘`; 승인 입력 없이 EOF(Ctrl-D)로 종료한 뒤 `create.txt`가 없어야 합니다. |
+| overwrite 승인 대기 | `source.txt를 요약해 overwrite.txt에 저장해줘`; 승인 입력 없이 EOF(Ctrl-D)로 종료한 뒤 사전 내용이 유지되어야 합니다. |
+| 웹 읽기 | `https://example.com 페이지를 읽어줘`; `web__browser_navigate` 뒤 `web__browser_snapshot` 순서만 허용됩니다. |
+| 웹 저장 승인 대기 | `https://example.com 페이지를 읽어 web-summary.md에 저장해줘`; navigation → snapshot → 승인 대기이며, 승인 없이 파일이 없어야 합니다. |
+| 활성 앱 | `현재 활성 앱을 알려줘`; macOS Accessibility 권한이 있을 때 한 번의 조회 결과와 최종 결과가 일치해야 합니다. |
+| 격리 Undo | 새 세션에서 임시 root의 `undo-target.txt` 쓰기를 **승인**한 뒤 `undo`를 입력합니다. 해당 임시 journal의 최신 항목만 되돌리고 대상 파일만 원래 상태로 복원/삭제해야 합니다. |
+
+웹 시나리오는 외부 HTTPS 접근이 가능한 환경에서만 수행합니다. 접근할 수 없거나
+navigation/snapshot이 실패하면 write가 호출되지 않는 것이 올바른 판정입니다.
+
+### 수동 transcript 기록
+
+`llm_mcp_transcript.py`는 `--log-file` 경로(기본값: `llm_mcp_transcript.log`)에
+실행 하나당 한 줄의 JSONL record를 append합니다. 기본 기록은 run ID, 시작·종료
+시각, 상태, 도구명, 문자열 길이와 digest만 포함하며, 사용자 원문·파일 본문·웹
+snapshot·raw tool arguments/results는 남기지 않습니다.
+
+```sh
+PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/llm_mcp_transcript.py" \
+  "test1.md를 요약해줘" \
+  --allowed-directory "$TMP_ROOT" \
+  --log-file "$TMP_LOG"
+```
+
+개발 진단에서만 `--include-raw-payloads`를 명시하면 raw model messages와 tool
+arguments/results를 기록합니다. 이 옵션은 민감한 파일·웹 내용을 로그에 남길 수
+있으므로 공유 로그나 실제 비밀값이 있는 요청에는 사용하지 마십시오. API key 및
+인증정보로 보이는 필드는 redaction 대상이지만, raw 기록 자체를 안전한 저장소로
+간주해서는 안 됩니다.
 
 ## 문제 해결
 

@@ -67,13 +67,32 @@ def write_client(config):
         ("write_file", {}),
         ("list_directory", {}),
         ("list_directory", {"path": 12}),
-        ("list_directory", {"path": "relative"}),
     ],
 )
 async def test_rejected_before_mcp(config, name, args):
     mcp = client(config)
     with pytest.raises(ToolRejectedError):
         await mcp.call_tool(name, args)
+    mcp._session.call_tool.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "relative",
+        "",
+        lambda config: f" {config.allowed_directories[0]} ",
+    ],
+)
+async def test_relative_empty_and_whitespace_wrapped_paths_are_rejected_before_mcp(
+    config, path
+):
+    mcp = client(config)
+    path = path(config) if callable(path) else path
+
+    with pytest.raises(ToolRejectedError, match="절대경로"):
+        await mcp.call_tool("list_directory", {"path": path})
+
     mcp._session.call_tool.assert_not_awaited()
 
 

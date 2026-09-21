@@ -95,7 +95,7 @@ async def test_listing_finishes_without_second_llm_round(config):
     mcp.list_tools.assert_awaited_once()
 
 
-async def test_active_app_read_only_tool_finishes_without_filesystem_or_web(config):
+async def test_active_app_success_returns_deterministic_value_without_repeat(config):
     mcp = fake_mcp()
     mcp.list_tools.return_value = [
         ToolDefinition(
@@ -106,18 +106,16 @@ async def test_active_app_read_only_tool_finishes_without_filesystem_or_web(conf
     ]
     mcp.call_tool.return_value = ToolResult(True, "Finder")
     model = AsyncMock()
-    model.generate.side_effect = [
-        ModelTurn(
-            None,
-            [ToolCall("active-app", "macos__get_active_app", "{}")],
-        ),
-        ModelTurn("현재 활성 앱은 Finder입니다.", []),
-    ]
+    model.generate.return_value = ModelTurn(
+        None,
+        [ToolCall("active-app", "macos__get_active_app", "{}")],
+    )
 
     outcome = await Planner(config, mcp, model).run("현재 활성 앱 이름 알려줘")
 
     assert outcome == Completed("현재 활성 앱은 Finder입니다.")
     mcp.call_tool.assert_awaited_once_with("macos__get_active_app", {})
+    assert model.generate.await_count == 1
     assert all(
         not call.args[0].startswith(("filesystem__", "web__"))
         for call in mcp.call_tool.await_args_list
@@ -557,6 +555,86 @@ async def test_web_snapshot_then_filesystem_write_is_sequential(config):
     )
 
 
+async def test_web_save_clarification_and_early_response_continue_to_approval(config):
+    gateway = fake_mcp()
+    url = "https://example.test/"
+    target = str(config.allowed_directories[0] / "summary.md")
+    gateway.list_tools.return_value = [
+        ToolDefinition("web__browser_navigate", "Navigate", {"type": "object"}),
+        ToolDefinition("web__browser_snapshot", "Snapshot", {"type": "object"}),
+        ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+    ]
+    gateway.call_tool.side_effect = [
+        web_result(url),
+        web_result(url, "PAGE TEXT"),
+        ToolResult(True, "summary.md created"),
+    ]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [],
+            ClarificationRequest(
+                "어떤 형식으로 저장할까요?",
+                ("요약",),
+                "edit_criteria",
+            ),
+        ),
+        ModelTurn("이 작업은 지원하지 않습니다.", []),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "navigate",
+                    "web__browser_navigate",
+                    json.dumps({"url": url}),
+                )
+            ],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "write",
+                    "filesystem__write_file",
+                    json.dumps({"path": target, "content": "페이지 요약"}),
+                )
+            ],
+        ),
+        ModelTurn("summary.md에 저장했습니다.", []),
+    ]
+
+    planner = Planner(config, gateway, model)
+    pending = await planner.run(f"{url} 내용을 summary.md로 저장해줘")
+
+    assert isinstance(pending, ApprovalRequired)
+    assert [item.args[0] for item in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+    ]
+    assert all(
+        call.kwargs["allow_clarification"] is False
+        for call in model.generate.await_args_list[:5]
+    )
+    assert [tool.name for tool in model.generate.await_args_list[0].args[1]] == [
+        "web__browser_navigate"
+    ]
+    assert [tool.name for tool in model.generate.await_args_list[3].args[1]] == [
+        "web__browser_snapshot"
+    ]
+    assert [tool.name for tool in model.generate.await_args_list[4].args[1]] == [
+        "filesystem__write_file"
+    ]
+
+    assert await planner.approve(pending.context) == Completed("summary.md에 저장했습니다.")
+    assert [item.args[0] for item in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+        "filesystem__write_file",
+    ]
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -695,7 +773,13 @@ async def test_web_failure_blocks_later_filesystem_write(config, failed_tool):
 
 async def test_web_command_cannot_write_before_navigation_and_snapshot(config):
     gateway = fake_mcp()
+    gateway.list_tools.return_value = [
+        ToolDefinition("web__browser_navigate", "Navigate", {"type": "object"}),
+        ToolDefinition("web__browser_snapshot", "Snapshot", {"type": "object"}),
+        ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+    ]
     target = str(config.allowed_directories[0] / "summary.md")
+    gateway.call_tool.side_effect = [web_result("https://example.test/"), web_result("https://example.test/")]
     model = AsyncMock()
     model.generate.side_effect = [
         ModelTurn(
@@ -708,15 +792,38 @@ async def test_web_command_cannot_write_before_navigation_and_snapshot(config):
                 )
             ],
         ),
-        ModelTurn("차단했습니다.", []),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "navigate",
+                    "web__browser_navigate",
+                    json.dumps({"url": "https://example.test/"}),
+                )
+            ],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "write-after-snapshot",
+                    "filesystem__write_file",
+                    json.dumps({"path": target, "content": "allowed only after snapshot"}),
+                )
+            ],
+        ),
     ]
 
     outcome = await Planner(config, gateway, model).run(
         "https://example.test/ 내용을 summary.md로 저장해줘"
     )
 
-    assert outcome == Completed("차단했습니다.")
-    gateway.call_tool.assert_not_awaited()
+    assert isinstance(outcome, ApprovalRequired)
+    assert [item.args[0] for item in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+    ]
 
 
 async def test_redirect_to_forbidden_target_blocks_snapshot_and_write(config):
@@ -819,7 +926,7 @@ async def test_web_output_cannot_expand_write_or_navigation_scope(config):
     ]
 
 
-async def test_tool_error_is_returned_to_same_model(config):
+async def test_rejected_path_error_allows_exact_allowed_root_recovery(config):
     mcp = fake_mcp()
     mcp.call_tool.side_effect = [ToolRejectedError("허용 경로 밖 접근"), ToolResult(True, "ok")]
     model = AsyncMock()
@@ -843,9 +950,43 @@ async def test_tool_error_is_returned_to_same_model(config):
     ]
     result = await Planner(config, mcp, model).run("목록")
     assert result == Completed("재시도 완료")
+    assert [item.args for item in mcp.call_tool.await_args_list] == [
+        ("filesystem__list_directory", {"path": "/outside"}),
+        (
+            "filesystem__list_directory",
+            {"path": str(config.allowed_directories[0])},
+        ),
+    ]
     assert any(
         message["role"] == "tool" and "허용 경로 밖" in message["content"]
         for message in model.generate.await_args_list[1].args[0]
+    )
+    assert "정확한 절대경로" in model.generate.await_args_list[0].args[0][0][
+        "content"
+    ]
+
+
+async def test_rejected_paths_stop_at_tool_round_limit_without_successful_execution(config):
+    config = replace(config, max_tool_rounds=2)
+    mcp = fake_mcp()
+    mcp.call_tool.side_effect = [
+        ToolRejectedError("도구 경로는 절대경로여야 합니다."),
+        ToolRejectedError("도구 경로는 절대경로여야 합니다."),
+    ]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        call(config, json.dumps({"path": "relative"})),
+        call(config, json.dumps({"path": ""})),
+    ]
+
+    outcome = await Planner(config, mcp, model).run("목록")
+
+    assert isinstance(outcome, Error)
+    assert "2 iterations" in outcome.message
+    assert mcp.call_tool.await_count == 2
+    assert all(
+        item.args[1]["path"] in {"relative", ""}
+        for item in mcp.call_tool.await_args_list
     )
 
 
