@@ -326,7 +326,7 @@ async def test_search_runtime_discovery_allowlist_and_boundaries(config, tmp_pat
 
         result = await mcp.call_tool(
             "search_files",
-            {"path": str(root), "pattern": "*회의록*"},
+                            {"path": str(root), "pattern": "**/*회의록*"},
         )
         assert result.ok and str(first.resolve()) in result.text
         assert await mcp.validate_result_path(str(first)) == first.resolve()
@@ -344,6 +344,37 @@ async def test_search_runtime_discovery_allowlist_and_boundaries(config, tmp_pat
             await mcp.validate_result_path(str(outside))
 
 
+async def test_real_meeting_note_glob_is_recursive_and_returns_absolute_safe_paths(
+    config, tmp_path, processes
+):
+    root = config.allowed_directories[0]
+    nested = root / "nested"
+    await asyncio.to_thread(nested.mkdir)
+    expected = (root / "회의록-1.md", root / "회의록-2.txt", nested / "회의록-3.md")
+    for path in expected:
+        await asyncio.to_thread(path.write_text, "fixture", encoding="utf-8")
+    await asyncio.to_thread((root / "result.txt").write_text, "fixture", encoding="utf-8")
+    outside = tmp_path / "회의록-외부.md"
+    await asyncio.to_thread(outside.write_text, "fixture", encoding="utf-8")
+    await asyncio.to_thread((root / "escape").symlink_to, tmp_path, target_is_directory=True)
+    mcp = MCPClient(config, allowed_tools={"search_files"})
+
+    async with mcp.connect():
+        result = await mcp.call_tool(
+            "search_files",
+            {
+                "path": str(root),
+                "pattern": "**/*회의록*",
+                "excludePatterns": [],
+            },
+        )
+
+    assert result.ok
+    assert set(result.text.splitlines()) == {str(path.resolve()) for path in expected}
+    assert str(root / "result.txt") not in result.text
+    assert str(outside) not in result.text
+
+
 async def test_real_search_read_only_candidate_flow(config, processes):
     root = config.allowed_directories[0]
     candidate = root / "회의록-유일.md"
@@ -359,7 +390,7 @@ async def test_real_search_read_only_candidate_flow(config, processes):
                     "search",
                     "filesystem__search_files",
                     json.dumps(
-                        {"path": str(root), "pattern": "*회의록*"},
+                            {"path": str(root), "pattern": "**/*회의록*"},
                         ensure_ascii=False,
                     ),
                 )
@@ -409,7 +440,9 @@ async def test_real_multiple_search_candidates_stop_before_read(config, processe
             ToolCall(
                 "search",
                 "filesystem__search_files",
-                json.dumps({"path": str(root), "pattern": "*회의록*"}, ensure_ascii=False),
+                    json.dumps(
+                        {"path": str(root), "pattern": "**/*회의록*"}, ensure_ascii=False
+                    ),
             )
         ],
     )

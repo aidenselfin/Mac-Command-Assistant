@@ -1,34 +1,25 @@
-# Secrets
-voice-action/config.json
-
-# Runtime artifacts
-PHASE1/logs/*
-!PHASE1/logs/.gitkeep
-
-# Python
-Final/.venv/
+.venv/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+config.json
+voice-action/config.json
+*.env
+node_modules/
+.DS_Store
 *.py[cod]
 *.pyo
 *.pyd
 *.pdb
 *.egg-info/
-
-# macOS
-.DS_Store
-
-# Backup and editor files
+.playwright-mcp/
+.uv-cache/
+.voice-action/
+*.log
+PHASE1/logs/*
+!PHASE1/logs/.gitkeep
+Final/.venv/
 *~
 *.bak
 *.swp
 .vscode/
-
-# Voice Action v2 local configuration and generated dependencies
-config.json
-*.env
-node_modules/
-.venv/
-.pytest_cache/
-.ruff_cache/
-.playwright-mcp/
-.voice-action/

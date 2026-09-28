@@ -272,7 +272,7 @@ async def test_real_web_to_filesystem_planner_e2e(
             allow_local_web=True,
             undo_journal=undo_journal,
         )
-        pending = await planner.run(f"{local_page} 내용을 summary.md로 저장해줘")
+        pending = await planner.run(f"{local_page}을 내용을 summary.md에 저장해줘")
         assert isinstance(pending, ApprovalRequired)
         assert not await asyncio.to_thread(target.exists)
         assert [name for name, _arguments, _result in calls] == [
@@ -524,6 +524,56 @@ async def test_real_web_only_planner_e2e(
             "web__browser_snapshot",
         ]
         assert all(name != "filesystem__write_file" for name, _args, _result in calls)
+
+    assert len(mcp_processes) == 2
+    assert all(process.returncode is not None for process in mcp_processes)
+    await wait_for_process_exit(browser_pid)
+
+
+async def test_real_web_navigation_preserves_path_and_query_url(
+    config,
+    local_page,
+    mcp_processes,
+    tracked_browser,
+    monkeypatch,
+):
+    manager = integrated_manager(config)
+    url = f"{local_page}경로?q=hello!"
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("navigate", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn("페이지 읽기 완료", []),
+    ]
+    calls = []
+
+    async with manager.connect():
+        original_call_tool = manager.call_tool
+
+        async def record_call(name, arguments):
+            result = await original_call_tool(name, arguments)
+            calls.append((name, arguments, result))
+            return result
+
+        monkeypatch.setattr(manager, "call_tool", record_call)
+        outcome = await Planner(
+            config,
+            manager,
+            model,
+            allow_local_web=True,
+        ).run(f"{url} 을 읽어줘")
+        await wait_for_file(tracked_browser)
+        browser_pid = int(await asyncio.to_thread(tracked_browser.read_text))
+
+        assert outcome == Completed("페이지 읽기 완료")
+        assert calls[0][:2] == ("web__browser_navigate", {"url": url})
+        assert [name for name, _arguments, _result in calls] == [
+            "web__browser_navigate",
+            "web__browser_snapshot",
+        ]
 
     assert len(mcp_processes) == 2
     assert all(process.returncode is not None for process in mcp_processes)

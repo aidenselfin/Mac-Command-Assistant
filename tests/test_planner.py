@@ -21,6 +21,8 @@ from voice_action.planner import (
     PlannerEventType,
     PlannerTiming,
     ToolCall,
+    _extract_user_urls,
+    _requires_web_save_flow,
 )
 from voice_action.planner import Planner as CorePlanner
 from voice_action.runtime import RuntimeController
@@ -74,6 +76,310 @@ def web_result(url, snapshot="page content", *, ok=True):
         ok,
         f"### Page state\n- Page URL: {url}\n- Page Snapshot:\n{snapshot}",
     )
+
+
+@pytest.mark.parametrize(
+    ("user_text", "expected_urls"),
+    [
+        (
+            "https://example.com을 읽고 summary.md에 저장해줘",
+            ("https://example.com",),
+        ),
+        (
+            "https://example.com, 다음 문장을 읽어줘.",
+            ("https://example.com",),
+        ),
+        ("https://example.com. 다음 문장을 읽어줘", ("https://example.com",)),
+        ("https://example.com 다음 문장을 읽어줘", ("https://example.com",)),
+        (
+            "(https://example.com/path(foo))를 읽어줘",
+            ("https://example.com/path(foo)",),
+        ),
+        (
+            "https://example.com/한글?값=보존 과 https://second.example/path",
+            ("https://example.com/한글?값=보존", "https://second.example/path"),
+        ),
+        (
+            "https://예시.한국/경로?encoded=%EA%B0%92 을 읽어줘",
+            ("https://예시.한국/경로?encoded=%EA%B0%92",),
+        ),
+        ("https://example.com/경로을 읽어줘", ()),
+    ],
+)
+def test_user_url_extraction_keeps_exact_safe_boundaries(user_text, expected_urls):
+    assert _extract_user_urls(user_text) == expected_urls
+
+
+@pytest.mark.parametrize(
+    ("user_text", "expected_urls"),
+    [
+        ("https://example.com/?q=hello! 을 읽어줘", ("https://example.com/?q=hello!",)),
+        ("https://example.com/사과 를 읽어줘", ("https://example.com/사과",)),
+    ],
+)
+def test_user_url_extraction_preserves_whitespace_delimited_url_suffixes(
+    user_text, expected_urls
+):
+    assert _extract_user_urls(user_text) == expected_urls
+
+
+async def test_quoted_save_phrase_is_explained_without_web_save_approval(config):
+    url = "https://example.com"
+    request = f'{url} 페이지에서 문구 "summary.md에 저장해줘"를 찾아 설명해줘'
+    gateway = fake_mcp()
+    gateway.call_tool.side_effect = [web_result(url), web_result(url, "PHRASE")]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("navigate", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn("문구를 설명했습니다.", []),
+    ]
+
+    outcome = await Planner(config, gateway, model).run(request)
+
+    assert not _requires_web_save_flow(request, (url,))
+    assert outcome == Completed("문구를 설명했습니다.")
+    assert [call.args[0] for call in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+    ]
+
+
+async def test_curly_quoted_save_phrase_is_explained_without_web_save_approval(config):
+    url = "https://example.com"
+    request = f"{url} 페이지에서 문구 “summary.md에 저장해줘”를 찾아 설명해줘"
+    gateway = fake_mcp()
+    gateway.call_tool.side_effect = [web_result(url), web_result(url, "PHRASE")]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("navigate", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn("문구를 설명했습니다.", []),
+    ]
+
+    outcome = await Planner(config, gateway, model).run(request)
+
+    assert not _requires_web_save_flow(request, (url,))
+    assert outcome == Completed("문구를 설명했습니다.")
+    assert [call.args[0] for call in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+    ]
+
+
+async def test_delimited_hangul_path_url_navigates_without_trimming(config):
+    url = "https://example.com/사과"
+    request = f"<{url}> 읽어줘"
+    gateway = fake_mcp()
+    gateway.call_tool.side_effect = [web_result(url), web_result(url, "PAGE TEXT")]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("navigate", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn("읽었습니다.", []),
+    ]
+
+    outcome = await Planner(config, gateway, model).run(request)
+
+    assert _extract_user_urls(request) == (url,)
+    assert outcome == Completed("읽었습니다.")
+    assert gateway.call_tool.await_args_list[0].args == (
+        "web__browser_navigate",
+        {"url": url},
+    )
+
+
+async def test_url_read_then_explicit_output_save_enters_web_save_approval(config):
+    url = "https://example.com"
+    target = config.allowed_directories[0] / "summary.md"
+    request = f"{url}을 읽고 summary.md에 저장해줘"
+    gateway = fake_mcp()
+    gateway.call_tool.side_effect = [web_result(url), web_result(url, "PAGE TEXT")]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("navigate", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "write",
+                    "filesystem__write_file",
+                    json.dumps({"path": str(target), "content": "summary"}),
+                )
+            ],
+        ),
+    ]
+
+    pending = await Planner(config, gateway, model).run(request)
+
+    assert _requires_web_save_flow(request, (url,))
+    assert isinstance(pending, ApprovalRequired)
+    assert not target.exists()
+    assert [call.args[0] for call in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+    ]
+
+
+def test_web_save_intent_distinguishes_quoted_filename_from_quoted_command():
+    url = "https://example.com"
+    assert _requires_web_save_flow(
+        f'{url} 페이지를 읽고 "summary.md"에 저장해줘', (url,)
+    )
+    assert not _requires_web_save_flow(
+        f'"{url} 페이지를 읽고 summary.md에 저장해줘"', (url,)
+    )
+
+
+@pytest.mark.parametrize(
+    ("user_text", "url", "wrong_url"),
+    [
+        (
+            "https://example.com/?q=hello! 을 읽어줘",
+            "https://example.com/?q=hello!",
+            "https://example.com/?q=hello",
+        ),
+        (
+            "https://example.com/사과 를 읽어줘",
+            "https://example.com/사과",
+            "https://example.com/사",
+        ),
+    ],
+)
+async def test_planner_rejects_model_navigation_to_trimmed_user_url(
+    config, user_text, url, wrong_url
+):
+    gateway = fake_mcp()
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("trimmed", "web__browser_navigate", json.dumps({"url": wrong_url}))],
+        ),
+        ModelTurn("탐색하지 않았습니다.", []),
+    ]
+
+    outcome = await Planner(config, gateway, model).run(user_text)
+
+    assert outcome == Completed("탐색하지 않았습니다.")
+    gateway.call_tool.assert_not_awaited()
+    assert "사용자 원문" in model.generate.await_args_list[1].args[0][-1]["content"]
+
+
+@pytest.mark.parametrize(
+    ("user_text", "url"),
+    [
+        ("https://example.com/?q=hello! 을 읽어줘", "https://example.com/?q=hello!"),
+        ("https://example.com/사과 를 읽어줘", "https://example.com/사과"),
+    ],
+)
+async def test_planner_navigates_exact_whitespace_delimited_user_url(config, user_text, url):
+    gateway = fake_mcp()
+    gateway.call_tool.side_effect = [web_result(url), web_result(url, "PAGE TEXT")]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("exact", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn("읽었습니다.", []),
+    ]
+
+    outcome = await Planner(config, gateway, model).run(user_text)
+
+    assert outcome == Completed("읽었습니다.")
+    assert [call.args for call in gateway.call_tool.await_args_list] == [
+        ("web__browser_navigate", {"url": url}),
+        ("web__browser_snapshot", {}),
+    ]
+
+
+async def test_web_file_comparison_reads_page_and_local_file_without_write_flow(config):
+    url = "https://example.com"
+    local_file = config.allowed_directories[0] / "test1.md"
+    gateway = fake_mcp()
+    gateway.call_tool.side_effect = [
+        web_result(url),
+        web_result(url, "PAGE TEXT"),
+        ToolResult(True, "LOCAL TEXT"),
+    ]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("navigate", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "read-local",
+                    "filesystem__read_text_file",
+                    json.dumps({"path": str(local_file)}),
+                )
+            ],
+        ),
+        ModelTurn("비교 결과", []),
+    ]
+
+    outcome = await Planner(config, gateway, model).run(
+        "https://example.com 페이지와 test1.md를 비교해줘"
+    )
+
+    assert outcome == Completed("비교 결과")
+    assert [call.args[0] for call in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+        "filesystem__read_text_file",
+    ]
+    assert all(
+        "filesystem__write_file" not in {tool.name for tool in call.args[1]}
+        for call in model.generate.await_args_list
+    )
+
+
+def test_web_save_intent_does_not_assume_local_file_save_is_page_output():
+    request = "https://example.com 페이지를 읽고 test1.md를 summary.md로 저장해줘"
+    assert not _requires_web_save_flow(request, ("https://example.com",))
+
+
+async def test_ambiguous_korean_url_boundary_is_rejected_before_navigation(config):
+    gateway = fake_mcp()
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "ambiguous",
+                    "web__browser_navigate",
+                    json.dumps({"url": "https://example.com/경로을"}),
+                )
+            ],
+        ),
+        ModelTurn("탐색하지 않았습니다.", []),
+    ]
+
+    outcome = await Planner(config, gateway, model).run("https://example.com/경로을 읽어줘")
+
+    assert outcome == Completed("탐색하지 않았습니다.")
+    gateway.call_tool.assert_not_awaited()
+    assert "사용자 원문" in model.generate.await_args_list[1].args[0][-1]["content"]
 
 
 async def test_listing_finishes_without_second_llm_round(config):
@@ -553,6 +859,41 @@ async def test_web_snapshot_then_filesystem_write_is_sequential(config):
     assert model.generate.await_args_list[3].args[0][-1]["content"] == (
         "summary.txt created"
     )
+
+
+async def test_korean_particle_url_web_save_reaches_snapshot_and_approval(config):
+    gateway = fake_mcp()
+    url = "https://example.com"
+    target = str(config.allowed_directories[0] / "summary.md")
+    gateway.call_tool.side_effect = [web_result(url), web_result(url, "PAGE TEXT")]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("navigate", "web__browser_navigate", json.dumps({"url": url}))],
+        ),
+        ModelTurn(None, [ToolCall("snapshot", "web__browser_snapshot", "{}")]),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "write",
+                    "filesystem__write_file",
+                    json.dumps({"path": target, "content": "summary"}),
+                )
+            ],
+        ),
+    ]
+
+    pending = await Planner(config, gateway, model).run(
+        "https://example.com을 읽고 summary.md에 저장해줘"
+    )
+
+    assert isinstance(pending, ApprovalRequired)
+    assert [call.args for call in gateway.call_tool.await_args_list] == [
+        ("web__browser_navigate", {"url": url}),
+        ("web__browser_snapshot", {}),
+    ]
 
 
 async def test_web_save_clarification_and_early_response_continue_to_approval(config):
@@ -1096,7 +1437,7 @@ async def test_auth_error_redacted(config):
     assert "secret-payload" not in str(error.value)
 
 
-def search_call(config, pattern="*회의록*"):
+def search_call(config, pattern="**/*회의록*"):
     return ModelTurn(
         None,
         [
@@ -1181,6 +1522,148 @@ async def test_no_search_candidate_finishes_without_read_or_write(config):
 
     assert isinstance(outcome, Completed)
     assert "찾지 못했습니다" in outcome.text
+    mcp.call_tool.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "invalid_arguments",
+    [
+        {"pattern": "*.txt"},
+        {"pattern": "회의록-1.md"},
+        {"pattern": "**/*회의록*", "excludePatterns": ["**/*회의록*"]},
+    ],
+)
+async def test_meeting_note_candidate_search_rejects_incomplete_model_scope(
+    config, invalid_arguments
+):
+    root = config.allowed_directories[0]
+    candidates = (root / "회의록-1.md", root / "회의록-2.md")
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(True, "\n".join(map(str, candidates)))
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "incomplete",
+                    "filesystem__search_files",
+                    json.dumps({"path": str(root), **invalid_arguments}),
+                )
+            ],
+        ),
+        search_call(config),
+    ]
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Clarification)
+    mcp.call_tool.assert_awaited_once_with(
+        "filesystem__search_files",
+        {"path": str(root), "pattern": "**/*회의록*"},
+    )
+    assert "tool_error" in model.generate.await_args_list[1].args[0][-1]["content"]
+
+
+async def test_meeting_note_candidate_search_requires_every_allowed_root(config, tmp_path):
+    first_root = config.allowed_directories[0]
+    second_root = tmp_path / "second-root"
+    second_root.mkdir()
+    config = replace(config, allowed_directories=(first_root, second_root))
+    first, second = first_root / "회의록-1.md", second_root / "회의록-2.md"
+    mcp = fake_mcp()
+    mcp.call_tool.side_effect = [ToolResult(True, str(first)), ToolResult(True, str(second))]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "incomplete-root",
+                    "filesystem__search_files",
+                    json.dumps(
+                        {"path": str(second_root), "pattern": "**/*회의록*"}
+                    ),
+                )
+            ],
+        ),
+        search_call(config),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "second-root",
+                    "filesystem__search_files",
+                    json.dumps(
+                        {"path": str(second_root), "pattern": "**/*회의록*"}
+                    ),
+                )
+            ],
+        ),
+    ]
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Clarification)
+    assert outcome.options == (str(first), str(second))
+    assert [call.args[1]["path"] for call in mcp.call_tool.await_args_list] == [
+        str(first_root),
+        str(second_root),
+    ]
+    assert "tool_error" in model.generate.await_args_list[1].args[0][-1]["content"]
+
+
+async def test_meeting_note_candidate_search_deduplicates_paths_before_clarification(config):
+    root = config.allowed_directories[0]
+    first, second = root / "회의록-1.md", root / "회의록-2.md"
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(True, f"{first}\n{first}\n{second}\n{second}")
+    model = AsyncMock()
+    model.generate.return_value = search_call(config)
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Clarification)
+    assert outcome.options == (str(first), str(second))
+
+
+async def test_meeting_note_candidate_search_truncation_stops_before_read_or_write(config):
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(True, "partial", truncated=True)
+    model = AsyncMock()
+    model.generate.return_value = search_call(config)
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Error)
+    assert "너무 커서" in outcome.message
+    assert [call.args[0] for call in mcp.call_tool.await_args_list] == [
+        "filesystem__search_files"
+    ]
+
+
+@pytest.mark.parametrize("via_symlink", [False, True])
+async def test_meeting_note_candidate_search_rejects_outside_and_symlink_results(
+    config, tmp_path, via_symlink
+):
+    root = config.allowed_directories[0]
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_candidate = outside / "회의록-외부.md"
+    outside_candidate.write_text("fixture", encoding="utf-8")
+    escape = root / "escape"
+    escape.symlink_to(outside, target_is_directory=True)
+    mcp = fake_mcp()
+    mcp.validate_result_path.side_effect = lambda value: Path(value).resolve(strict=True)
+    raw_candidate = escape / outside_candidate.name if via_symlink else outside_candidate
+    mcp.call_tool.return_value = ToolResult(True, str(raw_candidate))
+    model = AsyncMock()
+    model.generate.return_value = search_call(config)
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Error)
+    assert "허용 경로 밖" in outcome.message
     mcp.call_tool.assert_awaited_once()
 
 
