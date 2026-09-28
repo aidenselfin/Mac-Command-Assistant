@@ -54,6 +54,9 @@ FILESYSTEM_WRITE_TOOL = "filesystem__write_file"
 WEB_NAVIGATE_TOOL = "web__browser_navigate"
 WEB_SNAPSHOT_TOOL = "web__browser_snapshot"
 MACOS_ACTIVE_APP_TOOL = "macos__get_active_app"
+OTHER_TASK_PATTERN = re.compile(
+    r"파일|폴더|디렉터리|목록|읽|요약|저장|쓰|검색|찾|웹|페이지|https?://"
+)
 CONTENT_RESULT_TOOLS = frozenset(
     {FILESYSTEM_READ_TOOL, WEB_NAVIGATE_TOOL, WEB_SNAPSHOT_TOOL}
 )
@@ -157,6 +160,10 @@ class ApprovalContext:
     web_save_required: bool
     web_write_completed: bool
     prior_clarifications: int
+    model_calls: int
+    active_app_name: str | None
+    active_app_only: bool
+    write_completed: bool
 
     @property
     def digest(self) -> str:
@@ -387,6 +394,15 @@ def _extract_user_urls(text: str) -> tuple[str, ...]:
         if url is not None and url not in urls:
             urls.append(url)
     return tuple(urls)
+
+
+def _has_ambiguous_user_url(text: str) -> bool:
+    return any(
+        _unambiguous_user_url(
+            match.group(0), text[: match.start()], text[match.end() :]
+        ) is None
+        for match in USER_URL_PATTERN.finditer(text)
+    )
 
 
 def _unambiguous_user_url(
@@ -623,6 +639,10 @@ class _LoopState:
     web_write_completed: bool
     web_flow_corrections: int
     prior_clarifications: int
+    model_calls: int
+    active_app_name: str | None
+    active_app_only: bool
+    write_completed: bool
 
 
 class Planner:
@@ -673,6 +693,11 @@ class Planner:
         if not user_text.strip():
             raise PlannerError("명령이 비어 있습니다.")
         self.timing.reset()
+        if _has_ambiguous_user_url(user_text):
+            return Error(
+                "URL 경계가 모호합니다. 주소를 <https://example.com/경로>처럼 "
+                "꺾쇠로 감싸거나 URL 뒤에 공백을 넣어 다시 요청해 주세요."
+            )
         if _destructive_request(user_text):
             return Error(
                 "삭제 작업은 지원하지 않습니다. "
@@ -772,6 +797,12 @@ class Planner:
             web_write_completed=False,
             web_flow_corrections=0,
             prior_clarifications=prior_clarifications,
+            model_calls=0,
+            active_app_name=None,
+            active_app_only=(
+                "앱" in user_text and OTHER_TASK_PATTERN.search(user_text) is None
+            ),
+            write_completed=False,
         )
         return await self._continue(state)
 
@@ -810,7 +841,7 @@ class Planner:
         return Completed("파일 쓰기를 거절했습니다. 파일은 변경하지 않았습니다.")
 
     async def _continue(self, state: _LoopState) -> PlannerOutcome:
-        while state.iteration <= self.config.max_tool_rounds:
+        while True:
             if state.tool_calls:
                 outcome = await self._process_pending_calls(state)
                 if outcome is not None:
@@ -819,6 +850,15 @@ class Planner:
                 state.next_call_index = 0
                 state.iteration += 1
                 continue
+
+            if state.model_calls >= self.config.max_tool_rounds:
+                completion = (
+                    " 승인된 파일 변경은 완료되었습니다." if state.write_completed else ""
+                )
+                return Error(
+                    f"모델 호출 한도 초과 ({self.config.max_tool_rounds}회); "
+                    f"추가 모델 호출 없이 종료했습니다.{completion}"
+                )
 
             self._notify(PlannerEvent(PlannerEventType.PLANNING_STARTED, state.iteration))
             self.emit(
@@ -860,6 +900,12 @@ class Planner:
                         else state.tools
                     )
                 )
+            exposed_tools = [
+                tool
+                for tool in exposed_tools
+                if tool.name != MACOS_ACTIVE_APP_TOOL or state.active_app_name is None
+            ]
+            state.model_calls += 1
             try:
                 turn = await self.model.generate(
                     list(state.messages),
@@ -975,10 +1021,6 @@ class Planner:
             )
             state.tool_calls = tuple(turn.tool_calls)
             state.next_call_index = 0
-        return Error(
-            f"도구 호출 한도 초과 ({self.config.max_tool_rounds} iterations); "
-            "추가 파일 작업 없이 종료했습니다."
-        )
 
     async def _process_pending_calls(
         self, state: _LoopState
@@ -1013,6 +1055,17 @@ class Planner:
                     call,
                     state.iteration,
                     "tool_error: 도구 인자는 object여야 합니다.",
+                )
+                state.next_call_index += 1
+                continue
+
+            if call.name == MACOS_ACTIVE_APP_TOOL and state.active_app_name is not None:
+                state.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": state.active_app_name,
+                    }
                 )
                 state.next_call_index += 1
                 continue
@@ -1062,6 +1115,10 @@ class Planner:
     async def _policy_error(
         self, state: _LoopState, call: ToolCall, arguments: dict
     ) -> str | None:
+        if call.name == FILESYSTEM_WRITE_TOOL and (
+            state.user_urls or USER_URL_PATTERN.search(state.user_text)
+        ) and not state.web_save_required:
+            return "웹 내용의 파일 저장 요청이 확인되지 않아 파일을 쓸 수 없습니다."
         if (
             state.web_navigation_succeeded
             and not state.web_snapshot_succeeded
@@ -1098,6 +1155,8 @@ class Planner:
             if call.name != FILESYSTEM_SEARCH_TOOL:
                 return "모호한 파일 요청은 filesystem__search_files로 먼저 탐색해야 합니다."
             return self._candidate_search_arguments_error(state, arguments)
+        if state.read_only_candidate_request and call.name == FILESYSTEM_SEARCH_TOOL:
+            return "회의록 후보 탐색 범위가 이미 완료되었습니다."
         if state.read_only_candidate_request and call.name == FILESYSTEM_WRITE_TOOL:
             return "이 요청은 read-only 요약이므로 파일을 쓸 수 없습니다."
         if (
@@ -1128,6 +1187,8 @@ class Planner:
             },
             ensure_ascii=False,
         )
+        if set(arguments) - {"path", "pattern", "excludePatterns"}:
+            return f"회의록 후보 탐색에는 다음 조건만 사용할 수 있습니다: {safe_arguments}"
         if arguments.get("path") != str(expected_root):
             return (
                 "회의록 후보 탐색 root가 불완전하거나 범위와 다릅니다. "
@@ -1205,7 +1266,18 @@ class Planner:
             )
             return None
         if call.name == MACOS_ACTIVE_APP_TOOL:
-            return Completed(f"현재 활성 앱은 {result.text}입니다.")
+            name = result.text.strip()
+            if not name:
+                self._append_tool_error(
+                    state.messages,
+                    call,
+                    state.iteration,
+                    "tool_error: 현재 활성 앱 이름을 확인할 수 없습니다.",
+                )
+                return None
+            state.active_app_name = name
+            if state.active_app_only and len(state.tool_calls) == 1:
+                return Completed(f"현재 활성 앱은 {name}입니다.")
         if call.name in WEB_TOOLS:
             final_url = _page_url(result.text)
             error = _web_url_error(final_url, allow_local=self._allow_local_web)
@@ -1267,8 +1339,10 @@ class Planner:
             and state.single_search_candidate is not None
         ):
             state.candidate_read = True
-        elif call.name == FILESYSTEM_WRITE_TOOL and state.web_save_required:
-            state.web_write_completed = True
+        elif call.name == FILESYSTEM_WRITE_TOOL:
+            state.write_completed = True
+            if state.web_save_required:
+                state.web_write_completed = True
         state.messages.append(
             {"role": "tool", "tool_call_id": call.id, "content": result_text}
         )
@@ -1303,6 +1377,10 @@ class Planner:
             web_save_required=state.web_save_required,
             web_write_completed=state.web_write_completed,
             prior_clarifications=state.prior_clarifications,
+            model_calls=state.model_calls,
+            active_app_name=state.active_app_name,
+            active_app_only=state.active_app_only,
+            write_completed=state.write_completed,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -1341,6 +1419,10 @@ class Planner:
             web_write_completed=context.web_write_completed,
             web_flow_corrections=0,
             prior_clarifications=context.prior_clarifications,
+            model_calls=context.model_calls,
+            active_app_name=context.active_app_name,
+            active_app_only=context.active_app_only,
+            write_completed=context.write_completed,
         )
 
     async def _handle_search_result(
@@ -1356,7 +1438,11 @@ class Planner:
             validated = []
             for candidate in candidates:
                 path = await self._gateway.validate_result_path(candidate)
-                if not path.is_relative_to(search_root) or "회의록" not in path.name:
+                if (
+                    Path(candidate) != path
+                    or not path.is_relative_to(search_root)
+                    or "회의록" not in path.name
+                ):
                     raise ValueError("candidate is outside the verified meeting-note scope")
                 if path not in validated:
                     validated.append(path)

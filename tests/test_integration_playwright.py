@@ -211,6 +211,7 @@ async def test_filesystem_and_playwright_manager_pipeline(
     await wait_for_process_exit(browser_pid)
 
 
+@pytest.mark.parametrize("separator", ["을 ", " "])
 async def test_real_web_to_filesystem_planner_e2e(
     config,
     local_page,
@@ -218,6 +219,7 @@ async def test_real_web_to_filesystem_planner_e2e(
     tracked_browser,
     tmp_path,
     monkeypatch,
+    separator,
 ):
     manager = integrated_manager(config)
     target = config.allowed_directories[0] / "summary.md"
@@ -272,13 +274,17 @@ async def test_real_web_to_filesystem_planner_e2e(
             allow_local_web=True,
             undo_journal=undo_journal,
         )
-        pending = await planner.run(f"{local_page}을 내용을 summary.md에 저장해줘")
+        pending = await planner.run(
+            f"{local_page}{separator}내용을 summary.md에 저장해줘"
+        )
         assert isinstance(pending, ApprovalRequired)
         assert not await asyncio.to_thread(target.exists)
         assert [name for name, _arguments, _result in calls] == [
             "web__browser_navigate",
             "web__browser_snapshot",
         ]
+        assert calls[0][1] == {"url": local_page}
+        assert calls[1][1] == {}
         outcome = await planner.approve(pending.context)
         await wait_for_file(tracked_browser)
         browser_pid = int(await asyncio.to_thread(tracked_browser.read_text))

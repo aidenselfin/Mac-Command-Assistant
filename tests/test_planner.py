@@ -198,10 +198,11 @@ async def test_delimited_hangul_path_url_navigates_without_trimming(config):
     )
 
 
-async def test_url_read_then_explicit_output_save_enters_web_save_approval(config):
+@pytest.mark.parametrize("separator", ["을 ", " "])
+async def test_url_read_then_explicit_output_save_enters_web_save_approval(config, separator):
     url = "https://example.com"
     target = config.allowed_directories[0] / "summary.md"
-    request = f"{url}을 읽고 summary.md에 저장해줘"
+    request = f"{url}{separator}읽고 summary.md에 저장해줘"
     gateway = fake_mcp()
     gateway.call_tool.side_effect = [web_result(url), web_result(url, "PAGE TEXT")]
     model = AsyncMock()
@@ -228,9 +229,9 @@ async def test_url_read_then_explicit_output_save_enters_web_save_approval(confi
     assert _requires_web_save_flow(request, (url,))
     assert isinstance(pending, ApprovalRequired)
     assert not target.exists()
-    assert [call.args[0] for call in gateway.call_tool.await_args_list] == [
-        "web__browser_navigate",
-        "web__browser_snapshot",
+    assert [call.args for call in gateway.call_tool.await_args_list] == [
+        ("web__browser_navigate", {"url": url}),
+        ("web__browser_snapshot", {}),
     ]
 
 
@@ -358,28 +359,46 @@ def test_web_save_intent_does_not_assume_local_file_save_is_page_output():
     assert not _requires_web_save_flow(request, ("https://example.com",))
 
 
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "https://example.com 페이지와 test1.md를 비교해줘",
+        "https://example.com 페이지에서 summary.md 내용을 읽어줘",
+        "https://example.com 페이지를 summary.md에 저장하지 말고 읽어줘",
+        "https://example.com 페이지를 읽고 test1.md를 summary.md로 저장해줘",
+        'https://example.com 페이지에서 "summary.md에 저장해줘" 문구를 설명해줘',
+    ],
+)
+def test_web_save_intent_requires_page_output_relationship(user_text):
+    assert not _requires_web_save_flow(user_text, ("https://example.com",))
+
+
 async def test_ambiguous_korean_url_boundary_is_rejected_before_navigation(config):
     gateway = fake_mcp()
     model = AsyncMock()
-    model.generate.side_effect = [
-        ModelTurn(
-            None,
-            [
-                ToolCall(
-                    "ambiguous",
-                    "web__browser_navigate",
-                    json.dumps({"url": "https://example.com/경로을"}),
-                )
-            ],
-        ),
-        ModelTurn("탐색하지 않았습니다.", []),
-    ]
 
     outcome = await Planner(config, gateway, model).run("https://example.com/경로을 읽어줘")
 
-    assert outcome == Completed("탐색하지 않았습니다.")
+    assert isinstance(outcome, Error)
+    assert "꺾쇠" in outcome.message
+    model.generate.assert_not_awaited()
     gateway.call_tool.assert_not_awaited()
-    assert "사용자 원문" in model.generate.await_args_list[1].args[0][-1]["content"]
+
+
+async def test_ambiguous_url_cannot_be_bypassed_with_file_write(config):
+    gateway = fake_mcp()
+    model = AsyncMock()
+    target = config.allowed_directories[0] / "summary.md"
+
+    outcome = await Planner(config, gateway, model).run(
+        "https://example.com/경로을 읽고 summary.md에 저장해줘"
+    )
+
+    assert isinstance(outcome, Error)
+    assert "URL 경계" in outcome.message
+    assert not target.exists()
+    model.generate.assert_not_awaited()
+    gateway.call_tool.assert_not_awaited()
 
 
 async def test_listing_finishes_without_second_llm_round(config):
@@ -897,6 +916,7 @@ async def test_korean_particle_url_web_save_reaches_snapshot_and_approval(config
 
 
 async def test_web_save_clarification_and_early_response_continue_to_approval(config):
+    config = replace(config, max_tool_rounds=6)
     gateway = fake_mcp()
     url = "https://example.test/"
     target = str(config.allowed_directories[0] / "summary.md")
@@ -969,6 +989,7 @@ async def test_web_save_clarification_and_early_response_continue_to_approval(co
     ]
 
     assert await planner.approve(pending.context) == Completed("summary.md에 저장했습니다.")
+    assert model.generate.await_count == config.max_tool_rounds
     assert [item.args[0] for item in gateway.call_tool.await_args_list] == [
         "web__browser_navigate",
         "web__browser_snapshot",
@@ -1323,7 +1344,8 @@ async def test_rejected_paths_stop_at_tool_round_limit_without_successful_execut
     outcome = await Planner(config, mcp, model).run("목록")
 
     assert isinstance(outcome, Error)
-    assert "2 iterations" in outcome.message
+    assert "모델 호출 한도 초과 (2회)" in outcome.message
+    assert model.generate.await_count == 2
     assert mcp.call_tool.await_count == 2
     assert all(
         item.args[1]["path"] in {"relative", ""}
@@ -1343,7 +1365,7 @@ async def test_malformed_arguments_are_returned_to_model(config):
     assert "잘못된 도구 인자 JSON" in model.generate.await_args_list[1].args[0][-1]["content"]
 
 
-async def test_tool_loop_limit_stops_after_five_iterations(config):
+async def test_model_call_limit_stops_after_two_calls(config):
     config = replace(config, max_tool_rounds=2)
     mcp = fake_mcp()
     mcp.call_tool.return_value = ToolResult(True, "ok")
@@ -1351,7 +1373,7 @@ async def test_tool_loop_limit_stops_after_five_iterations(config):
     model.generate.return_value = call(config)
     outcome = await Planner(config, mcp, model).run("목록")
     assert isinstance(outcome, Error)
-    assert "2 iterations" in outcome.message
+    assert "모델 호출 한도 초과 (2회)" in outcome.message
     assert model.generate.await_count == 2
     assert mcp.call_tool.await_count == 2
 
@@ -1491,6 +1513,28 @@ async def test_single_search_candidate_auto_reads_without_clarification(config):
     assert not isinstance(outcome, Clarification)
 
 
+async def test_explicit_meeting_filename_reads_without_search(config):
+    candidate = config.allowed_directories[0] / "회의록-지정.md"
+    candidate.write_text("회의 내용", encoding="utf-8")
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(True, "회의 내용")
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("read", "filesystem__read_text_file", json.dumps({"path": str(candidate)}))],
+        ),
+        ModelTurn("요약 완료", []),
+    ]
+
+    assert await Planner(config, mcp, model).run("회의록-지정.md 요약해줘") == Completed(
+        "요약 완료"
+    )
+    mcp.call_tool.assert_awaited_once_with(
+        "filesystem__read_text_file", {"path": str(candidate)}
+    )
+
+
 async def test_multiple_search_candidates_clarify_before_any_read(config):
     root = config.allowed_directories[0]
     candidates = (root / "회의록-1.md", root / "회의록-2.md")
@@ -1531,13 +1575,17 @@ async def test_no_search_candidate_finishes_without_read_or_write(config):
         {"pattern": "*.txt"},
         {"pattern": "회의록-1.md"},
         {"pattern": "**/*회의록*", "excludePatterns": ["**/*회의록*"]},
+        {"pattern": "**/*회의록*", "unexpected": True},
     ],
 )
 async def test_meeting_note_candidate_search_rejects_incomplete_model_scope(
     config, invalid_arguments
 ):
     root = config.allowed_directories[0]
+    (root / "result.txt").write_text("검색 대상 아님", encoding="utf-8")
     candidates = (root / "회의록-1.md", root / "회의록-2.md")
+    for candidate in candidates:
+        candidate.write_text("회의 내용", encoding="utf-8")
     mcp = fake_mcp()
     mcp.call_tool.return_value = ToolResult(True, "\n".join(map(str, candidates)))
     model = AsyncMock()
@@ -1558,11 +1606,41 @@ async def test_meeting_note_candidate_search_rejects_incomplete_model_scope(
     outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
 
     assert isinstance(outcome, Clarification)
+    assert outcome.options == tuple(map(str, candidates))
     mcp.call_tool.assert_awaited_once_with(
         "filesystem__search_files",
         {"path": str(root), "pattern": "**/*회의록*"},
     )
     assert "tool_error" in model.generate.await_args_list[1].args[0][-1]["content"]
+    assert "**/*회의록*" in model.generate.await_args_list[1].args[0][-1]["content"]
+
+
+async def test_meeting_note_search_accepts_explicit_empty_exclusions(config):
+    root = config.allowed_directories[0]
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(True, "No matches found")
+    model = AsyncMock()
+    model.generate.return_value = ModelTurn(
+        None,
+        [
+            ToolCall(
+                "search",
+                "filesystem__search_files",
+                json.dumps(
+                    {"path": str(root), "pattern": "**/*회의록*", "excludePatterns": []}
+                ),
+            )
+        ],
+    )
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Completed)
+    assert "찾지 못했습니다" in outcome.text
+    mcp.call_tool.assert_awaited_once_with(
+        "filesystem__search_files",
+        {"path": str(root), "pattern": "**/*회의록*", "excludePatterns": []},
+    )
 
 
 async def test_meeting_note_candidate_search_requires_every_allowed_root(config, tmp_path):
@@ -1606,11 +1684,41 @@ async def test_meeting_note_candidate_search_requires_every_allowed_root(config,
 
     assert isinstance(outcome, Clarification)
     assert outcome.options == (str(first), str(second))
-    assert [call.args[1]["path"] for call in mcp.call_tool.await_args_list] == [
-        str(first_root),
-        str(second_root),
+    assert [call.args for call in mcp.call_tool.await_args_list] == [
+        ("filesystem__search_files", {"path": str(first_root), "pattern": "**/*회의록*"}),
+        ("filesystem__search_files", {"path": str(second_root), "pattern": "**/*회의록*"}),
     ]
     assert "tool_error" in model.generate.await_args_list[1].args[0][-1]["content"]
+
+
+@pytest.mark.parametrize("has_candidate", [False, True])
+async def test_meeting_note_zero_or_single_candidate_waits_for_remaining_root(
+    config, tmp_path, has_candidate
+):
+    first_root = config.allowed_directories[0]
+    second_root = tmp_path / "second-root"
+    second_root.mkdir()
+    config = replace(config, allowed_directories=(first_root, second_root))
+    candidate = first_root / "회의록-1.md"
+    if has_candidate:
+        candidate.write_text("회의 내용", encoding="utf-8")
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(
+        True, str(candidate) if has_candidate else "No matches found"
+    )
+    model = AsyncMock()
+    model.generate.side_effect = [
+        search_call(config),
+        ModelTurn("하나만 찾았습니다.", []),
+    ]
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Error)
+    mcp.call_tool.assert_awaited_once_with(
+        "filesystem__search_files",
+        {"path": str(first_root), "pattern": "**/*회의록*"},
+    )
 
 
 async def test_meeting_note_candidate_search_deduplicates_paths_before_clarification(config):
@@ -1664,6 +1772,24 @@ async def test_meeting_note_candidate_search_rejects_outside_and_symlink_results
 
     assert isinstance(outcome, Error)
     assert "허용 경로 밖" in outcome.message
+    mcp.call_tool.assert_awaited_once()
+
+
+async def test_meeting_note_candidate_search_rejects_symlink_inside_root(config):
+    root = config.allowed_directories[0]
+    target = root / "회의록-원본.md"
+    target.write_text("fixture", encoding="utf-8")
+    alias = root / "회의록-링크.md"
+    alias.symlink_to(target)
+    mcp = fake_mcp()
+    mcp.validate_result_path.side_effect = lambda value: Path(value).resolve(strict=True)
+    mcp.call_tool.return_value = ToolResult(True, str(alias))
+    model = AsyncMock()
+    model.generate.return_value = search_call(config)
+
+    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Error)
     mcp.call_tool.assert_awaited_once()
 
 
