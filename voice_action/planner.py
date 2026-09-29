@@ -802,7 +802,10 @@ class Planner:
             model_calls=model_calls,
             active_app_name=None,
             active_app_only=(
-                "앱" in user_text and OTHER_TASK_PATTERN.search(user_text) is None
+                "앱" in user_text
+                and OTHER_TASK_PATTERN.search(user_text) is None
+                and OUTPUT_FILENAME_PATTERN.search(user_text) is None
+                and WEB_SAVE_ACTION_PATTERN.search(user_text) is None
             ),
             write_completed=False,
         )

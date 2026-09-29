@@ -315,6 +315,27 @@ async def test_regression_standalone_active_app_still_completes_after_one_call(c
     gateway.call_tool.assert_awaited_once_with("macos__get_active_app", {})
 
 
+@pytest.mark.parametrize(
+    "command", ["현재 활성 앱 이름을 memo.txt에 기록해줘", "활성 앱과 test1.md 내용 보여줘"]
+)
+async def test_regression_active_app_with_named_file_is_not_a_standalone_lookup(
+    config, command
+):
+    gateway = fake_gateway()
+    gateway.call_tool.return_value = ToolResult(True, "Finder")
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(None, [ToolCall("active", "macos__get_active_app", "{}")]),
+        ModelTurn("Finder", []),
+    ]
+
+    outcome = await planner(config, gateway, model).run(command)
+
+    assert model.generate.await_count == 2
+    assert outcome == Completed("Finder")
+    gateway.call_tool.assert_awaited_once_with("macos__get_active_app", {})
+
+
 @pytest.mark.parametrize("same_turn", [True, False])
 async def test_regression_active_app_cache_skips_same_and_later_repeated_calls(
     config, same_turn
