@@ -955,8 +955,11 @@ class Planner:
                             "role": "tool",
                             "tool_call_id": request.call_id,
                             "content": (
-                                "clarification_error: 현재 요청에는 결과를 바꾸는 "
-                                "미해결 ambiguity가 없습니다. 원래 요청을 계속하세요."
+                                "clarification_error: 현재 요청에는 선택지로 물을 "
+                                "미해결 ambiguity가 없습니다. 도구로 완료할 수 있으면 "
+                                "원래 요청을 계속하세요. 원본 내용처럼 사용자만 제공할 수 "
+                                "있는 정보가 없으면 도구를 호출하거나 내용을 지어내지 말고 "
+                                "필요한 정보를 묻는 짧은 한국어 최종 응답을 반환하세요."
                             ),
                         }
                     )

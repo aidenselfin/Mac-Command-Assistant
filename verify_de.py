@@ -43,6 +43,11 @@ ORIGINAL = "원본 bytes 😀\r\n끝\n".encode()
 SOURCE = "회의 결정: 금요일 배포. 담당자는 민수.\n"
 BUDGET_WRITE_DONE = "승인된 파일 변경은 완료되었습니다."
 NOTHING_TO_UNDO = Completed("되돌릴 수 있는 최근 파일 쓰기가 없습니다.")
+PROVIDER_ERROR_CATEGORIES = (
+    ("not in request.tools", "tool_not_in_request"),
+    ("did not match schema", "schema_mismatch"),
+    ("Failed to call a function", "malformed_tool_call"),
+)
 
 
 def environment_cause(exc):
@@ -73,10 +78,15 @@ def error_summary(exc):
         if frame.filename == __file__
     ]
     code = getattr(cause, "code", None)
+    message = str(getattr(cause, "message", ""))
     return {
         "type": type(cause).__name__,
         "status_code": getattr(cause, "status_code", None),
         "code": code if isinstance(code, str) and len(code) <= 64 else None,
+        # A fixed category label only; the provider message itself is never stored.
+        "category": next(
+            (label for marker, label in PROVIDER_ERROR_CATEGORIES if marker in message), None
+        ),
         "harness_line": lines[-1] if lines else None,
     }
 
@@ -112,7 +122,9 @@ def code_baseline():
     return {
         "commit": git("rev-parse", "HEAD").strip(),
         "dirty": bool(git("status", "--porcelain").strip()),
-        "diff_sha256": hashlib.sha256(git("diff", "HEAD").encode()).hexdigest(),
+        "diff_sha256": hashlib.sha256(
+            (git("diff", "HEAD") + git("status", "--porcelain")).encode()
+        ).hexdigest(),
     }
 
 
@@ -122,6 +134,7 @@ class ObservedGateway:
     def __init__(self, gateway):
         self._gateway = gateway
         self.calls = []  # (name, "ok" | "error" | "rejected", elapsed_ms)
+        self.app_name = None  # in memory only, to check the value reached the user
 
     def __getattr__(self, name):
         return getattr(self._gateway, name)
@@ -132,6 +145,8 @@ class ObservedGateway:
         try:
             result = await self._gateway.call_tool(name, arguments)
             status = "ok" if result.ok else "error"
+            if result.ok and name == "macos__get_active_app":
+                self.app_name = result.text.strip()
             return result
         except ToolRejectedError:
             status = "rejected"
@@ -238,6 +253,8 @@ async def approve_and_undo(controller, outcome, scenario, root, before, journal,
     content = json.loads(outcome.context.prepared_write.canonical_arguments)["content"]
     if scenario == "overwrite_literal":
         assert content.strip() == "검증 완료"
+    if scenario == "app_write":
+        assert gateway.app_name and gateway.app_name in content
     expected = content.encode()
     assert expected and expected != (ORIGINAL if operation == "overwrite" else b"")
     row["approval"] = "approved"
@@ -289,7 +306,8 @@ async def check_read_only(controller, outcome, scenario, root, timing, gateway, 
             outcome = await controller.submit("2")
             row["resumed_outcome"] = type(outcome).__name__
             assert isinstance(outcome, Completed)
-            assert gateway.names("ok", "error").count("filesystem__read_text_file") == 1
+            # plan3 A.6 limits reads to the selected file; repeats are counted, not failed.
+            assert "filesystem__read_text_file" in gateway.names("ok")
         elif scenario != "meeting_many":
             assert isinstance(outcome, Completed)
             assert ("filesystem__read_text_file" in reached) == (scenario == "meeting_one")
@@ -312,6 +330,7 @@ async def check_read_only(controller, outcome, scenario, root, timing, gateway, 
     if scenario in {"active_app", "app_listing"}:
         # A permission error answered as text must not count as a lookup.
         assert "macos__get_active_app" not in gateway.names("error")
+        assert gateway.app_name and gateway.app_name in outcome.text
     if scenario == "active_app":
         assert len(timing.llm_round_ms) == 1  # deterministic single-lookup completion
     if scenario == "app_listing":
@@ -387,14 +406,18 @@ async def run_case(baseline, cwd, scenario, *, live=False):
     except Exception as exc:
         # No exception text, body, header, key, or raw provider response is recorded.
         row["error"] = error_summary(exc)
+        prefix = "web__" if scenario.startswith("web_") else (
+            "macos__" if "app" in scenario else None
+        )
         blocked = [
             name for name in (gateway.names("error") if gateway else [])
-            if name.startswith(("web__", "macos__"))
+            if prefix and name.startswith(prefix)
         ]
         cause = environment_cause(exc) or (f"tool_{blocked[0]}" if blocked else None)
         row["status"] = "environment_blocked" if cause else "functional_failure"
         row["blocked_by"] = cause
     finally:
+        os.chdir(previous_cwd)
         transcript.finish(row["status"])
         records = await asyncio.to_thread(read_records, transcript.path)
         events = records[0]["events"] if records else []
@@ -411,7 +434,7 @@ async def run_case(baseline, cwd, scenario, *, live=False):
             path_rejections=sum(status == "rejected" for _, status, _ in calls),
             tool_errors=metrics.tool_errors,
             policy_rejections=metrics.tool_errors - sum(
-                status == "error" for _, status, _ in calls
+                status != "ok" for _, status, _ in calls
             ),
             clarification_rejections=metrics.clarification_rejections,
             duplicate_calls=metrics.duplicates,
@@ -426,7 +449,6 @@ async def run_case(baseline, cwd, scenario, *, live=False):
             ),
             files_restored=after == before,
         )
-        os.chdir(previous_cwd)
     return row
 
 
@@ -440,7 +462,8 @@ async def run_acceptance(live, only=None, pause=0.0):
     settings = {name: getattr(baseline, name) for name in SETTING_FIELDS}
     if settings["base_url"]:
         parts = urlsplit(settings["base_url"])
-        settings["base_url"] = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        host = parts.hostname + (f":{parts.port}" if parts.port else "")
+        settings["base_url"] = urlunsplit((parts.scheme, host, parts.path, "", ""))
     report = {
         "settings": settings, "mode": "live" if live else "scripted",
         "code": await asyncio.to_thread(code_baseline), "pause_seconds": pause, "runs": [],

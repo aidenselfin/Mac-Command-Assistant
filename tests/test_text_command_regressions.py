@@ -315,6 +315,22 @@ async def test_regression_standalone_active_app_still_completes_after_one_call(c
     gateway.call_tool.assert_awaited_once_with("macos__get_active_app", {})
 
 
+async def test_regression_missing_source_rejection_lets_model_ask_instead_of_guessing(config):
+    gateway = fake_gateway()
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(None, [], ClarificationRequest("무엇을 요약할까요?", ("원본",), "edit_criteria")),
+        ModelTurn("요약할 원본 내용이나 파일을 알려주세요.", []),
+    ]
+
+    outcome = await planner(config, gateway, model).run("result.txt에 요약을 저장해줘")
+
+    assert outcome == Completed("요약할 원본 내용이나 파일을 알려주세요.")
+    rejection = model.generate.await_args_list[1].args[0][-1]["content"]
+    assert "지어내지 말고" in rejection and "최종 응답" in rejection
+    gateway.call_tool.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     "command", ["현재 활성 앱 이름을 memo.txt에 기록해줘", "활성 앱과 test1.md 내용 보여줘"]
 )
