@@ -1828,6 +1828,36 @@ async def test_interactive_number_resumes_pending_task(config):
     assert f"사용자가 선택한 파일: {second}" in resumed_messages[0]["content"]
 
 
+@pytest.mark.parametrize("limit", [1, 2, 3])
+async def test_candidate_selection_inherits_model_budget_and_timing(config, limit):
+    config = replace(config, max_tool_rounds=limit)
+    root = config.allowed_directories[0]
+    first, second = root / "회의록-1.md", root / "회의록-2.md"
+    first.write_text("첫 번째", encoding="utf-8")
+    second.write_text("두 번째", encoding="utf-8")
+    gateway = fake_mcp()
+    gateway.call_tool.side_effect = [
+        ToolResult(True, f"{first}\n{second}"), ToolResult(True, "두 번째 본문"),
+    ]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        search_call(config),
+        ModelTurn(None, [ToolCall(
+            "read", "filesystem__read_text_file", json.dumps({"path": str(second)}),
+        )]),
+        ModelTurn("선택한 회의록 요약", []),
+    ]
+    timing = PlannerTiming.empty()
+    controller = RuntimeController(Planner(config, gateway, model, timing=timing))
+    assert isinstance(await controller.submit("회의록 요약해줘"), Clarification)
+    outcome = await controller.submit("2번")
+
+    assert model.generate.await_count == limit
+    assert len(timing.llm_round_ms) == limit
+    assert isinstance(outcome, Completed if limit == 3 else Error)
+    assert gateway.call_tool.await_count == (1 if limit == 1 else 2)
+
+
 async def test_ambiguous_write_clarifies_before_model_or_mcp(config):
     mcp, model = fake_mcp(), AsyncMock()
 

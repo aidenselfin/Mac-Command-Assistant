@@ -7,7 +7,7 @@ import re
 import time
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from pathlib import Path
 from typing import Protocol
@@ -124,6 +124,7 @@ class ClarificationContext:
     kind: str
     options: tuple[str, ...]
     clarification_count: int
+    model_calls: int = 0
 
 
 @dataclass(frozen=True)
@@ -726,6 +727,7 @@ class Planner:
             resolution=resolution,
             prior_clarifications=context.clarification_count,
             selected_file=selection if context.kind == "file_candidate" else None,
+            model_calls=context.model_calls,
         )
 
     async def _run_loop(
@@ -735,8 +737,8 @@ class Planner:
         resolution: str | None = None,
         prior_clarifications: int = 0,
         selected_file: str | None = None,
+        model_calls: int = 0,
     ) -> PlannerOutcome:
-        self.timing.reset()
         tools = self._tools if self._tools is not None else await self._gateway.list_tools()
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
         resolution_rule = f"\n확정된 사용자 답변: {resolution}" if resolution else ""
@@ -797,7 +799,7 @@ class Planner:
             web_write_completed=False,
             web_flow_corrections=0,
             prior_clarifications=prior_clarifications,
-            model_calls=0,
+            model_calls=model_calls,
             active_app_name=None,
             active_app_only=(
                 "앱" in user_text and OTHER_TASK_PATTERN.search(user_text) is None
@@ -971,7 +973,8 @@ class Planner:
                     turn.clarification.question,
                     options,
                     ClarificationContext(
-                        state.user_text, turn.clarification.kind, options, count
+                        state.user_text, turn.clarification.kind, options, count,
+                        model_calls=state.model_calls,
                     ),
                 )
             if not turn.tool_calls:
@@ -1331,6 +1334,11 @@ class Planner:
                     state.candidate_search_candidates,
                     state.prior_clarifications,
                 )
+                if isinstance(search_outcome, Clarification):
+                    return replace(
+                        search_outcome,
+                        context=replace(search_outcome.context, model_calls=state.model_calls),
+                    )
                 if isinstance(search_outcome, (Clarification, Completed, Error)):
                     return search_outcome
                 state.single_search_candidate = search_outcome
