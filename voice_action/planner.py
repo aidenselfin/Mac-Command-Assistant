@@ -79,6 +79,10 @@ WEB_CONTENT_REFERENCE_PATTERN = re.compile(
     r"(?:페이지|웹|내용|본문|요약|(?:을|를)?\s*읽(?:고|어)|read)", re.IGNORECASE
 )
 QUOTE_PAIRS = {"'": "'", '"': '"', "“": "”", "‘": "’", "「": "」", "『": "』"}
+DELETE_ACTION_PATTERN = re.compile(
+    r"삭제(?=$|\s|해|하|할|를|요|[!?])|지워(?=$|\s|줘|주|요|[!?])|없애|"
+    r"(?<![\w./-])(?:delete|remove|erase|rm)(?![\w./-])", re.IGNORECASE
+)
 
 
 class ToolLoopLimitError(PlannerError):
@@ -352,16 +356,14 @@ MAX_CLARIFICATIONS = 2
 
 
 def _destructive_request(text: str) -> bool:
-    lowered = _without_quoted_text(text).casefold()
+    lowered = _without_quoted_text(text, action_pattern=DELETE_ACTION_PATTERN).casefold()
     if re.search(
         r"삭제\s*(?:하지|말|금지)|지우지|지워\s*(?:말|서는)|"
         r"(?:do\s+not|don't|never)\s+(?:delete|remove|erase)|삭제하지",
         lowered,
     ):
         return False
-    return re.search(
-        r"삭제|지워|없애|\b(?:delete|remove|erase|rm)\b", lowered
-    ) is not None
+    return DELETE_ACTION_PATTERN.search(lowered) is not None
 
 
 def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) -> bool:
@@ -638,7 +640,7 @@ def _requires_web_save_flow(user_text: str, user_urls: tuple[str, ...]) -> bool:
     return False
 
 
-def _without_quoted_text(text: str) -> str:
+def _without_quoted_text(text: str, *, action_pattern=WEB_SAVE_ACTION_PATTERN) -> str:
     """Mask quoted commands, while retaining an explicitly quoted filename."""
     masked = list(text)
     quote, start = None, None
@@ -647,7 +649,7 @@ def _without_quoted_text(text: str) -> str:
             quote, start = char, index
         elif quote is not None and char == QUOTE_PAIRS[quote]:
             content = text[start + 1 : index]
-            if WEB_SAVE_ACTION_PATTERN.search(content):
+            if action_pattern.search(content):
                 for quoted_index in range(start, index + 1):
                     masked[quoted_index] = " "
             else:

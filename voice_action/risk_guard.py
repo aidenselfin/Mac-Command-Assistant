@@ -11,8 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
-from voice_action.mcp_client import ToolRejectedError, ToolResult
 from voice_action.deletion import DELETE_TOOL
+from voice_action.mcp_client import ToolRejectedError, ToolResult
 from voice_action.undo import UndoJournal, UndoJournalError
 
 READ_ONLY_TOOLS = frozenset(
@@ -204,7 +204,9 @@ class RiskGuard:
                     await task  # 백업/삭제 작업이 끝날 때까지 journal을 닫지 않는다.
                     raise
             except (OSError, sqlite3.Error, UndoJournalError) as exc:
-                raise RiskGuardError("삭제 journal 오류입니다. 삭제 결과를 확인하고 Undo하세요.") from exc
+                raise RiskGuardError(
+                    "삭제 journal 오류입니다. 삭제 결과를 확인하고 Undo하세요."
+                ) from exc
             finally:
                 if on_finished is not None:
                     on_finished()

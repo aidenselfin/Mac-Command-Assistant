@@ -1,7 +1,6 @@
 """Local, approved file batches with durable backups in the existing journal."""
 
 import hashlib
-import json
 import os
 import stat
 import tempfile
@@ -226,10 +225,13 @@ class DeletionJournal:
                 restored += 1
             except (OSError, ToolRejectedError, UndoJournalError) as exc:
                 raise UndoJournalError(
-                    f"{restored}개 복원 후 중단했습니다. 복원된 파일은 유지됩니다. Undo로 재시도하세요."
+                    f"{restored}개 복원 후 중단했습니다. "
+                    "복원된 파일은 유지됩니다. Undo로 재시도하세요."
                 ) from exc
             finally:
                 os.unlink(temporary)
         with self.journal._connect() as connection:
-            connection.execute("UPDATE delete_batches SET status='undone' WHERE batch_id=?", (batch,))
+            connection.execute(
+                "UPDATE delete_batches SET status='undone' WHERE batch_id=?", (batch,)
+            )
         return f"삭제한 파일 {restored}개를 복원했습니다."

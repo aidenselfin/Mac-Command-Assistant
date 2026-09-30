@@ -1894,13 +1894,13 @@ async def test_cancelling_clarification_does_not_write(config):
     model.generate.assert_not_awaited()
 
 
-async def test_destructive_request_is_rejected_without_model_or_mcp(config):
+async def test_unspecified_delete_is_rejected_without_model_or_mcp(config):
     mcp, model = fake_mcp(), AsyncMock()
 
     outcome = await Planner(config, mcp, model).run("필요 없는 파일 전부 지워줘")
 
     assert isinstance(outcome, Error)
-    assert "지원하지 않습니다" in outcome.message
+    assert "지정해 주세요" in outcome.message
     assert "파일 목록" in outcome.message
     model.generate.assert_not_awaited()
     mcp.call_tool.assert_not_awaited()

@@ -2,7 +2,7 @@
 
 Voice Action AI는 자연어 명령을 제한된 MCP(Model Context Protocol) 도구 호출로 변환하는 안전 중심의 Python 애플리케이션입니다. 현재 구현은 이름과 달리 **음성 비서가 아니라 텍스트 명령 기반의 Multi-MCP 실행기**입니다. 터미널 단발 실행, 대화형 터미널, macOS Tkinter UI를 제공하며 다음 세 영역을 하나의 플래너에서 다룹니다.
 
-- 허용된 디렉터리 안의 파일 검색·목록 조회·텍스트 읽기·승인 기반 쓰기
+- 허용된 디렉터리 안의 파일 검색·목록 조회·텍스트 읽기·승인 기반 쓰기/일괄 삭제
 - 사용자가 명시한 HTTP(S) 페이지의 탐색과 읽기 전용 snapshot
 - macOS에서 현재 활성 앱 이름 조회
 
@@ -44,18 +44,41 @@ ruff:   All checks passed!
 | 모호한 회의록 선택 | `회의록 요약해줘` | 후보 1개면 자동 진행, 여러 개면 번호 선택 요청, 0개면 안전 종료 |
 | 새 텍스트 파일 작성 | `result.txt에 요약을 저장해줘` | 정확한 `write_file` 호출마다 승인 필요 |
 | 기존 텍스트 파일 덮어쓰기 | `result.txt 내용을 ...로 바꿔줘` | overwrite로 표시하고 승인 후 실행 |
+| 파일 삭제 | `voice-action-test/result.txt 파일을 삭제해줘` | 정확한 파일 경로를 표시하고 승인·백업 후 삭제 |
+| 일괄 삭제 | `voice-action-test 폴더의 *.txt 파일을 모두 삭제해줘` | 바로 아래 파일 목록 전체를 표시하고 한 번 승인 후 삭제 |
 | 웹 페이지 읽기 | `https://example.com 페이지를 읽고 요약해줘` | URL이 사용자 원문에 정확히 있어야 하며 navigation 뒤 snapshot 필수 |
 | 웹 내용을 파일로 저장 | `https://example.com을 읽고 summary.md에 저장해줘` | URL과 출력 파일명이 원문에 있어야 하며 snapshot 성공 후 승인 필요 |
 | 현재 활성 앱 조회 | `현재 활성 앱을 알려줘` | macOS에서만 제공, Accessibility 권한 필요 |
-| 최근 쓰기 Undo | 대화형 모드에서 `undo` 또는 `되돌리기` | IDLE 상태에서 최근 활성 journal 항목 하나만 처리 |
+| 최근 쓰기/삭제 Undo | 대화형 모드에서 `undo` 또는 `되돌리기` | 최근 쓰기 하나 또는 삭제 batch 전체 복원 |
 
-읽기 전용 도구는 자동 실행됩니다. 파일 쓰기는 항상 별도 승인 대상으로 분리됩니다.
+읽기 전용 도구는 자동 실행됩니다. 파일 쓰기와 삭제는 항상 별도 승인이 필요합니다.
 
-### 모드별 쓰기 동작
+삭제는 앱 내부 `local__delete_files` 도구로 실행합니다. 단일 파일, 명시한 여러 파일,
+또는 폴더와 glob 패턴(`*.txt`, `*`)을 지원합니다. 승인 화면에는 생략 없는 전체 대상 목록이
+표시되고, 그 목록이 고정됩니다. 승인 후 추가된 파일은 삭제하지 않습니다. 기존 대상의 내용이나
+식별 정보가 바뀌면 재승인을 요청하거나 삭제를 중단합니다. 한 번에 최대 100개, 백업 합계
+50 MiB이며 바이너리 파일도 백업할 수 있습니다. 폴더 자체와 심볼릭 링크, 재귀 삭제는 거부합니다.
+삭제 도중 일부 실패하면 삭제 개수를 표시하며, 이미 삭제된 파일은 Undo로 복원할 수 있습니다.
+파일 내용과 권한을 복원하며 ACL·확장 속성·원래 시각은 복원하지 않습니다.
+외부 프로그램이 검사와 unlink 사이에 대상을 바꾸는 경쟁을 완전히 막는 기능은 제공하지 않습니다.
+
+UI를 재실행한 뒤 입력 예시:
+
+```text
+voice-action-test/a.txt와 voice-action-test/b.txt 파일을 삭제해줘
+voice-action-test 폴더의 *.txt 파일을 모두 삭제해줘
+voice-action-test 폴더 바로 아래의 모든 파일을 삭제해줘
+```
+
+상단 `승인` 버튼으로 실행하며 `거절`/승인 대기 중 `취소`는 파일을 변경하지 않습니다.
+`Undo` 버튼 한 번으로 최근 삭제 batch를 복원합니다. 실행 중 취소한 경우 진행 중인 삭제
+batch와 journal 기록이 끝나기를 기다린 뒤 창을 닫습니다. 재실행 후 Undo로 복원할 수 있습니다.
+
+### 모드별 쓰기/삭제 동작
 
 | 실행 모드 | 쓰기 요청 처리 |
 |---|---|
-| `--text` | 승인 정보를 출력하고 종료합니다. 실제 파일은 쓰지 않습니다. |
+| `--text` | 승인 정보를 출력하고 종료합니다. 실제 파일을 쓰거나 삭제하지 않습니다. |
 | `--interactive` | `승인`, `approve`, `yes`, `y` 중 하나를 입력해야 실행합니다. |
 | `--ui` | 표시된 대상·작업·미리보기를 확인하고 `승인` 버튼을 눌러야 실행합니다. |
 
@@ -65,7 +88,7 @@ ruff:   All checks passed!
 
 다음 작업은 모델이 요청하더라도 애플리케이션 정책에서 차단되거나 도구 자체가 노출되지 않습니다.
 
-- 파일 또는 디렉터리 삭제
+- 디렉터리 삭제, 재귀 파일 삭제, 조건이나 대상을 지정하지 않은 삭제
 - 파일 이동, 이름 변경, 휴지통 이동
 - 디렉터리 생성
 - 여러 파일을 하나의 원자적 transaction으로 수정
@@ -283,6 +306,9 @@ macos__get_active_app
 
 MCP server가 추가 도구를 제공하더라도 자동으로 노출되지 않습니다. `delete_file`, `move_file`, Playwright action 도구 등은 발견되더라도 제외됩니다. 각 이름은 `namespace__tool` 형식이며 `MCPManager`가 원래 client로 순차 dispatch합니다.
 
+`local__delete_files`는 MCP server에 보내지 않는 앱 내부 도구이며 명시적인 삭제 요청에만
+모델에 노출됩니다. RiskGuard와 Undo journal이 경로 검증, 승인, 백업, 로컬 삭제를 처리합니다.
+
 ## 처리 흐름
 
 ```text
@@ -380,7 +406,8 @@ Clarification은 가상 application contract이며 MCP server에는 전송되지
 
 ## Undo
 
-Undo는 승인된 `filesystem__write_file`에만 적용됩니다. Planner나 MCP 도구로 노출하지 않고 runtime의 typed API가 직접 처리합니다.
+Undo는 승인된 `filesystem__write_file`과 `local__delete_files`에 적용됩니다.
+Planner나 MCP 도구로 노출하지 않고 runtime의 typed API가 직접 처리합니다.
 
 기본 journal:
 
@@ -403,10 +430,15 @@ Undo 동작:
 
 - create: 작성된 파일의 fingerprint가 정확히 같을 때만 삭제
 - overwrite: 현재 fingerprint가 정확히 같을 때만 같은 디렉터리의 임시 파일과 atomic replace로 원본 복원
+- delete: 삭제 batch의 원본 bytes와 파일 권한을 복원. 같은 경로에 새 파일이 있으면
+  덮어쓰지 않고 중단하며, 충돌을 해소한 뒤 Undo를 다시 시도할 수 있음
 - 외부 변경 감지: conflict로 기록하고 현재 파일 유지
 - symlink, non-regular file, allowed root 밖 경로: 변경 없이 거부
 - UTF-8이 아닌 기존 파일 overwrite: journal을 만들지 못하므로 쓰기도 차단
 - 한 번에 가장 최근 active entry 하나만 처리
+
+기존 `undo_entries` 테이블과 쓰기 이력은 유지합니다. 삭제는 같은 DB의 `delete_batches`와
+`delete_files`에 별도로 기록하며, 쓰기/삭제 중 가장 최근 활성 작업부터 Undo합니다.
 
 `--interactive`에서는 IDLE 상태에서 정확히 `undo` 또는 `되돌리기`를 입력합니다. UI에서는 IDLE일 때만 Undo 버튼이 활성화됩니다. `--text`는 자연어 Undo를 특별 처리하지 않습니다.
 
