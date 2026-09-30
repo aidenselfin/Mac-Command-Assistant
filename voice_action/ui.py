@@ -804,7 +804,7 @@ class TkView:
         self.output.insert("end", title + "\n", tag + "_title")
         self._output_original.append(title + "\n" + body)
         if tag == "result":
-            insert_markdown(self.output, body)
+            insert_markdown(self.output, body, follow=at_bottom)
         else:
             self.output.insert("end", body, tag)
         self.output.insert("end", "\n\n", tag)

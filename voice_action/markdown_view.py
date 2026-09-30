@@ -6,7 +6,7 @@ def render_markdown(text: str) -> str:
     return MarkdownIt("commonmark", {"html": False}).enable("table").render(text)
 
 
-def insert_markdown(output, text: str) -> None:
+def insert_markdown(output, text: str, *, follow: bool = True) -> None:
     from tkinterweb import HtmlFrame
 
     view = HtmlFrame(
@@ -30,4 +30,16 @@ def insert_markdown(output, text: str) -> None:
 
     output.bind("<Configure>", resize, add="+")
     resize()
+    index = output.index("end-1c")
     output.window_create("end", window=view)
+
+    def reveal():
+        if not output.winfo_exists():
+            return
+        # Embedded windows get their final layout only after Tk processes idle work.
+        view.configure(height=max(100, min(320, output.winfo_height() - 60)))
+        output.update_idletasks()
+        if follow:
+            output.yview(index)
+
+    output.after_idle(reveal)
