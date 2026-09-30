@@ -13,7 +13,6 @@ from typing import Protocol
 from openai import AsyncOpenAI
 
 from voice_action.macos_client import MacOSAXClient
-from voice_action.markdown_view import insert_markdown
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
 from voice_action.planner import (
@@ -528,7 +527,6 @@ class TkView:
         self.closed = False
         self._approval_ready = False
         self._approval_enabled = False
-        self._output_original = []
         self._has_output = False
         self._status = "STARTING"
         bg, surface, ink, muted = "#F5F6F8", "#FFFFFF", "#20242C", "#596273"
@@ -711,7 +709,6 @@ class TkView:
         ).pack(fill="x", pady=(8, 4))
         self.undo_button = ttk.Button(bottom, text="최근 변경 되돌리기", command=self._undo)
         self.undo_button.pack(anchor="e")
-        ttk.Button(bottom, text="결과 전체 복사", command=self._copy_output).pack(anchor="e")
         self.entry.bind("<Return>", self._enter)
         self.entry.bind("<<Paste>>", self._paste)
         self.entry.bind("<Control-v>", self._paste)
@@ -802,12 +799,7 @@ class TkView:
         at_bottom = self.output.yview()[1] >= 0.99
         self.output.configure(state="normal")
         self.output.insert("end", title + "\n", tag + "_title")
-        self._output_original.append(title + "\n" + body)
-        if tag == "result":
-            insert_markdown(self.output, body, follow=at_bottom)
-        else:
-            self.output.insert("end", body, tag)
-        self.output.insert("end", "\n\n", tag)
+        self.output.insert("end", body + "\n\n", tag)
         self.output.configure(state="disabled")
         if at_bottom:
             self.output.see("end")
@@ -868,16 +860,6 @@ class TkView:
             self._append("오류 발생", outcome.message, "error")
         elif isinstance(outcome, Busy):
             self._append("작업 중", outcome.message, "notice")
-
-    def _copy_text(self, text) -> str:
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
-        return "break"
-
-    def _copy_output(self, event=None) -> str:
-        if event is not None and self.output.tag_ranges("sel"):
-            return self._copy_text(self.output.get("sel.first", "sel.last"))
-        return self._copy_text("\n".join(self._output_original))
 
     def _fill_example(self, text: str) -> None:
         if self.presenter is not None and self.presenter.state is RuntimeState.IDLE:

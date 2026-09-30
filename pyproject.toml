@@ -11,8 +11,6 @@ dependencies = [
     "pyobjc-framework-Cocoa>=10,<13; sys_platform == 'darwin'",
     "python-dotenv>=1,<2",
     "rich>=14,<15",
-    "markdown-it-py>=3,<5",
-    "tkinterweb>=4,<5",
 ]
 
 [dependency-groups]

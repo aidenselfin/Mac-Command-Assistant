@@ -548,5 +548,3 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
         assert view.output.yview()[0] < 0.1
     finally:
         root.destroy()
-
-
