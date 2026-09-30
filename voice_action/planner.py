@@ -383,6 +383,9 @@ def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) ->
 def _delete_scope_error(arguments: dict, text: str, roots: tuple[Path, ...]) -> str | None:
     if not _destructive_request(text) or USER_URL_PATTERN.search(text):
         return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹 명령과 삭제를 분리하세요."
+    text = _without_quoted_text(text, action_pattern=DELETE_ACTION_PATTERN)
+    if re.search(r"제외|빼고|남기|\b(?:except|excluding|keep)\b", text, re.IGNORECASE):
+        return "제외 조건은 지원하지 않습니다. 삭제할 파일 목록이나 glob 패턴을 지정하세요."
     if "directory" in arguments:
         directory, pattern = arguments.get("directory"), arguments.get("pattern")
         if not isinstance(directory, str) or not isinstance(pattern, str):

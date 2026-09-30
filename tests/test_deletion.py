@@ -85,9 +85,7 @@ async def test_pattern_freezes_list_and_skips_directories(tmp_path):
     target.write_text("a")
     (root / "nested.txt").mkdir()
     (root / "keep.bin").write_bytes(b"keep")
-    prepared = await guard.prepare_write(
-        DELETE_TOOL, {"directory": str(root), "pattern": "*.txt"}
-    )
+    prepared = await guard.prepare_write(DELETE_TOOL, {"directory": str(root), "pattern": "*.txt"})
     added = root / "added.txt"
     added.write_text("new")
     assert prepared.targets == (str(target),)
@@ -124,16 +122,20 @@ async def test_boundaries_are_rejected_before_deletion(tmp_path, kind):
     assert target.exists()
 
 
-@pytest.mark.parametrize("arguments", [
-    {"paths": []}, {"paths": ["relative.txt"]}, {"paths": ["x", "x"]},
-    {"directory": "ROOT", "pattern": "**/*.txt"},
-    {"directory": "ROOT", "pattern": "../*"},
-    {"directory": "ROOT", "pattern": "*.missing"},
-])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"paths": []},
+        {"paths": ["relative.txt"]},
+        {"paths": ["x", "x"]},
+        {"directory": "ROOT", "pattern": "**/*.txt"},
+        {"directory": "ROOT", "pattern": "../*"},
+        {"directory": "ROOT", "pattern": "*.missing"},
+    ],
+)
 async def test_invalid_selectors_rejected(tmp_path, arguments):
     root, _journal, guard, _gateway = setup(tmp_path)
-    arguments = {key: str(root) if value == "ROOT" else value
-                 for key, value in arguments.items()}
+    arguments = {key: str(root) if value == "ROOT" else value for key, value in arguments.items()}
     with pytest.raises(ToolRejectedError):
         await guard.prepare_write(DELETE_TOOL, arguments)
 
@@ -231,8 +233,15 @@ async def test_cancel_waits_for_durable_delete_worker(tmp_path, monkeypatch):
     assert journal.undo_last_write().kind is UndoKind.DELETE_UNDONE
 
 
-@pytest.mark.parametrize("text", ["a.txt 삭제하지 말고 읽어줘", "delete.txt 읽어줘",
-                                  "don't delete a.txt", '"a.txt 삭제해줘"라는 문장을 읽어줘'])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a.txt 삭제하지 말고 읽어줘",
+        "delete.txt 읽어줘",
+        "don't delete a.txt",
+        '"a.txt 삭제해줘"라는 문장을 읽어줘',
+    ],
+)
 def test_non_delete_intent_does_not_enable_deletion(text):
     assert not _destructive_request(text)
 
@@ -244,9 +253,62 @@ def test_delete_scope_requires_user_intent_folder_and_pattern(tmp_path):
     assert _delete_scope_error(args, "다른 폴더의 *.txt 파일을 삭제해줘", (root,))
     assert _delete_scope_error(args, "allowed 폴더의 *.bin 파일을 삭제해줘", (root,))
     assert _delete_scope_error(args, "allowed 폴더의 *.txt 파일을 읽어줘", (root,))
-    assert _delete_scope_error({"directory": str(root), "pattern": "*"},
-                               "allowed 폴더 파일을 삭제해줘", (root,))
+    assert _delete_scope_error(
+        {"directory": str(root), "pattern": "*"}, "allowed 폴더 파일을 삭제해줘", (root,)
+    )
     assert _delete_scope_error({"paths": [str(root / "b.txt")]}, "a.txt 삭제해줘", (root,))
+    assert _delete_scope_error(args, "allowed 폴더의 *.txt 중 a.txt 제외하고 삭제해줘", (root,))
+    assert _delete_scope_error(
+        {"paths": [str(root / "a.txt")]}, '"a.txt 삭제해줘"라는 문장 말고 b.txt 삭제해줘', (root,)
+    )
+
+
+async def test_backup_failure_never_deletes_files(tmp_path, monkeypatch):
+    import sqlite3
+    from contextlib import contextmanager
+
+    root, journal, guard, _gateway = setup(tmp_path)
+    target = root / "a.txt"
+    target.write_text("original")
+    pending = await guard.prepare_write(DELETE_TOOL, {"paths": [str(target)]})
+
+    @contextmanager
+    def broken_connection():
+        raise sqlite3.OperationalError("injected backup failure")
+        yield
+
+    monkeypatch.setattr(journal, "_connect", broken_connection)
+    with pytest.raises(ToolRejectedError):
+        await guard.execute_approved(pending)
+    assert target.read_text() == "original"
+
+
+async def test_partial_restore_can_be_retried_without_overwriting_restored_files(
+    tmp_path, monkeypatch
+):
+    root, journal, guard, _gateway = setup(tmp_path)
+    a, b = root / "a.txt", root / "b.txt"
+    for path in (a, b):
+        path.write_text("original")
+    pending = await guard.prepare_write(DELETE_TOOL, {"paths": [str(a), str(b)]})
+    await guard.execute_approved(pending)
+    original_link = os.link
+
+    def fail_second(src, dst, *args, **kwargs):
+        if dst == b:
+            raise PermissionError("injected restore failure")
+        return original_link(src, dst, *args, **kwargs)
+
+    from voice_action.undo import UndoJournalError
+
+    monkeypatch.setattr(os, "link", fail_second)
+    with pytest.raises(UndoJournalError):
+        journal.undo_last_write()
+    assert a.read_text() == "original" and not b.exists()
+    a.write_text("user edited restored file")
+    monkeypatch.setattr(os, "link", original_link)
+    assert journal.undo_last_write().kind is UndoKind.DELETE_UNDONE
+    assert a.read_text() == "user edited restored file" and b.read_text() == "original"
 
 
 async def test_runtime_batch_approval_ui_list_and_undo_without_gateway_delete(config, tmp_path):
@@ -256,12 +318,12 @@ async def test_runtime_batch_approval_ui_list_and_undo_without_gateway_delete(co
         path.write_text("original")
     gateway, model = AsyncMock(), AsyncMock()
     gateway.list_tools.return_value = []
-    model.generate.return_value = ModelTurn(None, [ToolCall(
-        "delete", DELETE_TOOL, json.dumps({"paths": [str(a), str(b)]})
-    )])
-    planner = Planner(config, gateway, model, undo_journal=UndoJournal(
-        tmp_path / "undo.sqlite3", (root,)
-    ))
+    model.generate.return_value = ModelTurn(
+        None, [ToolCall("delete", DELETE_TOOL, json.dumps({"paths": [str(a), str(b)]}))]
+    )
+    planner = Planner(
+        config, gateway, model, undo_journal=UndoJournal(tmp_path / "undo.sqlite3", (root,))
+    )
     runtime = RuntimeController(planner)
     pending = await runtime.submit("a.txt와 b.txt를 삭제해줘")
     assert isinstance(pending, ApprovalRequired)
@@ -280,13 +342,17 @@ async def test_hallucinated_delete_on_read_request_never_executes(config, tmp_pa
     target = config.allowed_directories[0] / "a.txt"
     target.write_text("keep")
     model, gateway = AsyncMock(), AsyncMock()
-    model.generate.side_effect = [ModelTurn(None, [ToolCall(
-        "delete", DELETE_TOOL, json.dumps({"paths": [str(target)]})
-    )]), ModelTurn("읽기 요청입니다.", [])]
+    model.generate.side_effect = [
+        ModelTurn(None, [ToolCall("delete", DELETE_TOOL, json.dumps({"paths": [str(target)]}))]),
+        ModelTurn("읽기 요청입니다.", []),
+    ]
     gateway.list_tools.return_value = []
-    planner = Planner(config, gateway, model, undo_journal=UndoJournal(
-        tmp_path / "undo.sqlite3", config.allowed_directories
-    ))
+    planner = Planner(
+        config,
+        gateway,
+        model,
+        undo_journal=UndoJournal(tmp_path / "undo.sqlite3", config.allowed_directories),
+    )
     outcome = await planner.run("a.txt 읽어줘")
     assert isinstance(outcome, Completed) and target.read_text() == "keep"
     assert DELETE_TOOL not in [tool.name for tool in model.generate.await_args_list[0].args[1]]
@@ -296,10 +362,19 @@ async def test_hallucinated_delete_on_read_request_never_executes(config, tmp_pa
 async def test_missing_journal_blocks_deletion(config):
     model, gateway = AsyncMock(), AsyncMock()
     gateway.list_tools.return_value = []
-    model.generate.side_effect = [ModelTurn(None, [ToolCall(
-        "delete", DELETE_TOOL, json.dumps({"paths": [str(config.allowed_directories[0] /
-                                                       "한글 메모.txt")]})
-    )]), ModelTurn("삭제할 수 없습니다.", [])]
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "delete",
+                    DELETE_TOOL,
+                    json.dumps({"paths": [str(config.allowed_directories[0] / "한글 메모.txt")]}),
+                )
+            ],
+        ),
+        ModelTurn("삭제할 수 없습니다.", []),
+    ]
     outcome = await Planner(config, gateway, model).run('"한글 메모.txt" 삭제해줘')
     assert not isinstance(outcome, ApprovalRequired)
     assert (config.allowed_directories[0] / "한글 메모.txt").exists()

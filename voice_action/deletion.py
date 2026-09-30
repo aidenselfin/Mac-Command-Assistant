@@ -26,15 +26,22 @@ DELETE_DEFINITION = ToolDefinition(
     {
         "type": "object",
         "properties": {
-            "paths": {"type": "array", "items": {"type": "string"},
-                      "minItems": 1, "maxItems": MAX_DELETE_FILES, "uniqueItems": True},
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "maxItems": MAX_DELETE_FILES,
+                "uniqueItems": True,
+            },
             "directory": {"type": "string"},
             "pattern": {"type": "string", "minLength": 1},
         },
         "additionalProperties": False,
         "oneOf": [
-            {"required": ["paths"], "not": {"anyOf": [
-                {"required": ["directory"]}, {"required": ["pattern"]}]}},
+            {
+                "required": ["paths"],
+                "not": {"anyOf": [{"required": ["directory"]}, {"required": ["pattern"]}]},
+            },
             {"required": ["directory", "pattern"], "not": {"required": ["paths"]}},
         ],
     },
@@ -71,8 +78,12 @@ class DeletionJournal:
                 or not any(path.is_relative_to(root) for root in self.journal._roots)
                 or path.resolve(strict=not missing) != path
                 or path.is_symlink()
-                or path in {self.journal.path, Path(str(self.journal.path) + "-wal"),
-                            Path(str(self.journal.path) + "-shm")}
+                or path
+                in {
+                    self.journal.path,
+                    Path(str(self.journal.path) + "-wal"),
+                    Path(str(self.journal.path) + "-shm"),
+                }
             ):
                 raise ToolRejectedError("삭제 대상의 허용 경로/링크/Undo 경계를 위반했습니다.")
         except (OSError, RuntimeError, ValueError) as exc:
@@ -102,9 +113,15 @@ class DeletionJournal:
                 != (after.st_size, after.st_mtime_ns, after.st_ctime_ns)
             ):
                 raise ToolRejectedError("삭제 대상이 검사 중 변경되었습니다.")
-            snapshot = (str(path), metadata.st_dev, metadata.st_ino,
-                        metadata.st_mtime_ns, metadata.st_ctime_ns,
-                        stat.S_IMODE(metadata.st_mode), hashlib.sha256(data).hexdigest())
+            snapshot = (
+                str(path),
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+                stat.S_IMODE(metadata.st_mode),
+                hashlib.sha256(data).hexdigest(),
+            )
             return data, snapshot
         finally:
             os.close(descriptor)
@@ -147,8 +164,9 @@ class DeletionJournal:
             backups.append((data, current))
         batch = str(uuid.uuid4())
         with self.journal._connect() as connection:
-            connection.execute("INSERT INTO delete_batches VALUES (?, ?, 'active')",
-                               (batch, time.time_ns()))
+            connection.execute(
+                "INSERT INTO delete_batches VALUES (?, ?, 'active')", (batch, time.time_ns())
+            )
             connection.executemany(
                 "INSERT INTO delete_files VALUES (?, ?, ?, ?, ?, 'planned')",
                 [(batch, item[0], data, item[5], item[6]) for data, item in backups],
@@ -174,16 +192,22 @@ class DeletionJournal:
                 finally:
                     os.close(parent)
         except (OSError, ToolRejectedError, UndoJournalError) as exc:
-            return ToolResult(False, "", error=(
-                f"일괄 삭제 중단: {deleted}/{len(backups)}개 삭제됨. "
-                f"삭제된 파일은 Undo로 복원할 수 있습니다. ({type(exc).__name__})"
-            ))
+            return ToolResult(
+                False,
+                "",
+                error=(
+                    f"일괄 삭제 중단: {deleted}/{len(backups)}개 삭제됨. "
+                    f"삭제된 파일은 Undo로 복원할 수 있습니다. ({type(exc).__name__})"
+                ),
+            )
         return ToolResult(True, f"{deleted}개 파일을 삭제했습니다. Undo로 복원할 수 있습니다.")
 
     def _status(self, batch, path, status):
         with self.journal._connect() as connection:
-            connection.execute("UPDATE delete_files SET status=? WHERE batch_id=? AND path=?",
-                               (status, batch, path))
+            connection.execute(
+                "UPDATE delete_files SET status=? WHERE batch_id=? AND path=?",
+                (status, batch, path),
+            )
 
     def latest(self):
         with self.journal._connect() as connection:

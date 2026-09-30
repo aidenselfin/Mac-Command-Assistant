@@ -270,7 +270,7 @@ def error_message(exc: BaseException) -> str:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="허용 폴더 안의 텍스트 파일 작업")
+    parser = argparse.ArgumentParser(description="허용 폴더 안의 파일 읽기·쓰기·승인 기반 삭제")
     command_mode = parser.add_mutually_exclusive_group(required=True)
     command_mode.add_argument("--text")
     command_mode.add_argument("--interactive", action="store_true")
