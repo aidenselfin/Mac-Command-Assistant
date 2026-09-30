@@ -2,7 +2,6 @@
 
 import asyncio
 import queue
-import re
 import sys
 import threading
 from collections.abc import Callable
@@ -14,6 +13,7 @@ from typing import Protocol
 from openai import AsyncOpenAI
 
 from voice_action.macos_client import MacOSAXClient
+from voice_action.markdown_view import insert_markdown
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
 from voice_action.planner import (
@@ -515,66 +515,6 @@ class AsyncRuntimeWorker:
             self._shutdown_event.set()
 
 
-def output_blocks(value: str):
-    """Yield plain text or (headers, rows, original Markdown) table blocks."""
-    lines = value.splitlines(keepends=True)
-    text = []
-    fence = None
-    index = 0
-
-    def cells(line):
-        # ponytail: pipe tables only; use a Markdown parser if richer syntax is needed.
-        parts = re.split(r"(?<!\\)\|", line.strip())
-        if parts[0] == "":
-            parts.pop(0)
-        if parts and parts[-1] == "":
-            parts.pop()
-        return [part.strip().replace(r"\|", "|") for part in parts]
-
-    while index < len(lines):
-        line = lines[index]
-        marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-        if marker:
-            run = marker[1]
-            if fence is None:
-                fence = run
-            elif run[0] == fence[0] and len(run) >= len(fence) and not line.strip()[len(run):]:
-                fence = None
-            text.append(line)
-            index += 1
-            continue
-        if fence is None and "|" in line and index + 1 < len(lines):
-            headers = cells(line)
-            separators = cells(lines[index + 1])
-            if (
-                len(headers) == len(separators)
-                and len(headers) > 1
-                and all(re.fullmatch(r":?-{3,}:?", cell) for cell in separators)
-            ):
-                end = index + 2
-                rows = []
-                valid = True
-                while end < len(lines) and "|" in lines[end] and lines[end].strip():
-                    row = cells(lines[end])
-                    valid = valid and len(row) == len(headers)
-                    rows.append(row)
-                    end += 1
-                original = "".join(lines[index:end])
-                if valid:
-                    if text:
-                        yield "".join(text)
-                        text = []
-                    yield headers, rows, original
-                else:
-                    text.append(original)
-                index = end
-                continue
-        text.append(line)
-        index += 1
-    if text:
-        yield "".join(text)
-
-
 class TkView:
     """Tk widgets; every method is called only by the Tk main thread."""
 
@@ -863,11 +803,10 @@ class TkView:
         self.output.configure(state="normal")
         self.output.insert("end", title + "\n", tag + "_title")
         self._output_original.append(title + "\n" + body)
-        for block in output_blocks(body) if tag == "result" else (body,):
-            if isinstance(block, str):
-                self.output.insert("end", block, tag)
-            else:
-                self._insert_table(*block)
+        if tag == "result":
+            insert_markdown(self.output, body)
+        else:
+            self.output.insert("end", body, tag)
         self.output.insert("end", "\n\n", tag)
         self.output.configure(state="disabled")
         if at_bottom:
@@ -929,39 +868,6 @@ class TkView:
             self._append("오류 발생", outcome.message, "error")
         elif isinstance(outcome, Busy):
             self._append("작업 중", outcome.message, "notice")
-
-    def _insert_table(self, headers, rows, original) -> None:
-        from tkinter import ttk
-
-        frame = ttk.Frame(self.output)
-        columns = tuple(str(index) for index in range(len(headers)))
-        table = ttk.Treeview(
-            frame, columns=columns, show="headings", height=min(10, max(1, len(rows)))
-        )
-        for column, header in zip(columns, headers, strict=True):
-            table.heading(column, text=header)
-            table.column(column, width=160, minwidth=80, stretch=False)
-        for row in rows:
-            table.insert("", "end", values=row)
-        vertical = ttk.Scrollbar(frame, orient="vertical", command=table.yview)
-        horizontal = ttk.Scrollbar(frame, orient="horizontal", command=table.xview)
-        table.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
-        table.grid(row=0, column=0, sticky="nsew")
-        vertical.grid(row=0, column=1, sticky="ns")
-        horizontal.grid(row=1, column=0, sticky="ew")
-        frame.columnconfigure(0, weight=1)
-        frame.configure(width=max(100, self.output.winfo_width() - 20))
-        self.output.bind(
-            "<Configure>",
-            lambda event: frame.configure(width=max(100, event.width - 20)),
-            add="+",
-        )
-        frame.grid_propagate(False)
-        frame.configure(height=table.winfo_reqheight() + horizontal.winfo_reqheight())
-        for shortcut in ("<Control-c>", "<Command-c>"):
-            table.bind(shortcut, lambda event, text=original: self._copy_text(text))
-        self.output.window_create(self._tk.END, window=frame)
-        self.output.insert(self._tk.END, "\n")
 
     def _copy_text(self, text) -> str:
         self.root.clipboard_clear()

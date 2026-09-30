@@ -651,6 +651,35 @@ wheels = [
 ]
 
 [[package]]
+name = "tkinterweb"
+version = "4.25.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tkinterweb-tkhtml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/8e/57e7249a3d85459a2cd09f0c7476d9682383b7a3cd84e32e683a5ffad859/tkinterweb-4.25.4.tar.gz", hash = "sha256:ee1a458d693dff74b6e4cae47b5b64f741c591a72ef8172b104ceb241c98d2d8", size = 112965, upload-time = "2026-09-10T22:55:58.24Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/7e/9717c012bc9a2a36c8dd0f1a9b61b45d8b9bf46015fc973369ac933881bb/tkinterweb-4.25.4-py3-none-any.whl", hash = "sha256:22be8a4d914a93ade160d6155dc2bc54597cb59df8ef00f3936c02a2ae7ad38e", size = 116910, upload-time = "2026-09-10T22:55:56.951Z" },
+]
+
+[[package]]
+name = "tkinterweb-tkhtml"
+version = "2.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/85/cc7d3f77191324f503b46cd05fc17927dd48516cb845a69d70bbdfdad1d8/tkinterweb_tkhtml-2.2.2.tar.gz", hash = "sha256:48df89a28f4ab5692173a7146716cd34cb6cecf73f5e79803a4157ca960fa30b", size = 2121033, upload-time = "2026-09-26T15:10:45.388Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/83/d3c7f17885ddf42a9c573c60787081e7163693bc7725e04db7babed3f18c/tkinterweb_tkhtml-2.2.2-py3-none-any.whl", hash = "sha256:accd66e18816acc9899131a0c299b02ce03ec289d02e744af999602ee4fb063d", size = 2129094, upload-time = "2026-09-26T15:10:25.262Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/10/c593305e2328ed8754ff7cbec8eb66fb8fe1f954575f2169c4c5fbde94bb/tkinterweb_tkhtml-2.2.2-py3-none-linux_armv7l.whl", hash = "sha256:92178cc617231cc7b0281b4c600628004e48fc53774e53e7748e7e52519afebe", size = 153081, upload-time = "2026-09-26T15:10:27.077Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/7b/ced5156eab3fc220e8182f9e7de6fcb1e57a7622601e5653cb159cb43910/tkinterweb_tkhtml-2.2.2-py3-none-macosx_10_6_x86_64.whl", hash = "sha256:501aee6901ce8cc1a9b71b41f8cf5e407779324988a8dcf2a37d001552d23566", size = 285799, upload-time = "2026-09-26T15:10:28.671Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/18/e8441ba46f53d9e2095a33dfb37925a22f636420db5b631e82727eecd891/tkinterweb_tkhtml-2.2.2-py3-none-macosx_11_0_arm64.whl", hash = "sha256:d97a628b8b2b704faa994c8537d904d718835fce973cf620e6ac60334c58a668", size = 276982, upload-time = "2026-09-26T15:10:30.144Z" },
+    { url = "https://files.pythonhosted.org/packages/88/d9/c90532d06b99ad5fa689de6cb0c3de8b179cba20ffccb7396f02fe575906/tkinterweb_tkhtml-2.2.2-py3-none-manylinux1_i686.whl", hash = "sha256:133528b6ad680bb016feff344f8580d80bd227d6c38cd2b0cb7169d78488860d", size = 185530, upload-time = "2026-09-26T15:10:31.457Z" },
+    { url = "https://files.pythonhosted.org/packages/63/70/f336445e1192dc7fb620684fe0c990fa1ac27c1effa217e0e70fd58831fd/tkinterweb_tkhtml-2.2.2-py3-none-manylinux1_x86_64.whl", hash = "sha256:fe82da0971d62e9ab6438696463fe4af25567ff8c71df1e269dab8812c244d35", size = 363034, upload-time = "2026-09-26T15:10:32.952Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/fa/7908bc25f574e6d12d93fc03b841c17eebb97c88339704ef4ab0070d7378/tkinterweb_tkhtml-2.2.2-py3-none-manylinux2014_aarch64.whl", hash = "sha256:798c013a97c7bceabd6dd39477eb7786337e3dcba223efb6b2b7c7d7222ffffe", size = 169526, upload-time = "2026-09-26T15:10:34.358Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/d2/b83f685502769f4353668166ed9651b32052af74e9a5c9daaebb63b916df/tkinterweb_tkhtml-2.2.2-py3-none-win32.whl", hash = "sha256:39a04ef7c17037f38a39e5571bc53517528a975e4e97d9f929a027ed12a6d914", size = 269166, upload-time = "2026-09-26T15:10:37.556Z" },
+    { url = "https://files.pythonhosted.org/packages/91/fa/33b719c6b97efd9308f3d1e28dcb7d1d0094614438e7bff2758d8fcd2db9/tkinterweb_tkhtml-2.2.2-py3-none-win_amd64.whl", hash = "sha256:970569961e40e7e88d4fd5b848b593144c844d2702372320f640fbb964be75dc", size = 463616, upload-time = "2026-09-26T15:10:40.221Z" },
+]
+
+[[package]]
 name = "tqdm"
 version = "4.70.0"
 source = { registry = "https://pypi.org/simple" }
@@ -703,12 +732,14 @@ source = { virtual = "." }
 dependencies = [
     { name = "anyio" },
     { name = "jsonschema" },
+    { name = "markdown-it-py" },
     { name = "mcp" },
     { name = "openai" },
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
     { name = "python-dotenv" },
     { name = "rich" },
+    { name = "tkinterweb" },
 ]
 
 [package.dev-dependencies]
@@ -722,12 +753,14 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4,<5" },
     { name = "jsonschema", specifier = ">=4,<5" },
+    { name = "markdown-it-py", specifier = ">=3,<5" },
     { name = "mcp", specifier = ">=1.26,<2" },
     { name = "openai", specifier = ">=2,<3" },
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'", specifier = ">=10,<13" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=10,<13" },
     { name = "python-dotenv", specifier = ">=1,<2" },
     { name = "rich", specifier = ">=14,<15" },
+    { name = "tkinterweb", specifier = ">=4,<5" },
 ]
 
 [package.metadata.requires-dev]
