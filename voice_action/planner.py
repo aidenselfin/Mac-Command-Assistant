@@ -7,7 +7,7 @@ import re
 import time
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 from typing import Protocol
@@ -124,7 +124,6 @@ class ClarificationContext:
     kind: str
     options: tuple[str, ...]
     clarification_count: int
-    model_calls: int = 0
 
 
 @dataclass(frozen=True)
@@ -727,7 +726,6 @@ class Planner:
             resolution=resolution,
             prior_clarifications=context.clarification_count,
             selected_file=selection if context.kind == "file_candidate" else None,
-            model_calls=context.model_calls,
         )
 
     async def _run_loop(
@@ -737,8 +735,8 @@ class Planner:
         resolution: str | None = None,
         prior_clarifications: int = 0,
         selected_file: str | None = None,
-        model_calls: int = 0,
     ) -> PlannerOutcome:
+        self.timing.reset()
         tools = self._tools if self._tools is not None else await self._gateway.list_tools()
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
         resolution_rule = f"\n확정된 사용자 답변: {resolution}" if resolution else ""
@@ -799,13 +797,10 @@ class Planner:
             web_write_completed=False,
             web_flow_corrections=0,
             prior_clarifications=prior_clarifications,
-            model_calls=model_calls,
+            model_calls=0,
             active_app_name=None,
             active_app_only=(
-                "앱" in user_text
-                and OTHER_TASK_PATTERN.search(user_text) is None
-                and OUTPUT_FILENAME_PATTERN.search(user_text) is None
-                and WEB_SAVE_ACTION_PATTERN.search(user_text) is None
+                "앱" in user_text and OTHER_TASK_PATTERN.search(user_text) is None
             ),
             write_completed=False,
         )
@@ -955,11 +950,8 @@ class Planner:
                             "role": "tool",
                             "tool_call_id": request.call_id,
                             "content": (
-                                "clarification_error: 현재 요청에는 선택지로 물을 "
-                                "미해결 ambiguity가 없습니다. 도구로 완료할 수 있으면 "
-                                "원래 요청을 계속하세요. 원본 내용처럼 사용자만 제공할 수 "
-                                "있는 정보가 없으면 도구를 호출하거나 내용을 지어내지 말고 "
-                                "필요한 정보를 묻는 짧은 한국어 최종 응답을 반환하세요."
+                                "clarification_error: 현재 요청에는 결과를 바꾸는 "
+                                "미해결 ambiguity가 없습니다. 원래 요청을 계속하세요."
                             ),
                         }
                     )
@@ -979,8 +971,7 @@ class Planner:
                     turn.clarification.question,
                     options,
                     ClarificationContext(
-                        state.user_text, turn.clarification.kind, options, count,
-                        model_calls=state.model_calls,
+                        state.user_text, turn.clarification.kind, options, count
                     ),
                 )
             if not turn.tool_calls:
@@ -1340,11 +1331,6 @@ class Planner:
                     state.candidate_search_candidates,
                     state.prior_clarifications,
                 )
-                if isinstance(search_outcome, Clarification):
-                    return replace(
-                        search_outcome,
-                        context=replace(search_outcome.context, model_calls=state.model_calls),
-                    )
                 if isinstance(search_outcome, (Clarification, Completed, Error)):
                     return search_outcome
                 state.single_search_candidate = search_outcome
