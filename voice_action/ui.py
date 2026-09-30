@@ -580,7 +580,9 @@ class TkView:
         self.undo_button.configure(state=normal if undo_enabled else disabled)
         if approval_visible:
             if not self.approval_frame.winfo_ismapped():
-                self.approval_frame.pack(padx=10, pady=(0, 10), anchor="w")
+                self.approval_frame.pack(
+                    before=self.output, padx=10, pady=(0, 10), anchor="w"
+                )
         else:
             self.approval_frame.pack_forget()
 
