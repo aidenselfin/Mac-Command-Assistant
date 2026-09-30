@@ -232,6 +232,11 @@ class MCPClient:
             raise MCPToolNotFoundError("허용되지 않은 도구입니다.")
         if self._session is None or self._failed:
             raise MCPConnectionError("MCP 연결이 종료되었거나 사용할 수 없습니다.")
+        if name == "read_text_file" and isinstance(arguments, dict):
+            arguments = {
+                key: value for key, value in arguments.items()
+                if key not in {"head", "tail"} or value is not None
+            }
         try:
             Draft202012Validator(tool.schema).validate(arguments)
         except ValidationError as exc:

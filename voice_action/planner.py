@@ -298,6 +298,15 @@ class OpenAICompatibleModel:
             }
             for tool in tools
         ]
+        for tool in provider_tools:
+            function = tool["function"]
+            if function["name"] == FILESYSTEM_READ_TOOL:
+                function["parameters"] = deepcopy(function["parameters"])
+                properties = function["parameters"].get("properties", {})
+                for name in ("head", "tail"):
+                    if name in properties and name not in function["parameters"].get("required", []):
+                        properties[name] = {"anyOf": [properties[name], {"type": "null"}]}
+                function["description"] += " 전체 파일을 읽을 때 head와 tail은 생략하세요."
         if allow_tools and allow_clarification:
             provider_tools.append(CLARIFICATION_TOOL)
         try:
@@ -610,6 +619,17 @@ def _write_target_is_explicit(
     ) is not None
 
 
+def _requires_web_content(user_text: str, user_urls: tuple[str, ...]) -> bool:
+    if not user_urls:
+        return False
+    text = user_text
+    for url in user_urls:
+        text = text.replace(url, " ")
+    if re.search(r"(?:URL|주소|문자열|url\s+string).{0,12}(?:번역|설명|translate|explain)", text, re.I):
+        return False
+    return WEB_CONTENT_REFERENCE_PATTERN.search(text) is not None
+
+
 def _requires_web_save_flow(user_text: str, user_urls: tuple[str, ...]) -> bool:
     if not user_urls:
         return False
@@ -811,6 +831,13 @@ class Planner:
                     "사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. "
                     "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 "
                     "추측하지 마세요. "
+                    "문서 요약·추출·번역·저장에서는 원문에 없는 사실, 연도, 담당자, "
+                    "기한을 추가하지 마세요. 날짜는 별도 요청이 없으면 원문 표현을 유지하세요. "
+                    "결정사항·미결정 사항·담당자의 할 일을 구분하고, 완료된 작업은 "
+                    "미완료 할 일에 포함하지 마세요. 없는 정보는 '정보 없음'으로 표시하세요. "
+                    "사용자가 명시한 URL의 페이지 본문 읽기·요약은 web__browser_navigate "
+                    "다음 web__browser_snapshot으로 수행하세요. URL 문자열 자체의 "
+                    "번역·설명 요청은 페이지 방문이 필요하지 않습니다. "
                     "이동이나 우회는 금지됩니다. "
                     "삭제는 사용자 원문에 지정된 파일만 local__delete_files로 처리하세요. "
                     "일괄 삭제는 directory와 pattern으로 선택하고, 폴더 바로 아래 파일만 "
@@ -944,10 +971,15 @@ class Planner:
                 and not state.web_write_completed
                 and not state.web_failed
             )
+            web_content_pending = (
+                _requires_web_content(state.user_text, state.user_urls)
+                and not state.web_snapshot_succeeded
+                and not state.web_failed
+            )
             snapshot_pending = (
                 state.web_navigation_succeeded and not state.web_snapshot_succeeded
             )
-            if web_save_pending:
+            if web_save_pending or web_content_pending:
                 required_tool = (
                     WEB_SNAPSHOT_TOOL
                     if snapshot_pending
@@ -985,7 +1017,7 @@ class Planner:
                     list(state.messages),
                     exposed_tools,
                     allow_tools=True,
-                    allow_clarification=not (snapshot_pending or web_save_pending),
+                    allow_clarification=not (snapshot_pending or web_save_pending or web_content_pending),
                 )
             finally:
                 self.timing.llm_round_ms.append(
@@ -1049,15 +1081,15 @@ class Planner:
                     ),
                 )
             if not turn.tool_calls:
-                if web_save_pending:
+                if web_save_pending or web_content_pending:
                     state.messages.extend(
                         [
                             {"role": "assistant", "content": turn.text or ""},
                             {
                                 "role": "system",
                                 "content": (
-                                    "웹 저장 요청은 navigation, snapshot, 승인된 "
-                                    "filesystem__write_file 순서를 완료해야 합니다. "
+                                    "웹 본문 요청은 navigation, snapshot을 완료해야 하며 "
+                                    "저장 요청은 승인된 filesystem__write_file까지 필요합니다. "
                                     "최종 응답 대신 현재 단계의 도구를 호출하세요."
                                 ),
                             },
@@ -1065,7 +1097,7 @@ class Planner:
                     )
                     state.web_flow_corrections += 1
                     if state.web_flow_corrections > MAX_CLARIFICATIONS:
-                        return Error("웹 저장 절차를 완료하지 못해 파일을 변경하지 않았습니다.")
+                        return Error("웹 절차를 완료하지 못해 파일을 변경하지 않았습니다.")
                     continue
                 if state.web_navigation_succeeded and not state.web_snapshot_succeeded:
                     return Error(
