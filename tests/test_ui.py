@@ -123,6 +123,24 @@ def test_tk_entry_pastes_from_shortcut_and_context_menu():
         view.entry.selection_range(0, tk.END)
         view.entry_menu.invoke(0)
         assert view.entry.get() == "한글 붙여넣기"
+        view.entry.delete(0, tk.END)
+        view.entry.event_generate("<Control-v>")
+        assert view.entry.get() == "한글 붙여넣기"
+        view.entry.delete(0, tk.END)
+        view.entry.insert(0, "앞 교체 뒤")
+        view.entry.selection_range(2, 4)
+        view.entry.icursor(tk.END)
+        view.entry.event_generate("<<Paste>>")
+        assert view.entry.get() == "앞 한글 붙여넣기 뒤"
+        view.entry.selection_range(0, tk.END)
+        root.clipboard_clear()
+        view.entry_menu.invoke(0)
+        assert view.entry.get() == "앞 한글 붙여넣기 뒤"
+        root.clipboard_append("덮어쓰면 안 됨")
+        for state in ("readonly", "disabled"):
+            view.entry.configure(state=state)
+            view.entry_menu.invoke(0)
+            assert view.entry.get() == "앞 한글 붙여넣기 뒤"
         assert view.entry.bind("<Button-3>")
         if ui_module.sys.platform == "darwin":
             assert view.entry.bind("<Button-2>")
@@ -232,12 +250,8 @@ def test_approval_display_is_bounded_and_has_no_opaque_context():
 
 
 def test_approval_buttons_call_only_typed_pending_apis():
-    approve_presenter, approve_adapter, _view = presenter_at(
-        RuntimeState.WAITING_APPROVAL
-    )
-    reject_presenter, reject_adapter, _view = presenter_at(
-        RuntimeState.WAITING_APPROVAL
-    )
+    approve_presenter, approve_adapter, _view = presenter_at(RuntimeState.WAITING_APPROVAL)
+    reject_presenter, reject_adapter, _view = presenter_at(RuntimeState.WAITING_APPROVAL)
 
     assert approve_presenter.approve()
     assert reject_presenter.reject()
@@ -453,3 +467,84 @@ def test_outcome_rendering_keeps_clarification_contract():
     presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("완료")))
 
     assert view.outputs == ["[QUESTION] 선택하세요\n  1. a\n  2. b", "[DONE] 완료"]
+
+
+def test_redesigned_tk_view_preserves_approval_and_input_contract():
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root)
+        adapter = FakeAdapter()
+        presenter = UIPresenter(adapter, view)
+        view.bind_presenter(presenter)
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        root.update()
+        assert root.minsize() == (720, 520)
+        view.example_buttons[0].invoke()
+        assert view.entry.get() and adapter.submissions == []
+        view._execute()
+        assert len(adapter.submissions) == 1
+        assert view.entry.get() == ""
+        assert "내 요청" in view.output.get("1.0", "end")
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_APPROVAL))
+        assert str(view.approve_button.cget("state")) == "disabled"
+        targets = tuple(f"/allowed/긴 경로/{i:03}.txt" for i in range(100))
+        pending = ApprovalRequired(
+            "local__delete_files", targets[0], "delete", 0, "", False, {"nonce": "PRIVATE"}, targets
+        )
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, pending))
+        root.geometry("720x520")
+        root.update()
+        text = view.approval_output.get("1.0", "end")
+        assert all(path in text for path in targets)
+        assert "PRIVATE" not in text
+        assert view.approval_frame.winfo_ismapped()
+        for widget in (view.entry, view.approve_button, view.reject_button, view.undo_button):
+            assert widget.winfo_rooty() + widget.winfo_height() <= (
+                root.winfo_rooty() + root.winfo_height()
+            )
+        view.entry.insert(0, "실행하면 안 되는 명령")
+        view._enter(None)
+        assert adapter.approvals == 0 and len(adapter.submissions) == 1
+        view.approve_button.invoke()
+        view.approve_button.invoke()
+        assert adapter.approvals == 1
+        assert str(view.approve_button.cget("state")) == "disabled"
+        assert str(view.reject_button.cget("state")) == "disabled"
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("완료")))
+        root.update()
+        assert not view.approval_frame.winfo_ismapped()
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_APPROVAL))
+        pending = ApprovalRequired(
+            "filesystem__write_file",
+            "/allowed/summary.md",
+            "overwrite",
+            240,
+            "가" * 200 + "SECRET",
+            True,
+            {},
+        )
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, pending))
+        text = view.approval_output.get("1.0", "end")
+        assert "덮어씁니다" in text and "일부 내용만" in text
+        assert "SECRET" not in text
+        view.reject_button.invoke()
+        assert adapter.rejections == 1
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("줄\n" * 150)))
+        root.update()
+        view.output.yview_moveto(0)
+        root.update()
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("새 결과")))
+        root.update()
+        assert view.output.yview()[0] < 0.1
+    finally:
+        root.destroy()
