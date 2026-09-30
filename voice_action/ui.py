@@ -103,6 +103,15 @@ def render_outcome(outcome: RuntimeResult) -> str:
         )
         return f"[QUESTION] {outcome.question}\n{options}"
     if isinstance(outcome, ApprovalRequired):
+        if outcome.operation == "delete":
+            import json
+
+            targets = "\n".join(json.dumps(path, ensure_ascii=False) for path in outcome.targets)
+            return (
+                f"[APPROVAL REQUIRED]\noperation: delete\n"
+                f"삭제 대상: {len(outcome.targets)}개 파일\n{targets}\n"
+                "승인하면 위 파일들을 백업 후 삭제합니다. Undo로 일괄 복원할 수 있습니다."
+            )
         preview = outcome.preview[:200]
         suffix = "…" if outcome.preview_truncated else ""
         return "\n".join(

@@ -27,6 +27,7 @@ class UndoJournalError(RuntimeError):
 class UndoKind(Enum):
     CREATE_UNDONE = auto()
     OVERWRITE_UNDONE = auto()
+    DELETE_UNDONE = auto()
     NOTHING_TO_UNDO = auto()
     CONFLICT = auto()
     BOUNDARY_ERROR = auto()
@@ -140,6 +141,9 @@ class UndoJournal:
                     ON undo_entries(status, created_at DESC)
                     """
                 )
+            from voice_action.deletion import DeletionJournal
+
+            self.deletions = DeletionJournal(self)
         except UndoJournalError:
             raise
         except (OSError, sqlite3.Error) as exc:
@@ -248,6 +252,22 @@ class UndoJournal:
             self._set_status(entry.command_id, "failed", expected="active")
 
     def undo_last_write(self) -> UndoResult:
+        try:
+            latest_delete = self.deletions.latest()
+            with self._connect() as connection:
+                latest_write = connection.execute(
+                    "SELECT MAX(created_at) FROM undo_entries WHERE status='active'"
+                ).fetchone()[0]
+            if latest_delete and (latest_write is None or latest_delete[1] > latest_write):
+                from voice_action.mcp_client import ToolRejectedError
+
+                try:
+                    message = self.deletions.undo(latest_delete[0])
+                except ToolRejectedError as exc:
+                    return UndoResult(UndoKind.CONFLICT, str(exc))
+                return UndoResult(UndoKind.DELETE_UNDONE, message)
+        except (OSError, sqlite3.Error) as exc:
+            raise UndoJournalError("삭제 Undo journal을 처리할 수 없습니다.") from exc
         row = self._claim_latest()
         if row is None:
             return UndoResult(UndoKind.NOTHING_TO_UNDO, NOTHING_TO_UNDO_MESSAGE)

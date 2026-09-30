@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import secrets
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Protocol
 
 from voice_action.mcp_client import ToolRejectedError, ToolResult
+from voice_action.deletion import DELETE_TOOL
 from voice_action.undo import UndoJournal, UndoJournalError
 
 READ_ONLY_TOOLS = frozenset(
@@ -23,7 +25,7 @@ READ_ONLY_TOOLS = frozenset(
         "macos__get_active_app",
     }
 )
-WRITE_TOOLS = frozenset({"filesystem__write_file"})
+WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL})
 PREVIEW_LIMIT = 200
 
 
@@ -68,6 +70,8 @@ class PreparedWrite:
     canonical_arguments: str = field(repr=False)
     digest: str = field(repr=False)
     nonce: str = field(repr=False)
+    targets: tuple[str, ...] = ()
+    snapshots: tuple[tuple, ...] = field(default=(), repr=False)
 
 
 def classify_tool(name: str) -> ToolRisk:
@@ -116,8 +120,27 @@ class RiskGuard:
             raise ForbiddenToolError(f"금지된 도구입니다: {name}")
         if risk is not ToolRisk.WRITE:
             raise RiskGuardError("쓰기 승인은 write 도구에만 사용할 수 있습니다.")
+        if name == DELETE_TOOL:
+            return await asyncio.to_thread(self._prepare_delete, arguments)
         normalized = await self._gateway.normalize_tool_arguments(name, arguments)
         return self._new_prepared(name, normalized)
+
+    def _prepare_delete(self, arguments: dict) -> PreparedWrite:
+        if self._undo_journal is None:
+            raise RiskGuardError("Undo journal이 없어 파일을 삭제할 수 없습니다.")
+        try:
+            normalized, snapshots = self._undo_journal.deletions.prepare(arguments)
+        except (OSError, sqlite3.Error, UndoJournalError) as exc:
+            raise RiskGuardError("삭제 대상/백업을 준비할 수 없습니다.") from exc
+        canonical = _canonical_json(normalized)
+        digest = _digest(DELETE_TOOL, canonical + _canonical_json({"files": snapshots}))
+        nonce = secrets.token_urlsafe(32)
+        self._pending[nonce] = digest
+        targets = tuple(normalized["paths"])
+        return PreparedWrite(
+            DELETE_TOOL, targets[0] if len(targets) == 1 else f"{len(targets)}개 파일",
+            "delete", 0, "", False, canonical, digest, nonce, targets, snapshots,
+        )
 
     def _new_prepared(self, name: str, normalized: dict) -> PreparedWrite:
         path = normalized.get("path")
@@ -163,6 +186,28 @@ class RiskGuard:
             raise ApprovalInvalidError("승인이 없거나 이미 사용되었습니다.")
 
         arguments = json.loads(prepared.canonical_arguments)
+        if prepared.tool_name == DELETE_TOOL:
+            refreshed = await asyncio.to_thread(self._prepare_delete, arguments)
+            self._pending.pop(refreshed.nonce, None)
+            if expected != prepared.digest or refreshed.digest != prepared.digest:
+                self._pending[refreshed.nonce] = refreshed.digest
+                raise ApprovalChangedError(refreshed)
+            if on_started is not None:
+                on_started()
+            task = asyncio.create_task(asyncio.to_thread(
+                self._undo_journal.deletions.execute, refreshed.snapshots
+            ))
+            try:
+                try:
+                    return await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    await task  # 백업/삭제 작업이 끝날 때까지 journal을 닫지 않는다.
+                    raise
+            except (OSError, sqlite3.Error, UndoJournalError) as exc:
+                raise RiskGuardError("삭제 journal 오류입니다. 삭제 결과를 확인하고 Undo하세요.") from exc
+            finally:
+                if on_finished is not None:
+                    on_finished()
         normalized = await self._gateway.normalize_tool_arguments(
             prepared.tool_name, arguments
         )

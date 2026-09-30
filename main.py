@@ -70,6 +70,13 @@ def print_outcome(console: Console, outcome: RuntimeResult) -> None:
         for index, option in enumerate(outcome.options, 1):
             console.print(f"  {index}. {option}", markup=False, highlight=False)
     elif isinstance(outcome, ApprovalRequired):
+        if outcome.operation == "delete":
+            from voice_action.ui import render_outcome
+
+            console.print(render_outcome(outcome), markup=False, highlight=False)
+            console.print("승인: 승인/approve/yes/y | 거절: 거절/reject/no/n/취소/cancel/c",
+                          markup=False)
+            return
         suffix = "…" if outcome.preview_truncated else ""
         console.print("[APPROVAL REQUIRED]", markup=False, highlight=False)
         console.print(f"tool: {outcome.tool_name}", markup=False, highlight=False)

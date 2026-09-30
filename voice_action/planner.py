@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from openai import APIError, APITimeoutError, AsyncOpenAI, AuthenticationError
 
 from voice_action.config import Config
+from voice_action.deletion import DELETE_DEFINITION, DELETE_TOOL
 from voice_action.mcp_client import (
     MCPError,
     ToolDefinition,
@@ -183,6 +184,7 @@ class ApprovalRequired:
     preview: str
     preview_truncated: bool
     context: ApprovalContext = field(repr=False)
+    targets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -350,11 +352,61 @@ MAX_CLARIFICATIONS = 2
 
 
 def _destructive_request(text: str) -> bool:
-    lowered = text.casefold()
+    lowered = _without_quoted_text(text).casefold()
+    if re.search(
+        r"삭제\s*(?:하지|말|금지)|지우지|지워\s*(?:말|서는)|"
+        r"(?:do\s+not|don't|never)\s+(?:delete|remove|erase)|삭제하지",
+        lowered,
+    ):
+        return False
+    return re.search(
+        r"삭제|지워|없애|\b(?:delete|remove|erase|rm)\b", lowered
+    ) is not None
+
+
+def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) -> bool:
+    names = {str(directory)}
+    for root in roots:
+        if directory.is_relative_to(root):
+            relative = directory.relative_to(root)
+            names.add(str(Path(root.name) / relative))
+            if relative != Path("."):
+                names.add(str(relative))
     return any(
-        token in lowered
-        for token in ("삭제", "지워", "없애", "delete", "remove", "erase", "rm ")
+        re.search(rf"(?<![\w./-]){re.escape(name)}(?![\w.-])", text)
+        for name in names
     )
+
+
+def _delete_scope_error(arguments: dict, text: str, roots: tuple[Path, ...]) -> str | None:
+    if not _destructive_request(text) or USER_URL_PATTERN.search(text):
+        return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹 명령과 삭제를 분리하세요."
+    if "directory" in arguments:
+        directory, pattern = arguments.get("directory"), arguments.get("pattern")
+        if not isinstance(directory, str) or not isinstance(pattern, str):
+            return "삭제 폴더와 패턴을 지정해야 합니다."
+        if not _mentioned_directory(Path(directory), text, roots):
+            return "일괄 삭제 폴더가 사용자 명령에 명시되지 않았습니다."
+        if pattern == "*":
+            if not re.search(r"모두|전부|전체|모든|\ball\b|\*", text, re.IGNORECASE):
+                return "모든 파일 삭제가 사용자 명령에 명시되지 않았습니다."
+        elif pattern not in text:
+            return "삭제 패턴이 사용자 명령에 명시되지 않았습니다."
+        return None
+    paths = arguments.get("paths")
+    if not isinstance(paths, list) or not paths:
+        return "삭제 파일 목록을 지정해야 합니다."
+    for raw in paths:
+        if not isinstance(raw, str) or not _write_target_is_explicit(raw, text, ()):
+            return "삭제할 파일명이 사용자 명령에 명시되지 않았습니다."
+        path = Path(raw)
+        # 파일 경로를 명시했다면 같은 이름의 다른 폴더 파일을 선택하지 않는다.
+        qualified = re.findall(rf"(?:/|[\w.-]+/)[^\s\"'<>]*{re.escape(path.name)}", text)
+        if qualified and not any(
+            str(path) == item or str(path).endswith("/" + item) for item in qualified
+        ):
+            return "삭제 파일 경로가 사용자 명령의 경로와 일치하지 않습니다."
+    return None
 
 
 def _ambiguous_mutation(text: str) -> bool:
@@ -684,6 +736,7 @@ class Planner:
         if result.kind in {
             UndoKind.CREATE_UNDONE,
             UndoKind.OVERWRITE_UNDONE,
+            UndoKind.DELETE_UNDONE,
             UndoKind.NOTHING_TO_UNDO,
         }:
             return Completed(result.message)
@@ -698,10 +751,14 @@ class Planner:
                 "URL 경계가 모호합니다. 주소를 <https://example.com/경로>처럼 "
                 "꺾쇠로 감싸거나 URL 뒤에 공백을 넣어 다시 요청해 주세요."
             )
-        if _destructive_request(user_text):
+        if _destructive_request(user_text) and not (
+            OUTPUT_FILENAME_PATTERN.search(user_text)
+            or any(root.name in user_text or str(root) in user_text
+                   for root in self.config.allowed_directories)
+        ):
             return Error(
-                "삭제 작업은 지원하지 않습니다. "
-                "대신 파일 목록 조회나 특정 파일 읽기를 요청해 주세요."
+                "삭제할 파일 경로나 일괄 삭제할 폴더와 패턴을 지정해 주세요. "
+                "먼저 파일 목록 조회로 대상을 확인할 수 있습니다."
             )
         if _ambiguous_mutation(user_text):
             return _edit_clarification(user_text)
@@ -737,7 +794,9 @@ class Planner:
         selected_file: str | None = None,
     ) -> PlannerOutcome:
         self.timing.reset()
-        tools = self._tools if self._tools is not None else await self._gateway.list_tools()
+        tools = list(self._tools if self._tools is not None else await self._gateway.list_tools())
+        if _destructive_request(user_text) and not USER_URL_PATTERN.search(user_text):
+            tools.append(DELETE_DEFINITION)
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
         resolution_rule = f"\n확정된 사용자 답변: {resolution}" if resolution else ""
         messages = [
@@ -745,9 +804,14 @@ class Planner:
                 "role": "system",
                 "content": (
                     "사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. "
-                    "실제 정보 조회와 파일 작업은 반드시 제공된 MCP 도구로 처리하고 "
+                    "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 "
                     "추측하지 마세요. "
-                    "삭제/이동이나 우회는 금지됩니다. "
+                    "이동이나 우회는 금지됩니다. "
+                    "삭제는 사용자 원문에 지정된 파일만 local__delete_files로 처리하세요. "
+                    "일괄 삭제는 directory와 pattern으로 선택하고, 폴더 바로 아래 파일만 "
+                    "대상입니다. 재귀 삭제는 금지되며 요청에 하위 폴더/재귀가 포함되면 "
+                    "지원하지 않는다고 답하세요. 승인 전에는 삭제 완료를 말하지 마세요. "
+                    "여러 파일 삭제는 한 번의 local__delete_files 호출로 모으세요. "
                     "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 "
                     "request_clarification contract를 사용하세요. "
                     "복잡하다는 이유로 질문하지 마세요. "
@@ -822,6 +886,8 @@ class Planner:
         except ApprovalInvalidError as exc:
             return Error(str(exc))
         except (ToolRejectedError, MCPError) as exc:
+            if context.pending_call.name == DELETE_TOOL:
+                return Error(str(exc))
             self._append_tool_error(
                 state.messages,
                 context.pending_call,
@@ -831,6 +897,8 @@ class Planner:
             state.next_call_index += 1
             return await self._continue(state)
         outcome = await self._accept_tool_result(state, context.pending_call, result)
+        if context.pending_call.name == DELETE_TOOL:
+            return Completed(result.text) if result.ok else Error(result.error or result.text)
         if outcome is not None:
             return outcome
         state.next_call_index += 1
@@ -838,7 +906,8 @@ class Planner:
 
     def reject(self, context: ApprovalContext) -> Completed:
         self._risk_guard.reject(context.prepared_write)
-        return Completed("파일 쓰기를 거절했습니다. 파일은 변경하지 않았습니다.")
+        action = "삭제" if context.pending_call.name == DELETE_TOOL else "쓰기"
+        return Completed(f"파일 {action}를 거절했습니다. 파일은 변경하지 않았습니다.")
 
     async def _continue(self, state: _LoopState) -> PlannerOutcome:
         while True:
@@ -1115,6 +1184,12 @@ class Planner:
     async def _policy_error(
         self, state: _LoopState, call: ToolCall, arguments: dict
     ) -> str | None:
+        if call.name == DELETE_TOOL:
+            if state.read_only_candidate_request:
+                return "읽기 전용 요청에서는 파일을 삭제할 수 없습니다."
+            if re.search(r"재귀|하위\s*폴더|recursive|\*\*", state.user_text, re.IGNORECASE):
+                return "폴더/재귀 삭제는 지원하지 않습니다. 파일만 삭제할 수 있습니다."
+            return _delete_scope_error(arguments, state.user_text, self.config.allowed_directories)
         if call.name == FILESYSTEM_WRITE_TOOL and (
             state.user_urls or USER_URL_PATTERN.search(state.user_text)
         ) and not state.web_save_required:
@@ -1343,6 +1418,8 @@ class Planner:
             state.write_completed = True
             if state.web_save_required:
                 state.web_write_completed = True
+        elif call.name == DELETE_TOOL:
+            state.write_completed = True
         state.messages.append(
             {"role": "tool", "tool_call_id": call.id, "content": result_text}
         )
@@ -1390,6 +1467,7 @@ class Planner:
             prepared.preview,
             prepared.preview_truncated,
             context,
+            prepared.targets,
         )
 
     @staticmethod
