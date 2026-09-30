@@ -315,7 +315,11 @@ class OpenAICompatibleModel:
                 model=self.model,
                 messages=messages,
                 tools=provider_tools,
-                tool_choice="auto" if allow_tools else "none",
+                tool_choice=(
+                    {"type": "function", "function": {"name": tools[0].name}}
+                    if allow_tools and not allow_clarification and len(tools) == 1
+                    else "auto" if allow_tools else "none"
+                ),
             )
         except AuthenticationError as exc:
             raise PlannerError("LLM 인증 실패") from exc
@@ -837,7 +841,8 @@ class Planner:
                     "문서 요약·추출·번역·저장에서는 원문에 없는 사실, 연도, 담당자, "
                     "기한을 추가하지 마세요. 날짜는 별도 요청이 없으면 원문 표현을 유지하세요. "
                     "결정사항·미결정 사항·담당자의 할 일을 구분하고, 완료된 작업은 "
-                    "미완료 할 일에 포함하지 마세요. 없는 정보는 '정보 없음'으로 표시하세요. "
+                    "미완료 할 일에 포함하지 마세요. 담당자별 추출에서는 해당하는 작업을 "
+                    "빠뜨리지 말고 모두 포함하세요. 없는 정보는 '정보 없음'으로 표시하세요. "
                     "사용자가 명시한 URL의 페이지 본문 읽기·요약은 web__browser_navigate "
                     "다음 web__browser_snapshot으로 수행하세요. URL 문자열 자체의 "
                     "번역·설명 요청은 페이지 방문이 필요하지 않습니다. "

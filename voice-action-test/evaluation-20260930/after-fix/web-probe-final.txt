@@ -1,0 +1,41 @@
+CONFIG groq openai/gpt-oss-20b
+Secure MCP Filesystem Server running on stdio
+Client does not support MCP Roots, using allowed directories set from server args: [
+  '/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix'
+]
+
+COMMAND https://example.com 페이지를 읽고 한국어로 2줄 요약해줘
+[PLAN] iteration=1/5
+[TOOL] iteration=1 name=web__browser_navigate
+[TOOL-OK] iteration=1 name=web__browser_navigate result_chars=147 truncated=False
+[PLAN] iteration=2/5
+[TOOL] iteration=2 name=web__browser_snapshot
+[TOOL-OK] iteration=2 name=web__browser_snapshot result_chars=1272 truncated=False
+[PLAN] iteration=3/5
+[DONE] 예시 도메인(Example Domain)은 문서 예시용으로만 사용되는 사이트이며 실제 서비스가 아님을 명시합니다.  
+이 도메인은 테스트나 모니터링 등 실제 운영 목적으로 활용해서는 안 됩니다.
+ELAPSED 5.01
+
+COMMAND https://example.com 페이지를 읽고 한국어로 2줄 요약해줘
+[PLAN] iteration=1/5
+[TOOL] iteration=1 name=web__browser_navigate
+[TOOL-OK] iteration=1 name=web__browser_navigate result_chars=147 truncated=False
+[PLAN] iteration=2/5
+[TOOL] iteration=2 name=web__browser_snapshot
+[TOOL-OK] iteration=2 name=web__browser_snapshot result_chars=1288 truncated=False
+[PLAN] iteration=3/5
+[DONE] 이 도메인은 문서 예시용으로 사용되며, 권한이 필요 없습니다.  
+서비스가 아니므로 테스트나 모니터링 목적으로 사용하지 마세요.
+ELAPSED 2.2
+
+COMMAND https://example.com 페이지를 읽고 한국어로 2줄 요약해줘
+[PLAN] iteration=1/5
+[TOOL] iteration=1 name=web__browser_navigate
+[TOOL-OK] iteration=1 name=web__browser_navigate result_chars=147 truncated=False
+[PLAN] iteration=2/5
+[TOOL] iteration=2 name=web__browser_snapshot
+[TOOL-OK] iteration=2 name=web__browser_snapshot result_chars=1288 truncated=False
+[PLAN] iteration=3/5
+[DONE] 예시 도메인(Example Domain)은 문서 예제용으로만 사용되는 테스트용 도메인입니다. 서비스가 아니며, 테스트나 
+모니터링 목적으로 이용해서는 안 됩니다.
+ELAPSED 1.45

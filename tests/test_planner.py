@@ -2317,6 +2317,14 @@ async def test_read_provider_schema_accepts_null_without_changing_mcp_schema():
     assert not validator.is_valid({"path": "/source.txt", "head": "1"})
     assert not validator.is_valid({"path": None})
     assert schema == original
+    with pytest.raises(PlannerError, match="비어"):
+        await model.generate(
+            [], [ToolDefinition("web__browser_navigate", "Navigate", {"type": "object"})],
+            allow_clarification=False,
+        )
+    assert client.chat.completions.create.await_args.kwargs["tool_choice"] == {
+        "type": "function", "function": {"name": "web__browser_navigate"},
+    }
 
 
 async def test_web_read_refusal_is_corrected_before_navigation(config):

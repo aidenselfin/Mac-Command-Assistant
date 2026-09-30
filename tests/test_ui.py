@@ -31,6 +31,8 @@ class FakeView:
         self.controls = []
         self.outputs = []
         self.close_count = 0
+        self.requests = []
+        self.approval_enabled = []
 
     def set_status(self, value):
         self.statuses.append(value)
@@ -43,6 +45,15 @@ class FakeView:
 
     def show_output(self, value):
         self.outputs.append(value)
+
+    def show_outcome(self, outcome):
+        self.show_output(ui_module.render_outcome(outcome))
+
+    def show_request(self, text):
+        self.requests.append(text)
+
+    def set_approval_enabled(self, enabled):
+        self.approval_enabled.append(enabled)
 
     def close(self):
         self.close_count += 1

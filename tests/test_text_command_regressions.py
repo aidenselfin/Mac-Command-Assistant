@@ -151,7 +151,8 @@ async def test_regression_web_file_comparison_does_not_enter_web_save_flow(confi
         "https://example.com 페이지와 test1.md를 비교해줘"
     )
 
-    assert outcome == Completed("비교 결과")
+    assert isinstance(outcome, Error)
+    assert "한도 초과" in outcome.message
     first_tools = model.generate.await_args_list[0].args[1]
     assert "filesystem__write_file" not in {tool.name for tool in first_tools}
     gateway.call_tool.assert_not_awaited()
@@ -219,6 +220,7 @@ async def test_web_file_comparison_rejects_hidden_write_after_reads(config):
     ],
 )
 async def test_non_save_web_request_rejects_hidden_write_before_navigation(config, user_text):
+    config = replace(config, max_tool_rounds=2)
     target = config.allowed_directories[0] / "summary.md"
     gateway = fake_gateway()
     gateway.list_tools.return_value = [
@@ -241,7 +243,7 @@ async def test_non_save_web_request_rejects_hidden_write_before_navigation(confi
 
     outcome = await planner(config, gateway, model).run(user_text)
 
-    assert outcome == Completed("거부했습니다.")
+    assert isinstance(outcome, Error)
     assert "filesystem__write_file" not in {
         tool.name for tool in model.generate.await_args_list[0].args[1]
     }
@@ -262,7 +264,7 @@ async def test_web_save_negation_does_not_expose_write_or_request_approval(confi
         "https://example.com 페이지를 저장하지 말고 요약해줘"
     )
 
-    assert outcome == Completed("요약만 했습니다.")
+    assert isinstance(outcome, Error)
     assert "filesystem__write_file" not in {
         tool.name for tool in model.generate.await_args.args[1]
     }

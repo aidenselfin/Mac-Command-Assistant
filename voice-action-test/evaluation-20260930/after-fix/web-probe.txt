@@ -1,0 +1,37 @@
+CONFIG groq openai/gpt-oss-20b
+Secure MCP Filesystem Server running on stdio
+Client does not support MCP Roots, using allowed directories set from server args: [
+  '/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix'
+]
+
+COMMAND https://example.com 페이지를 읽고 한국어로 2줄 요약해줘
+[PLAN] iteration=1/5
+[TOOL] iteration=1 name=web__browser_navigate
+[TOOL-OK] iteration=1 name=web__browser_navigate result_chars=147 truncated=False
+[PLAN] iteration=2/5
+[TOOL] iteration=2 name=web__browser_snapshot
+[TOOL-OK] iteration=2 name=web__browser_snapshot result_chars=1272 truncated=False
+[PLAN] iteration=3/5
+[DONE] Example.com은 문서 예시용으로만 사용되는 도메인이며, 테스트나 모니터링 용도로 활용해선 안 됩니다.  
+서비스가 아닌 이 도메인은 사용 권한이 없으므로 신뢰할 수 있는 환경에서만 참고용으로 이용하십시오.  
+요청을 완료했습니다.
+ELAPSED 6.56
+
+COMMAND https://example.com 페이지를 읽고 한국어로 2줄 요약해줘
+[PLAN] iteration=1/5
+[TOOL] iteration=1 name=web__browser_navigate
+[TOOL-OK] iteration=1 name=web__browser_navigate result_chars=147 truncated=False
+[PLAN] iteration=2/5
+[TOOL] iteration=2 name=web__browser_snapshot
+[TOOL-OK] iteration=2 name=web__browser_snapshot result_chars=1288 truncated=False
+[PLAN] iteration=3/5
+[DONE] 예시 도메인은 문서 예시용으로만 사용되며 서비스가 아니므로 테스트나 모니터링에 사용하지 말아야 합니다.  
+학습 및 참조를 위해 IANA 페이지(https://iana.org/help/example-domains)로 연결됩니다.
+ELAPSED 1.58
+
+COMMAND https://example.com 페이지를 읽고 한국어로 2줄 요약해줘
+[PLAN] iteration=1/5
+API_DIAGNOSTIC BadRequestError 400
+API_MESSAGE Tool call validation failed: tool call validation failed: attempted to call tool 'request_clarification' which was not in request.tools
+[ERROR] LLM API 요청 실패
+ELAPSED 0.9
