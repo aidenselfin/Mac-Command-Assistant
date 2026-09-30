@@ -1,0 +1,369 @@
+........................................................................ [ 21%]
+........................................................................ [ 43%]
+........................................................................ [ 65%]
+..................................................................F.FFFF [ 87%]
+...........................................                              [100%]
+=================================== FAILURES ===================================
+_______ test_regression_web_file_comparison_does_not_enter_web_save_flow _______
+
+config = Config(provider='openai', model='gpt-4o-mini', allowed_directories=(PosixPath('/private/var/folders/sk/vqs5vzfs2y5gh3x...),), base_url=None, max_tool_rounds=1, llm_timeout_seconds=60.0, mcp_timeout_seconds=30.0, max_tool_result_chars=50000)
+
+    async def test_regression_web_file_comparison_does_not_enter_web_save_flow(config):
+        config = replace(config, max_tool_rounds=1)
+        gateway = fake_gateway()
+        gateway.list_tools.return_value = [
+            ToolDefinition("web__browser_navigate", "Navigate", {"type": "object"}),
+            ToolDefinition("web__browser_snapshot", "Snapshot", {"type": "object"}),
+            ToolDefinition("filesystem__read_text_file", "Read", {"type": "object"}),
+            ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+        ]
+        model = AsyncMock()
+        model.generate.return_value = ModelTurn("비교 결과", [])
+    
+        outcome = await planner(config, gateway, model).run(
+            "https://example.com 페이지와 test1.md를 비교해줘"
+        )
+    
+>       assert outcome == Completed("비교 결과")
+E       AssertionError: assert Error(message='모델 호출 한도 초과 (1회); 추가 모델 호출 없이 종료했습니다.') == Completed(text='비교 결과')
+E        +  where Completed(text='비교 결과') = Completed('비교 결과')
+
+tests/test_text_command_regressions.py:154: AssertionError
+_ test_non_save_web_request_rejects_hidden_write_before_navigation[https://example.com \ud398\uc774\uc9c0\uc640 test1.md\ub97c \ube44\uad50\ud574\uc918] _
+
+self = <AsyncMock name='mock.generate' id='4532434272'>
+args = ([{'role': 'system', 'content': '사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. 실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. ...: '웹 본문 요청은 navigation, snapshot을 완료해야 하며 저장 요청은 승인된 filesystem__write_file까지 필요합니다. 최종 응답 대신 현재 단계의 도구를 호출하세요.'}], [])
+kwargs = {'allow_tools': True, 'allow_clarification': False}
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+>                   result = next(effect)
+                             ^^^^^^^^^^^^
+E                   StopIteration
+
+../.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/unittest/mock.py:2294: StopIteration
+
+During handling of the above exception, another exception occurred:
+
+config = Config(provider='openai', model='gpt-4o-mini', allowed_directories=(PosixPath('/private/var/folders/sk/vqs5vzfs2y5gh3x...),), base_url=None, max_tool_rounds=5, llm_timeout_seconds=60.0, mcp_timeout_seconds=30.0, max_tool_result_chars=50000)
+user_text = 'https://example.com 페이지와 test1.md를 비교해줘'
+
+    @pytest.mark.parametrize(
+        "user_text",
+        [
+            "https://example.com 페이지와 test1.md를 비교해줘",
+            "https://example.com 페이지에서 summary.md 내용을 읽어줘",
+            "https://example.com 페이지를 summary.md에 저장하지 말고 읽어줘",
+        ],
+    )
+    async def test_non_save_web_request_rejects_hidden_write_before_navigation(config, user_text):
+        target = config.allowed_directories[0] / "summary.md"
+        gateway = fake_gateway()
+        gateway.list_tools.return_value = [
+            ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+        ]
+        model = AsyncMock()
+        model.generate.side_effect = [
+            ModelTurn(
+                None,
+                [
+                    ToolCall(
+                        "hidden-write",
+                        "filesystem__write_file",
+                        json.dumps({"path": str(target), "content": "SHOULD NOT WRITE"}),
+                    )
+                ],
+            ),
+            ModelTurn("거부했습니다.", []),
+        ]
+    
+>       outcome = await planner(config, gateway, model).run(user_text)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_text_command_regressions.py:242: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+voice_action/planner.py:786: in run
+    ):
+       
+voice_action/planner.py:897: in _run_loop
+    web_flow_corrections=0,
+       ^^^^^^^^^^^^^^^^^^^^^
+voice_action/planner.py:994: in _continue
+    )
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AsyncMock name='mock.generate' id='4532434272'>
+args = ([{'role': 'system', 'content': '사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. 실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. ...: '웹 본문 요청은 navigation, snapshot을 완료해야 하며 저장 요청은 승인된 filesystem__write_file까지 필요합니다. 최종 응답 대신 현재 단계의 도구를 호출하세요.'}], [])
+kwargs = {'allow_tools': True, 'allow_clarification': False}
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+                    result = next(effect)
+                except StopIteration:
+                    # It is impossible to propagate a StopIteration
+                    # through coroutines because of PEP 479
+>                   raise StopAsyncIteration
+E                   StopAsyncIteration
+
+../.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/unittest/mock.py:2298: StopAsyncIteration
+_ test_non_save_web_request_rejects_hidden_write_before_navigation[https://example.com \ud398\uc774\uc9c0\uc5d0\uc11c summary.md \ub0b4\uc6a9\uc744 \uc77d\uc5b4\uc918] _
+
+self = <AsyncMock name='mock.generate' id='4532498896'>
+args = ([{'role': 'system', 'content': '사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. 실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. ...: '웹 본문 요청은 navigation, snapshot을 완료해야 하며 저장 요청은 승인된 filesystem__write_file까지 필요합니다. 최종 응답 대신 현재 단계의 도구를 호출하세요.'}], [])
+kwargs = {'allow_tools': True, 'allow_clarification': False}
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+>                   result = next(effect)
+                             ^^^^^^^^^^^^
+E                   StopIteration
+
+../.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/unittest/mock.py:2294: StopIteration
+
+During handling of the above exception, another exception occurred:
+
+config = Config(provider='openai', model='gpt-4o-mini', allowed_directories=(PosixPath('/private/var/folders/sk/vqs5vzfs2y5gh3x...),), base_url=None, max_tool_rounds=5, llm_timeout_seconds=60.0, mcp_timeout_seconds=30.0, max_tool_result_chars=50000)
+user_text = 'https://example.com 페이지에서 summary.md 내용을 읽어줘'
+
+    @pytest.mark.parametrize(
+        "user_text",
+        [
+            "https://example.com 페이지와 test1.md를 비교해줘",
+            "https://example.com 페이지에서 summary.md 내용을 읽어줘",
+            "https://example.com 페이지를 summary.md에 저장하지 말고 읽어줘",
+        ],
+    )
+    async def test_non_save_web_request_rejects_hidden_write_before_navigation(config, user_text):
+        target = config.allowed_directories[0] / "summary.md"
+        gateway = fake_gateway()
+        gateway.list_tools.return_value = [
+            ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+        ]
+        model = AsyncMock()
+        model.generate.side_effect = [
+            ModelTurn(
+                None,
+                [
+                    ToolCall(
+                        "hidden-write",
+                        "filesystem__write_file",
+                        json.dumps({"path": str(target), "content": "SHOULD NOT WRITE"}),
+                    )
+                ],
+            ),
+            ModelTurn("거부했습니다.", []),
+        ]
+    
+>       outcome = await planner(config, gateway, model).run(user_text)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_text_command_regressions.py:242: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+voice_action/planner.py:786: in run
+    ):
+       
+voice_action/planner.py:897: in _run_loop
+    web_flow_corrections=0,
+       ^^^^^^^^^^^^^^^^^^^^^
+voice_action/planner.py:994: in _continue
+    )
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AsyncMock name='mock.generate' id='4532498896'>
+args = ([{'role': 'system', 'content': '사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. 실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. ...: '웹 본문 요청은 navigation, snapshot을 완료해야 하며 저장 요청은 승인된 filesystem__write_file까지 필요합니다. 최종 응답 대신 현재 단계의 도구를 호출하세요.'}], [])
+kwargs = {'allow_tools': True, 'allow_clarification': False}
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+                    result = next(effect)
+                except StopIteration:
+                    # It is impossible to propagate a StopIteration
+                    # through coroutines because of PEP 479
+>                   raise StopAsyncIteration
+E                   StopAsyncIteration
+
+../.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/unittest/mock.py:2298: StopAsyncIteration
+_ test_non_save_web_request_rejects_hidden_write_before_navigation[https://example.com \ud398\uc774\uc9c0\ub97c summary.md\uc5d0 \uc800\uc7a5\ud558\uc9c0 \ub9d0\uace0 \uc77d\uc5b4\uc918] _
+
+self = <AsyncMock name='mock.generate' id='4532570304'>
+args = ([{'role': 'system', 'content': '사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. 실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. ...: '웹 본문 요청은 navigation, snapshot을 완료해야 하며 저장 요청은 승인된 filesystem__write_file까지 필요합니다. 최종 응답 대신 현재 단계의 도구를 호출하세요.'}], [])
+kwargs = {'allow_tools': True, 'allow_clarification': False}
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+>                   result = next(effect)
+                             ^^^^^^^^^^^^
+E                   StopIteration
+
+../.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/unittest/mock.py:2294: StopIteration
+
+During handling of the above exception, another exception occurred:
+
+config = Config(provider='openai', model='gpt-4o-mini', allowed_directories=(PosixPath('/private/var/folders/sk/vqs5vzfs2y5gh3x...),), base_url=None, max_tool_rounds=5, llm_timeout_seconds=60.0, mcp_timeout_seconds=30.0, max_tool_result_chars=50000)
+user_text = 'https://example.com 페이지를 summary.md에 저장하지 말고 읽어줘'
+
+    @pytest.mark.parametrize(
+        "user_text",
+        [
+            "https://example.com 페이지와 test1.md를 비교해줘",
+            "https://example.com 페이지에서 summary.md 내용을 읽어줘",
+            "https://example.com 페이지를 summary.md에 저장하지 말고 읽어줘",
+        ],
+    )
+    async def test_non_save_web_request_rejects_hidden_write_before_navigation(config, user_text):
+        target = config.allowed_directories[0] / "summary.md"
+        gateway = fake_gateway()
+        gateway.list_tools.return_value = [
+            ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+        ]
+        model = AsyncMock()
+        model.generate.side_effect = [
+            ModelTurn(
+                None,
+                [
+                    ToolCall(
+                        "hidden-write",
+                        "filesystem__write_file",
+                        json.dumps({"path": str(target), "content": "SHOULD NOT WRITE"}),
+                    )
+                ],
+            ),
+            ModelTurn("거부했습니다.", []),
+        ]
+    
+>       outcome = await planner(config, gateway, model).run(user_text)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_text_command_regressions.py:242: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+voice_action/planner.py:786: in run
+    ):
+       
+voice_action/planner.py:897: in _run_loop
+    web_flow_corrections=0,
+       ^^^^^^^^^^^^^^^^^^^^^
+voice_action/planner.py:994: in _continue
+    )
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AsyncMock name='mock.generate' id='4532570304'>
+args = ([{'role': 'system', 'content': '사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. 실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. ...: '웹 본문 요청은 navigation, snapshot을 완료해야 하며 저장 요청은 승인된 filesystem__write_file까지 필요합니다. 최종 응답 대신 현재 단계의 도구를 호출하세요.'}], [])
+kwargs = {'allow_tools': True, 'allow_clarification': False}
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+                    result = next(effect)
+                except StopIteration:
+                    # It is impossible to propagate a StopIteration
+                    # through coroutines because of PEP 479
+>                   raise StopAsyncIteration
+E                   StopAsyncIteration
+
+../.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/unittest/mock.py:2298: StopAsyncIteration
+_______ test_web_save_negation_does_not_expose_write_or_request_approval _______
+
+config = Config(provider='openai', model='gpt-4o-mini', allowed_directories=(PosixPath('/private/var/folders/sk/vqs5vzfs2y5gh3x...),), base_url=None, max_tool_rounds=5, llm_timeout_seconds=60.0, mcp_timeout_seconds=30.0, max_tool_result_chars=50000)
+
+    async def test_web_save_negation_does_not_expose_write_or_request_approval(config):
+        gateway = fake_gateway()
+        gateway.list_tools.return_value = [
+            ToolDefinition("web__browser_navigate", "Navigate", {"type": "object"}),
+            ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+        ]
+        model = AsyncMock()
+        model.generate.return_value = ModelTurn("요약만 했습니다.", [])
+    
+        outcome = await planner(config, gateway, model).run(
+            "https://example.com 페이지를 저장하지 말고 요약해줘"
+        )
+    
+>       assert outcome == Completed("요약만 했습니다.")
+E       AssertionError: assert Error(message='웹 절차를 완료하지 못해 파일을 변경하지 않았습니다.') == Completed(text='요약만 했습니다.')
+E        +  where Completed(text='요약만 했습니다.') = Completed('요약만 했습니다.')
+
+tests/test_text_command_regressions.py:265: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_text_command_regressions.py::test_regression_web_file_comparison_does_not_enter_web_save_flow
+FAILED tests/test_text_command_regressions.py::test_non_save_web_request_rejects_hidden_write_before_navigation[https://example.com \ud398\uc774\uc9c0\uc640 test1.md\ub97c \ube44\uad50\ud574\uc918]
+FAILED tests/test_text_command_regressions.py::test_non_save_web_request_rejects_hidden_write_before_navigation[https://example.com \ud398\uc774\uc9c0\uc5d0\uc11c summary.md \ub0b4\uc6a9\uc744 \uc77d\uc5b4\uc918]
+FAILED tests/test_text_command_regressions.py::test_non_save_web_request_rejects_hidden_write_before_navigation[https://example.com \ud398\uc774\uc9c0\ub97c summary.md\uc5d0 \uc800\uc7a5\ud558\uc9c0 \ub9d0\uace0 \uc77d\uc5b4\uc918]
+FAILED tests/test_text_command_regressions.py::test_web_save_negation_does_not_expose_write_or_request_approval
+5 failed, 326 passed in 43.86s

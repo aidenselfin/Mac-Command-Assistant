@@ -632,11 +632,8 @@ async def test_web_navigation_snapshot_uses_one_sequential_gateway_loop(config):
         ("web__browser_snapshot", {}),
     ]
     exposed = model.generate.await_args_list[0].args[1]
-    assert {tool.name for tool in exposed} == {
-        "filesystem__list_directory",
-        "web__browser_navigate",
-        "web__browser_snapshot",
-    }
+    assert {tool.name for tool in exposed} == {"web__browser_navigate"}
+    assert model.generate.await_args_list[0].kwargs["allow_clarification"] is False
     assert [
         tool.name for tool in model.generate.await_args_list[1].args[1]
     ] == ["web__browser_snapshot"]
@@ -2292,3 +2289,82 @@ async def test_approval_preview_and_repr_do_not_expose_full_content(config):
     assert "DO-NOT-LEAK-TAIL" not in repr(pending)
     assert "DO-NOT-LEAK-TAIL" not in repr(pending.context)
     assert all("DO-NOT-LEAK-TAIL" not in line for line in logs)
+
+
+async def test_read_provider_schema_accepts_null_without_changing_mcp_schema():
+    from jsonschema import Draft202012Validator
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "head": {"type": "integer", "minimum": 0},
+            "tail": {"type": "integer", "minimum": 0},
+        },
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+    original = deepcopy(schema)
+    client = AsyncMock()
+    client.chat.completions.create.return_value.choices = []
+    model = OpenAICompatibleModel(client, "test")
+    with pytest.raises(PlannerError, match="비어"):
+        await model.generate([], [ToolDefinition("filesystem__read_text_file", "Read", schema)])
+    sent = client.chat.completions.create.await_args.kwargs["tools"][0]["function"]
+    validator = Draft202012Validator(sent["parameters"])
+    for options in ({}, {"head": None, "tail": None}, {"head": 1}):
+        validator.validate({"path": "/source.txt", **options})
+    assert not validator.is_valid({"path": "/source.txt", "head": "1"})
+    assert not validator.is_valid({"path": None})
+    assert schema == original
+
+
+async def test_web_read_refusal_is_corrected_before_navigation(config):
+    gateway = fake_mcp()
+    gateway.list_tools.return_value = [
+        ToolDefinition("web__browser_navigate", "Navigate", {"type": "object"}),
+        ToolDefinition("web__browser_snapshot", "Snapshot", {"type": "object"}),
+    ]
+    gateway.call_tool.return_value = web_result("https://example.com")
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn("웹 읽기는 지원하지 않습니다.", []),
+        ModelTurn(
+            None, [ToolCall("nav", "web__browser_navigate", '{"url":"https://example.com"}')]
+        ),
+        ModelTurn(None, [ToolCall("snap", "web__browser_snapshot", "{}")]),
+        ModelTurn("실제 페이지 요약", []),
+    ]
+    assert await Planner(config, gateway, model).run(
+        "https://example.com 페이지를 읽고 요약해줘"
+    ) == Completed("실제 페이지 요약")
+    assert [c.args[0] for c in gateway.call_tool.await_args_list] == [
+        "web__browser_navigate",
+        "web__browser_snapshot",
+    ]
+
+
+async def test_web_read_repeated_refusal_is_error(config):
+    gateway = fake_mcp()
+    model = AsyncMock()
+    model.generate.return_value = ModelTurn("웹 읽기 불가", [])
+    outcome = await Planner(config, gateway, model).run("https://example.com 본문을 요약해줘")
+    assert isinstance(outcome, Error)
+    assert model.generate.await_count == 3
+    gateway.call_tool.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "https://example.com URL 문자열을 한국어로 설명해줘",
+        "https://example.com 주소를 설명해줘",
+        "Translate the URL string https://example.com",
+    ],
+)
+async def test_url_literal_explanation_does_not_require_navigation(config, user_text):
+    gateway = fake_mcp()
+    model = AsyncMock()
+    model.generate.return_value = ModelTurn("주소 설명", [])
+    assert await Planner(config, gateway, model).run(user_text) == Completed("주소 설명")
+    gateway.call_tool.assert_not_awaited()

@@ -3,6 +3,8 @@ import queue
 import threading
 from contextlib import asynccontextmanager
 
+import pytest
+
 import voice_action.ui as ui_module
 from voice_action.planner import (
     ApprovalRequired,
@@ -84,6 +86,38 @@ def presenter_at(state):
     presenter = UIPresenter(adapter, view)
     presenter.handle(UIMessage(UIMessageType.STATE, state))
     return presenter, adapter, view
+
+
+def test_tk_entry_pastes_from_shortcut_and_context_menu():
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root)
+        root.update()
+        view.entry.focus_force()
+        root.update()
+        root.clipboard_clear()
+        root.clipboard_append("한글 붙여넣기")
+        key = "<Command-v>" if ui_module.sys.platform == "darwin" else "<Control-v>"
+        view.entry.event_generate(key)
+        root.update()
+        assert view.entry.get() == "한글 붙여넣기"
+        view.entry.delete(0, tk.END)
+        view.entry_menu.invoke(0)
+        assert view.entry.get() == "한글 붙여넣기"
+        view.entry.selection_range(0, tk.END)
+        view.entry_menu.invoke(0)
+        assert view.entry.get() == "한글 붙여넣기"
+        assert view.entry.bind("<Button-3>")
+        if ui_module.sys.platform == "darwin":
+            assert view.entry.bind("<Button-2>")
+            assert view.entry.bind("<Control-Button-1>")
+    finally:
+        root.destroy()
 
 
 def test_manager_factory_registers_macos_only_on_darwin(config, monkeypatch):

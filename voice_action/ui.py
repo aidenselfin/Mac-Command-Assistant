@@ -545,6 +545,14 @@ class TkView:
         self.cancel_button = tk.Button(command_row, text="취소", command=self._cancel)
         self.cancel_button.pack(side="left", padx=(6, 0))
         self.entry.bind("<Return>", self._enter)
+        paste_key = "<Command-v>" if sys.platform == "darwin" else "<Control-v>"
+        self.entry.bind(paste_key, self._paste)
+        self.entry_menu = tk.Menu(self.entry, tearoff=False)
+        self.entry_menu.add_command(label="붙여넣기", command=self._paste)
+        self.entry.bind("<Button-3>", self._show_entry_menu)
+        if sys.platform == "darwin":
+            self.entry.bind("<Button-2>", self._show_entry_menu)
+            self.entry.bind("<Control-Button-1>", self._show_entry_menu)
 
         self.output = tk.Text(root, wrap="word", state="disabled")
         self.output.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -612,6 +620,18 @@ class TkView:
 
     def _enter(self, _event) -> str:
         self._execute()
+        return "break"
+
+    def _paste(self, _event=None) -> str:
+        self.entry.event_generate("<<Paste>>")
+        return "break"
+
+    def _show_entry_menu(self, event) -> str:
+        self.entry.focus_set()
+        try:
+            self.entry_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.entry_menu.grab_release()
         return "break"
 
     def _approve(self) -> None:

@@ -304,7 +304,8 @@ class OpenAICompatibleModel:
                 function["parameters"] = deepcopy(function["parameters"])
                 properties = function["parameters"].get("properties", {})
                 for name in ("head", "tail"):
-                    if name in properties and name not in function["parameters"].get("required", []):
+                    required = function["parameters"].get("required", [])
+                    if name in properties and name not in required:
                         properties[name] = {"anyOf": [properties[name], {"type": "null"}]}
                 function["description"] += " 전체 파일을 읽을 때 head와 tail은 생략하세요."
         if allow_tools and allow_clarification:
@@ -625,7 +626,9 @@ def _requires_web_content(user_text: str, user_urls: tuple[str, ...]) -> bool:
     text = user_text
     for url in user_urls:
         text = text.replace(url, " ")
-    if re.search(r"(?:URL|주소|문자열|url\s+string).{0,12}(?:번역|설명|translate|explain)", text, re.I):
+    if re.search(
+        r"(?:URL|주소|문자열|url\s+string).{0,12}(?:번역|설명|translate|explain)", text, re.I
+    ):
         return False
     return WEB_CONTENT_REFERENCE_PATTERN.search(text) is not None
 
@@ -1017,7 +1020,9 @@ class Planner:
                     list(state.messages),
                     exposed_tools,
                     allow_tools=True,
-                    allow_clarification=not (snapshot_pending or web_save_pending or web_content_pending),
+                    allow_clarification=not (
+                        snapshot_pending or web_save_pending or web_content_pending
+                    ),
                 )
             finally:
                 self.timing.llm_round_ms.append(
@@ -1081,7 +1086,7 @@ class Planner:
                     ),
                 )
             if not turn.tool_calls:
-                if web_save_pending or web_content_pending:
+                if web_save_pending or (web_content_pending and not snapshot_pending):
                     state.messages.extend(
                         [
                             {"role": "assistant", "content": turn.text or ""},

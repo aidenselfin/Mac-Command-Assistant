@@ -1,0 +1,77 @@
+[
+  {
+    "command": "/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix/expenses.csv를 읽고 총 지출과 분류별 합계를 계산해줘",
+    "seconds": 1.41,
+    "stages": [
+      "Completed"
+    ],
+    "result": "총 지출: **47,400원**  \n분류별 합계  \n- 식비: 30,000원  \n- 교통: 7,500원  \n- 구독: 9,900원"
+  },
+  {
+    "command": "/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix/회의록-0929.md를 읽고 담당자가 명시된 미완료 작업만 담당자, 작업, 마감일 표로 tasks-1.md에 저장해줘",
+    "seconds": 2.21,
+    "stages": [
+      "ApprovalRequired",
+      "Completed"
+    ],
+    "result": "완료"
+  },
+  {
+    "command": "https://example.com 페이지를 읽고 한국어로 2줄 요약해줘",
+    "seconds": 0.84,
+    "stages": [
+      "Error"
+    ],
+    "result": "LLM API 요청 실패"
+  },
+  {
+    "command": "/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix/expenses.csv를 읽고 총 지출과 분류별 합계를 계산해줘",
+    "seconds": 1.05,
+    "stages": [
+      "Completed"
+    ],
+    "result": "총 지출: 47,400원  \n분류별 합계:\n- 식비: 30,000원  \n- 교통: 7,500원  \n- 구독: 9,900원"
+  },
+  {
+    "command": "/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix/회의록-0929.md를 읽고 담당자가 명시된 미완료 작업만 담당자, 작업, 마감일 표로 tasks-2.md에 저장해줘",
+    "seconds": 1.87,
+    "stages": [
+      "ApprovalRequired",
+      "Completed"
+    ],
+    "result": "파일 쓰기를 거절했습니다. 파일은 변경하지 않았습니다."
+  },
+  {
+    "command": "https://example.com 페이지를 읽고 한국어로 2줄 요약해줘",
+    "seconds": 4.95,
+    "stages": [
+      "Completed"
+    ],
+    "result": "Example Domain은 문서 예시용으로만 사용되는 도메인이며 실제 서비스가 아님을 명시합니다. 테스트나 모니터링 등 실질적인 목적으로 의존해서는 안 됩니다."
+  },
+  {
+    "command": "/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix/expenses.csv를 읽고 총 지출과 분류별 합계를 계산해줘",
+    "seconds": 1.04,
+    "stages": [
+      "Completed"
+    ],
+    "result": "**총 지출:** 47,400원  \n\n**분류별 합계:**\n- 식비: 30,000원  \n- 교통: 7,500원  \n- 구독: 9,900원"
+  },
+  {
+    "command": "/Users/juhyeon/voice-action-AI/voice-action-test/evaluation-20260930/after-fix/회의록-0929.md를 읽고 담당자가 명시된 미완료 작업만 담당자, 작업, 마감일 표로 tasks-3.md에 저장해줘",
+    "seconds": 2.35,
+    "stages": [
+      "ApprovalRequired",
+      "Completed"
+    ],
+    "result": "완료되었습니다."
+  },
+  {
+    "command": "https://example.com 페이지를 읽고 한국어로 2줄 요약해줘",
+    "seconds": 0.69,
+    "stages": [
+      "Error"
+    ],
+    "result": "LLM API 요청 실패"
+  }
+]

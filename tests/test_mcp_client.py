@@ -308,3 +308,43 @@ async def test_tool_calls_are_serialized(config):
         )
     )
     assert mcp._session.call_tool.await_count == 3
+
+
+async def test_read_optional_nulls_are_omitted_without_relaxing_validation(config):
+    mcp = MCPClient(config, allowed_tools={"read_text_file"})
+    mcp.tools = [
+        ToolDefinition(
+            "read_text_file",
+            "Read",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "head": {"type": "integer", "minimum": 0},
+                    "tail": {"type": "integer", "minimum": 0},
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        )
+    ]
+    mcp._session = AsyncMock()
+    mcp._roots = config.allowed_directories
+    path = config.allowed_directories[0] / "source.txt"
+    path.write_text("first\nsecond\n")
+    for options, expected in [
+        ({}, {}),
+        ({"head": None, "tail": None}, {}),
+        ({"head": 1, "tail": None}, {"head": 1}),
+    ]:
+        args = {"path": str(path), **options}
+        original = args.copy()
+        assert await mcp.normalize_tool_arguments("read_text_file", args) == {
+            "path": str(path),
+            **expected,
+        }
+        assert args == original
+    for invalid in ({"head": "1"}, {"tail": -1}, {"unknown": None}, {"path": None}):
+        with pytest.raises(ToolRejectedError):
+            await mcp.normalize_tool_arguments("read_text_file", {"path": str(path), **invalid})
+    mcp._session.call_tool.assert_not_awaited()
