@@ -12,14 +12,28 @@
   - 적용: lesson은 RecordingModel이 보내는 system 메시지 사본 끝에 추가(Planner 미수정),
     user_hint 출력, dev_report는 `.voice-action/feedback-report.md`
   - CLI `--lessons`, `--lesson-off ID`. `--text` / `--interactive` / `--ui` 모두 연결
+- 2026-10-04 코드 리뷰 및 Claude Code 전달 자료 작성 (검토 기준 `f3578ea`)
+  - 문서: `docs/reviews/2026-10-04-claude-code-review.md`
+  - 재현: `docs/reviews/reproduce_feedback_review.py` (합성 데이터·임시 파일만 사용)
+  - F01~F10: 민감 기록/JSON 손상, 실패 격리, 분석 run 연결, lesson 시점·재발 측정,
+    DB lock·symlink, overwrite 재승인 누락(기존 결함), 취소 분석의 quota 누락
+  - production 코드는 변경하지 않음. 수정 방향·영향도·필수 회귀·변경 단위를 문서에 정리
 
 # 검증
 - 2026-10-04: pytest 344 passed (FORCE_COLOR 해제 시), ruff All checks passed
 - 실제 OpenRouter 분석 호출 1회 성공 (9.4초, 스키마 통과)
 - 실제 Groq `--text` 실행에서 이벤트 기록 확인, DB 안 API 키 0건
+- 리뷰 재검증: UI 제외 pytest 305 passed, 22 deselected (27.67초), Ruff 통과
+  - 로컬 HTTP bind 샌드박스 차단으로 초기 9 setup errors; 권한 승인 후 동일 테스트 통과
+- 리뷰 재현 스크립트: F01~F10 결함 확인, interactive 인수 통과
+  - 실제 stdin pipe + Filesystem MCP, scripted LLM/fake analyzer
+  - 목록/읽기/create 승인/거절/overwrite Undo/삭제 Undo/반복 오류 분석/exit
+  - UI 실행 및 실제 외부 LLM API 호출은 이번 리뷰에서 하지 않음
 
 # 다음 작업
+- Claude Code: 리뷰의 P1/P2 항목을 회귀 테스트로 고정하고 최소 수정. 실행 인수는 interactive 사용
 - M5: 2주 사용 후 incident 수, lesson 적용 후 재발률, 분석 비용을 보고 임계값 조정
+  - 운영 지표 평가 전에 기록 안전성과 incident/lesson 귀속 문제를 먼저 해결할 것을 권장
 
 # 중요한 결정
 - `.voice-action/undo.sqlite3`는 원본에서 복사되어 원본 경로를 가리키는 항목이 있다.
