@@ -13,7 +13,13 @@ from typing import Protocol
 
 from voice_action.deletion import DELETE_TOOL
 from voice_action.mcp_client import ToolRejectedError, ToolResult
-from voice_action.undo import UndoJournal, UndoJournalError
+from voice_action.undo import (
+    UndoJournal,
+    UndoJournalError,
+    _fingerprint,
+    _read_regular_file,
+    _UndoBoundaryError,
+)
 
 READ_ONLY_TOOLS = frozenset(
     {
@@ -72,6 +78,7 @@ class PreparedWrite:
     nonce: str = field(repr=False)
     targets: tuple[str, ...] = ()
     snapshots: tuple[tuple, ...] = field(default=(), repr=False)
+    file_state: str = field(default="", repr=False)
 
 
 def classify_tool(name: str) -> ToolRisk:
@@ -91,9 +98,22 @@ def _canonical_json(arguments: dict) -> str:
     )
 
 
-def _digest(tool_name: str, canonical_arguments: str) -> str:
-    payload = f"{tool_name}\n{canonical_arguments}".encode()
+def _digest(tool_name: str, canonical_arguments: str, file_state: str = "") -> str:
+    payload = f"{tool_name}\n{canonical_arguments}\n{file_state}".encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def file_state(path: str) -> str:
+    """Identity and content hash of the file an overwrite approval was shown for.
+
+    Bound into the approval digest, so an edit, a same-path replacement or a symlink swap
+    while the approval is pending forces a new approval. Never the bytes themselves.
+    """
+    try:
+        data, metadata = _read_regular_file(Path(path))
+    except (OSError, _UndoBoundaryError):
+        return "unreadable"
+    return f"{metadata.st_dev}:{metadata.st_ino}:{_fingerprint(data)}"
 
 
 class RiskGuard:
@@ -150,8 +170,10 @@ class RiskGuard:
         if not isinstance(content, str):
             raise RiskGuardError("write_file content는 문자열이어야 합니다.")
         target = Path(path)
+        state = ""
         if target.exists():
-            if not target.is_file():
+            state = file_state(path)
+            if not target.is_file() or state == "unreadable":
                 raise RiskGuardError("쓰기 대상은 regular file이어야 합니다.")
             operation = "overwrite"
         else:
@@ -159,7 +181,7 @@ class RiskGuard:
                 raise RiskGuardError("쓰기 대상의 부모 디렉터리가 존재하지 않습니다.")
             operation = "create"
         canonical = _canonical_json(normalized)
-        digest = _digest(name, canonical)
+        digest = _digest(name, canonical, state)
         nonce = secrets.token_urlsafe(32)
         self._pending[nonce] = digest
         return PreparedWrite(
@@ -172,6 +194,7 @@ class RiskGuard:
             canonical,
             digest,
             nonce,
+            file_state=state,
         )
 
     async def execute_approved(
@@ -232,6 +255,7 @@ class RiskGuard:
                 refreshed.target_path,
                 refreshed.operation,
                 normalized["content"],
+                refreshed.file_state or None,
             )
         except UndoJournalError as exc:
             raise RiskGuardError(
@@ -272,6 +296,7 @@ class RiskGuard:
         path = normalized["path"]
         content = normalized["content"]
         operation = "overwrite" if Path(path).is_file() else "create"
+        state = file_state(path) if operation == "overwrite" else ""
         canonical = _canonical_json(normalized)
         return PreparedWrite(
             name,
@@ -281,6 +306,7 @@ class RiskGuard:
             content[:PREVIEW_LIMIT],
             len(content) > PREVIEW_LIMIT,
             canonical,
-            _digest(name, canonical),
+            _digest(name, canonical, state),
             "",
+            file_state=state,
         )

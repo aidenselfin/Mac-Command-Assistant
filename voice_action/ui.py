@@ -24,6 +24,7 @@ from voice_action.planner import (
     Error,
     OpenAICompatibleModel,
     Planner,
+    PlannerError,
     PlannerEvent,
     PlannerEventType,
 )
@@ -480,6 +481,10 @@ class AsyncRuntimeWorker:
             outcome = await task
         except asyncio.CancelledError:
             return
+        except PlannerError as exc:
+            # Known, already-redacted failures (e.g. the LLM API rejected the request): the
+            # controller is back to IDLE, so report it and keep the window usable.
+            self.messages.put(UIMessage(UIMessageType.OUTCOME, Error(str(exc))))
         except Exception as exc:
             self._close_after_stop = True
             self.messages.put(

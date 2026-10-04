@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import os
+import sqlite3
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -297,11 +298,25 @@ def manage_lessons(console: Console, lesson_off: int | None) -> int:
                 markup=False,
             )
             return 0 if found else 1
+        out = lambda text: console.print(text, markup=False, highlight=False)  # noqa: E731
+        out("[활성 lesson]")
         rows = loop.active_lessons()
         for lesson_id, text in rows:
-            console.print(f"#{lesson_id} {text}", markup=False, highlight=False)
+            out(f"  #{lesson_id} {text}")
         if not rows:
-            console.print("활성 lesson이 없습니다.", markup=False)
+            out("  없음")
+        out("[최근 감지·분석]")
+        incidents = loop.recent_incidents()
+        for stamp, rule, signature, status, analysis in incidents:
+            out(f"  {stamp} {rule} {status} · {signature[:60]}")
+            if analysis:
+                out(f"    원인: {analysis['root_cause']}")
+                detail = analysis.get("lesson") or analysis.get("user_hint") or "-"
+                out(f"    조치: {analysis['action']} · {detail}")
+        if not incidents:
+            out("  없음")
+        if loop.report_path.exists():
+            out(f"[개발자 리포트] {loop.report_path}")
         return 0
     finally:
         loop.db.close()
@@ -322,7 +337,16 @@ def main(argv=None) -> int:
     args = vars(parser.parse_args(argv))
     lessons, lesson_off = args.pop("lessons"), args.pop("lesson_off")
     if lessons or lesson_off is not None:
-        return manage_lessons(Console(), lesson_off)
+        console = Console()
+        try:
+            return manage_lessons(console, lesson_off)
+        except (OSError, sqlite3.Error):
+            console.print(
+                "[ERROR] 피드백 기록을 읽을 수 없습니다. .voice-action/feedback.sqlite3를 "
+                "확인하세요.",
+                markup=False,
+            )
+            return 1
     text = args.pop("text")
     interactive = args.pop("interactive")
     ui = args.pop("ui")

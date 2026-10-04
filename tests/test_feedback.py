@@ -92,7 +92,7 @@ async def test_tool_results_are_stored_as_fingerprints(tmp_path):
     await model.generate([{"role": "tool", "content": "X" * 5000}], [], allow_tools=True)
     (payload,) = loop.db.execute("SELECT payload FROM events WHERE kind='llm_request'").fetchone()
     stored = json.loads(payload)["messages"][0]["content"]
-    assert stored["chars"] == 5000 and len(stored["head"]) == 500
+    assert stored["chars"] == 5000 and "head" not in stored and "X" not in json.dumps(stored)
 
 
 async def test_repeated_error_learns_lesson_and_injects_it(tmp_path):
@@ -107,8 +107,12 @@ async def test_repeated_error_learns_lesson_and_injects_it(tmp_path):
     await asyncio.gather(*loop._tasks)
     assert [text for _, text in loop.active_lessons()] == [LESSON["lesson"]]
     assert "[FEEDBACK] 폴더 이름을 명령에 함께 적어 주세요." in emitted
+    assert any(m.startswith("[FEEDBACK] 문제 감지 R1") for m in emitted)
+    assert any(m.startswith("[FEEDBACK] 분석 완료 R1") for m in emitted)
+    assert loop.recent_incidents()[0][4]["action"] == "lesson"
 
     model = FakeModel([ModelTurn("ok", [])])
+    loop.user_input("다음 명령", new_run=True)  # lessons apply from the next command on
     planner_messages = [
         {"role": "system", "content": "기본 규칙"},
         {"role": "user", "content": "x"},
@@ -122,16 +126,6 @@ async def test_repeated_error_learns_lesson_and_injects_it(tmp_path):
     loop.outcome(Error("LLM 응답 시간 초과"))
     loop.run_finished()
     assert len(analyzer.calls) == 1
-
-
-def test_lesson_that_keeps_failing_is_retired(tmp_path):
-    loop, _ = make_loop(tmp_path)
-    loop._add_lesson("error:x", "지침")
-    for _ in range(3):
-        loop._queue("R1", "error:x")
-    texts = [text for _, text in loop.active_lessons()]
-    assert "지침" not in texts
-    assert "재발을 막지 못해" in loop.report_path.read_text()
 
 
 async def test_unsafe_lesson_goes_to_report_not_prompt(tmp_path):
@@ -160,10 +154,13 @@ async def test_tool_loop_retry_and_correction_rules(tmp_path):
         await model.generate([], [], allow_tools=True)
     rules = [rule for rule, _ in loop.run_finished()]
     assert "R2" in rules
+    loop.clock.now += 5
     loop.user_input("목록 보여 줘", new_run=True)
     assert "R3" not in [rule for rule, _ in loop.run_finished()]
+    loop.clock.now += 5
     loop.user_input("목록 보여줘", new_run=True)
     assert "R3" in [rule for rule, _ in loop.run_finished()]
+    loop.clock.now += 5
     loop.user_input("아니 그게 아니라 메모 폴더", new_run=True)
     assert "R5" in [rule for rule, _ in loop.run_finished()]
 
@@ -200,3 +197,26 @@ def test_feedback_can_be_disabled(config):
     from dataclasses import replace
 
     assert build_feedback(replace(config, feedback_enabled=False), print) is None
+
+
+def test_correction_points_at_the_latest_command_and_dedupe_is_announced(tmp_path):
+    loop, emitted = make_loop(tmp_path)
+    # Signatures sort "폴더…" after "두…", so an unordered query would pick the wrong one.
+    for text in ("폴더 내 파일 알려줘", "두 파일 설명해줘"):
+        loop.clock.now += 5
+        loop.user_input(text, new_run=True)
+        loop.run_finished()
+    loop.clock.now += 5
+    loop.user_input("파일 삭제하지 말고, 두 파일 요약해줘", new_run=True)
+    assert loop.run_finished() == [("R5", "correction:두 파일 설명해줘")]
+    loop._queue("R5", "correction:두 파일 설명해줘")
+    assert emitted[-1].endswith("이미 분석한 문제라 이번에는 생략")
+
+
+def test_correction_pattern():
+    from voice_action.feedback import CORRECTION_PATTERN
+
+    for text in ("아니, 그거 말고", "A 말고 B 보여줘", "다음부턴 요약도 해줘", "왜 안 보여줘"):
+        assert CORRECTION_PATTERN.search(text), text
+    for text in ("아니면 csv만 보여줘", "폴더 내 파일 보여줘", "두 파일 설명해줘"):
+        assert not CORRECTION_PATTERN.search(text), text

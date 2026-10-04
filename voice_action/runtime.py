@@ -146,11 +146,11 @@ class RuntimeController:
             return Busy("다른 명령을 처리 중입니다.", self.state)
 
         self._in_flight = True
-        if self._feedback is not None:
-            self._feedback.user_input(
-                text, new_run=self.state is not RuntimeState.WAITING_USER_INPUT
-            )
         try:
+            if self._feedback is not None:
+                self._feedback.user_input(
+                    text, new_run=self.state is not RuntimeState.WAITING_USER_INPUT
+                )
             if self.state is RuntimeState.WAITING_USER_INPUT:
                 return await self._submit_clarification_answer(text)
             self._transition(RuntimeState.PLANNING, "command_started")
@@ -175,9 +175,9 @@ class RuntimeController:
         if self.state is not RuntimeState.WAITING_APPROVAL or pending is None:
             raise RuntimeTransitionError("대기 중인 승인이 없습니다.")
         self._in_flight = True
-        if self._feedback is not None:
-            self._feedback.decision("approve", pending.tool_name)
         try:
+            if self._feedback is not None:
+                self._feedback.decision("approve", pending.tool_name)
             self._transition(RuntimeState.RESUMING_PLAN, "approval_granted")
             outcome = await self.planner.approve(pending.context)
             return self._finish(outcome)
@@ -199,9 +199,9 @@ class RuntimeController:
         if self.state is not RuntimeState.WAITING_APPROVAL or pending is None:
             raise RuntimeTransitionError("대기 중인 승인이 없습니다.")
         self._in_flight = True
-        if self._feedback is not None:
-            self._feedback.decision("reject", pending.tool_name)
         try:
+            if self._feedback is not None:
+                self._feedback.decision("reject", pending.tool_name)
             return self._finish(self.planner.reject(pending.context))
         except BaseException as exc:
             if self._feedback is not None:
@@ -218,9 +218,9 @@ class RuntimeController:
         if self._in_flight or self.state is not RuntimeState.IDLE:
             return Busy("다른 명령을 처리 중입니다.", self.state)
         self._in_flight = True
-        if self._feedback is not None:
-            self._feedback.decision("undo")
         try:
+            if self._feedback is not None:
+                self._feedback.decision("undo")
             outcome = await self.planner.undo_last_write()
             return self._finish(outcome)
         except BaseException as exc:

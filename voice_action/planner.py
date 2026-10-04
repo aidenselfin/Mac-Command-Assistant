@@ -326,7 +326,15 @@ class OpenAICompatibleModel:
         except APITimeoutError as exc:
             raise PlannerError("LLM 응답 시간 초과") from exc
         except APIError as exc:
-            raise PlannerError("LLM API 요청 실패") from exc
+            status = getattr(exc, "status_code", None)
+            if status == 404:
+                raise PlannerError(
+                    f"LLM API 요청 실패 (HTTP 404): 모델 '{self.model}'을 찾을 수 없습니다. "
+                    "model 설정을 확인하세요."
+                ) from exc
+            raise PlannerError(
+                f"LLM API 요청 실패 (HTTP {status})" if status else "LLM API 요청 실패"
+            ) from exc
         if not response.choices:
             raise PlannerError("LLM 응답이 비어 있습니다.")
         message = response.choices[0].message
