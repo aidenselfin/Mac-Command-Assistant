@@ -1,0 +1,15 @@
+Subject: Interactive verification session
+
+Please use the interactive terminal for this session.
+First, list the files and read the specified source document.
+Then request a summary to be saved as a new text file.
+Review the approval prompt before approving the write.
+
+If you reject the request, the destination file must remain unchanged.
+After an approved overwrite, use Undo to restore the previous content.
+
+The review meeting is scheduled for October 8 at 3:00 p.m.
+The time zone and meeting location have not been specified.
+Do not invent either detail when translating or summarizing this notice.
+
+This is a fictional notice for translation testing.

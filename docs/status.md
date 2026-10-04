@@ -18,6 +18,9 @@
   - F01~F10: 민감 기록/JSON 손상, 실패 격리, 분석 run 연결, lesson 시점·재발 측정,
     DB lock·symlink, overwrite 재승인 누락(기존 결함), 취소 분석의 quota 누락
   - production 코드는 변경하지 않음. 수정 방향·영향도·필수 회귀·변경 단위를 문서에 정리
+- 테스트 자료 11개 추가: 회의록 3개(하위 폴더 포함), 요구사항·제품 비교·번역·문서 정리,
+  덮어쓰기·삭제 2개·문서 내 지시 안전성 연습. 기존 2개와 합쳐 13개
+  - interactive 명령 예시와 예상 결과: `docs/test-data.md`
 
 # 검증
 - 2026-10-04: pytest 344 passed (FORCE_COLOR 해제 시), ruff All checks passed
@@ -29,6 +32,9 @@
   - 실제 stdin pipe + Filesystem MCP, scripted LLM/fake analyzer
   - 목록/읽기/create 승인/거절/overwrite Undo/삭제 Undo/반복 오류 분석/exit
   - UI 실행 및 실제 외부 LLM API 호출은 이번 리뷰에서 하지 않음
+- 샘플 자료 검증: 전체 13개 UTF-8 읽기/빈 내용 없음, 회의록 후보 3개, 삭제 대상 2개,
+  덮어쓰기 원본 표식 확인. 기존 product.md/expenses.csv 무변경, diff whitespace 검사 통과
+  - 자료만 추가했으며 앱 실행·실제 모델 응답 검증은 재실행하지 않음
 
 # 다음 작업
 - Claude Code: 리뷰의 P1/P2 항목을 회귀 테스트로 고정하고 최소 수정. 실행 인수는 interactive 사용
