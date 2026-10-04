@@ -148,6 +148,7 @@ def test_tk_entry_pastes_from_shortcut_and_context_menu():
             assert view.entry.bind("<Button-2>")
             assert view.entry.bind("<Control-Button-1>")
     finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
         root.destroy()
 
 
@@ -576,6 +577,7 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
         root.update()
         assert view.output.yview()[0] < 0.1
     finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
         root.destroy()
 
 
@@ -650,6 +652,7 @@ def test_tk_view_shows_folder_and_renders_only_model_text():
         )
         assert "**원문**" in view.approval_output.get("1.0", "end")  # what will be written
     finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
         root.destroy()
 
 
@@ -705,6 +708,7 @@ def test_redesigned_view_status_tool_cards_and_delete_panel():
         assert view.approve_button.cget("style") == "Danger.TButton"
         assert str(view.approval_frame.cget("bg")).upper() == ui_module.RED_SOFT
     finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
         root.destroy()
 
 
@@ -729,4 +733,5 @@ def test_convert_approval_panel_shows_source_output_and_preview():
         assert "2,048 bytes" in details and "미리보기가 없습니다" in details
         assert view.approve_button.cget("text") == "승인하고 변환"
     finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
         root.destroy()

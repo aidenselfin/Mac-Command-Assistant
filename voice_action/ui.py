@@ -534,6 +534,15 @@ class AsyncRuntimeWorker:
             self._shutdown_event.set()
 
 
+def display_path(path: str) -> str:
+    """A path as shown for approval: control characters (newline, tab, ...) are escaped so
+    one file name can't look like two rows. Only the display changes, never the path used."""
+    return "".join(
+        char if char.isprintable() else char.encode("unicode_escape").decode("ascii")
+        for char in path
+    )
+
+
 MarkdownSegment = tuple[str, tuple[str, ...]]
 MARKDOWN_INLINE = re.compile(
     r"`([^`\n]+)`"  # code
@@ -1133,7 +1142,7 @@ class TkView:
                 ("삭제 대상 ", ("label",)),
                 (f"{len(outcome.targets)}개\n", ("count",)),
                 *[
-                    (f"{index:>{width}}  {path}\n", ())
+                    (f"{index:>{width}}  {display_path(path)}\n", ())
                     for index, path in enumerate(outcome.targets, 1)
                 ],
                 (
@@ -1145,9 +1154,9 @@ class TkView:
         if outcome.operation == "convert":
             segments = [
                 ("원본  ", ("label",)),
-                (f"{outcome.targets[0] if outcome.targets else ''}\n", ()),
+                (f"{display_path(outcome.targets[0]) if outcome.targets else ''}\n", ()),
                 ("출력  ", ("label",)),
-                (f"{outcome.target_path}\n", ()),
+                (f"{display_path(outcome.target_path)}\n", ()),
                 ("크기  ", ("label",)),
                 (f"{outcome.content_chars:,} bytes\n", ()),
                 ("원본은 그대로 두고 새 파일을 만듭니다.\n", ("note",)),
@@ -1162,7 +1171,7 @@ class TkView:
         truncated = outcome.preview_truncated or len(outcome.preview) > APPROVAL_PREVIEW_CHARS
         segments = [
             ("대상  ", ("label",)),
-            (f"{outcome.target_path}\n", ()),
+            (f"{display_path(outcome.target_path)}\n", ()),
             ("내용  ", ("label",)),
             (f"{outcome.content_chars}자\n", ()),
         ]
