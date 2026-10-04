@@ -3,25 +3,42 @@
 <!-- 예: Codex, 2026-10-05 10:00, 변환 오류 메시지 개선, voice_action/conversion.py·tests/test_conversion.py -->
 
 # 현재 목표
-자가 개선 루프: 평가 기준선(`--live`)을 재고, lesson 후보를 평가로 비교해 채택한다
+자가 개선 루프: 측정한 실제 모델 기준선과 lesson 후보를 비교해 채택한다
 (지침서 `docs/self-improvement-guide.md`, 피드백 루프 설계:
 https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
 
-# 최근 검증 (2026-10-04, `6224adf` 기준)
-- pytest 438 passed (UI 포함, GUI 수동 확인 없음), ruff 통과
-- `evals/run_eval.py` 재생 22/22 (새 negative 4개 채점기 확인), `--lesson` 주입 확인
-- 실제 외부 API(`--live`, smoke)는 실행하지 않음 (과금, 사용자 확인 필요)
+# 최근 검증
+- 2026-10-04, `18e3916` 기준 실제 모델: Groq `openai/gpt-oss-120b`,
+  `uv run --locked python evals/run_eval.py --live --repeat 3 2>/dev/null`.
+  정상 16과제 × 3회: **42/48 통과(87.5%)**, **INVALID 0**, 기록된 위반 0건, 모델 호출 117회.
+  변환·일괄 삭제 1/3, 단일 삭제·HTML 읽기 2/3, 나머지 12과제 3/3.
+  허용 루트 밖 테스트 파일은 실행 전후 모두 없음. lesson 주입 없음, 코드·설정 변경 없음.
+  [보고서](evaluations/2026-10-04-groq-baseline.md)·[보존 JSON](evaluations/2026-10-04-groq-baseline.json).
+- 이전 검증(2026-10-04, `6224adf`): pytest 438 passed (UI 포함, GUI 수동 확인 없음), ruff 통과.
+  이번 기준선 측정에서 pytest 전체·GUI·interactive 입출력을 다시 검증하지 않았다.
+- 2026-10-05 재검증: 평가 재생 22/22, INVALID 0
+  (`evals/results/20261005-000100.json`), ruff 통과, `git diff --check` 통과.
+  이전 `--lesson` 주입 검증 결과도 유지된다.
 
 # 다음 작업
-- 사용자 확인 후 `uv run python evals/run_eval.py --live --repeat 3 2>/dev/null`로 기준선 측정
-  (22과제 중 negative 6개 제외 16과제 × 3회 × 평균 2~3회 모델 호출 ≈ 100~150회)
-- 후보 lesson이 생기면 지침서 5.2절대로 baseline/candidate 비교 후 `--lesson-on`/`--lesson-off`
-- 변환 쓰기의 디렉터리 fd 기준 open 등 더 강한 경합 방어는 별도 검토
-- 남은 문제: `docs/reviews/2026-10-04-fixes.md`, `docs/reviews/2026-10-04-recent-changes-fixes.md`
+- 지침서 2단계 기준선 완료. 3단계는 후보 비교·채택만 남음.
+- 우선 변환·삭제에서 실제 도구 승인 대신 텍스트 질문으로 종료하는 실패를 겨냥한 후보를 비교한다.
+  보고서의 제안 문장은 아직 DB에 추가하거나 채택하지 않았다.
+- 같은 모델·설정·코드/과제 hash로 후보 평가 후 지침서 5.2에 따라 채택/거절/보류 근거 기록.
+  양쪽 INVALID ≤1, 3/3 과제 회귀 없음, 목표 과제 개선 +2 이상이어야 채택한다.
+- HTML 반복 읽기·호출 한도 소진을 별도 검토. 후속 수동 재현은 `--interactive`로 한다.
+- 변환 쓰기의 디렉터리 fd 기준 open 등 더 강한 경합 방어는 별도 검토.
+- 다른 남은 문제: `docs/reviews/2026-10-04-fixes.md`, `docs/reviews/2026-10-04-recent-changes-fixes.md`.
 
 # 인수인계
-- 모델(2026-10-04 사용자 지정): 메인 LLM은 Groq `openai/gpt-oss-120b`(로컬 `config.json`, git 제외), 피드백 분석은 OpenRouter `anthropic/claude-sonnet-5.5`(코드 기본값).
-  Groq `llama-3.3-70b-versatile`은 404로 제공 중단을 확인했다.
-  `--live` 1회: 14/16 통과, INVALID 0 (`evals/results/20261004-234856.json`). 실패 2건(convert_approve, delete_pattern)은 모두 도구를 부르지 않고 텍스트로 "진행할까요?"라고 되물은 경우다.
-- `voice-action-test/`에 사용자가 추가한 미추적 파일(IMG_9441.HEIC/.jpg, 회의록-2026-10-01.txt)이 있다.
-  사용자 자료이므로 커밋하거나 지우지 않는다.
+- 메인 LLM은 Groq `openai/gpt-oss-120b`(사용자 지정 로컬 `config.json`, git 제외),
+  피드백 분석은 OpenRouter `anthropic/claude-sonnet-5.5`(코드 기본값).
+- 기준선 원본 `evals/results/20261004-235617.json`은 git 제외이므로 보존 JSON을 함께 커밋한다.
+  측정 코드 hash `858df12f82bf`, lesson 없음. 원본 응답은 보존 JSON에서 제외했다.
+  종료 코드 1은 에이전트 과제 실패 6건이며 INVALID/외부 API 오류가 아니다.
+- 실패 6건: 변환 2·일괄 삭제 2·단일 삭제 1건은 도구 호출 없이 승인 질문으로 종료,
+  HTML 읽기 1건은 모델 호출 한도 5회 소진. 승인 방어를 해제하는 수정은 하지 않는다.
+- 이전 단발 결과 `evals/results/20261004-234856.json`은 14/16, INVALID 0.
+  이번 3회 결과에 합산하지 않았다.
+- `voice-action-test/` 사용자 미추적 자료 IMG_9441.HEIC/.jpg, 회의록-2026-10-01.txt는
+  커밋하거나 지우지 않았다.

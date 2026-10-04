@@ -4,7 +4,8 @@
 - 원문: `~/Downloads/voice_action_self_improvement_guide.md` (설계 지침 v1.0, 1308행)
 - 이 문서: 원문을 실제 코드와 대조해 검토하고, 이 저장소에서 바로 실행할 수 있게 줄인 판
 - 1단계(EvalRunner)·2단계(과제 22개)·3단계(lesson 후보→채택) 코드는 구현·검증되어 있다.
-  2단계의 `--live --repeat 3` 기준선과 3단계의 실제 후보 비교는 사용자 확인 후(과금) 진행한다.
+  2단계의 실제 모델 기준선은 42/48 통과·INVALID 0으로 측정 완료했다.
+  [기준선 보고서](evaluations/2026-10-04-groq-baseline.md)를 참고한다. 3단계의 실제 후보 비교는 남아 있다.
 
 ## 1. 검토 결론
 
@@ -20,7 +21,7 @@
 | 승인 전 변경 금지 (trajectory) | **적용** | 승인 요청 시점에 manifest가 초기 상태와 같은지 검사 |
 | 실패 분류 (10.3) | **축소 적용** | passed / agent 실패 / simulator·harness·provider·timeout(=INVALID) |
 | negative control (9.3) | **적용** | 일부러 틀린 실행을 grader가 떨어뜨리는지 과제로 고정 |
-| lesson을 후보로 두고 비교 후 채택 (2.2, 14) | **적용 (3단계)** | 지금은 analyzer confidence ≥ 0.6이면 바로 활성화된다 |
+| lesson을 후보로 두고 비교 후 채택 (2.2, 14) | **적용 (3단계)** | 분석 결과는 후보로 저장하며, 평가 비교 후 사람이 채택해야 활성화된다 |
 | YAML 과제 DSL (7.2) | **수정 → JSON** | PyYAML 미설치. 새 의존성 없이 stdlib `json` 사용 |
 | 파일 이동 예시 (7.2, 9.3) | **수정** | **이 앱에는 이동 도구가 없다.** 지원 쓰기: `write_file`(생성·덮어쓰기), `local__delete_files`, `local__convert_file`. 예시를 이것들로 바꿨다 |
 | 취소 (cancel) | **수정** | 별도 동작이 아니다. 질문 단계의 "취소" 입력 또는 승인 단계의 거절(`reject_pending`)이다 |
@@ -51,7 +52,7 @@
   과제를 만들 때 이 정책을 따라야 한다.
 - MCP 연결은 anyio TaskGroup 안에서 돌기 때문에 예외가 **중첩 ExceptionGroup**으로 올라온다.
   실패 분류는 가장 안쪽 예외로 한다 (`evals/run_eval.py`에 반영됨).
-- `--live`는 프로젝트 루트에서 실행해야 로컬 `config.json`(OpenRouter Sonnet)이 적용된다.
+- `--live`는 프로젝트 루트에서 실행해야 로컬 `config.json`의 모델 설정이 적용된다(현재 Groq `openai/gpt-oss-120b`).
 
 ## 3. 1단계: EvalRunner (완료)
 
@@ -120,7 +121,7 @@ uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장
 - `--live` (당시 메인 모델 OpenRouter `anthropic/claude-sonnet-5.5`, 이후 Groq로 변경): `read_summary`, `write_reject` 2/2 통과.
 - `ruff check` 통과. 기존 서비스 코드는 수정하지 않았다.
 
-## 4. 2단계: 과제 늘리기 (재생 모드 완료, `--live` 기준선 남음)
+## 4. 2단계: 과제 늘리기 (재생·실제 모델 기준선 완료)
 
 목표: `--live` 기준선(baseline)을 잴 수 있는 과제 15~25개. 개수보다 서로 다른 상황을 우선한다.
 
@@ -144,7 +145,10 @@ uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장
 
 진행 (2026-10-04): 정상 10개·negative 4개를 추가해 22개. 재생 모드 22/22 통과, 새 negative 4개는
 각각 추가 수정·과다 삭제·문서 미읽기·문서 지시 따름을 채점기가 실패로 잡는다.
-`expect.must_run`(필수 도구 실행)을 채점에 쓴다. `--live` 기준선은 아직 재지 않았다.
+`expect.must_run`(필수 도구 실행)을 채점에 쓴다. 사용자 승인 후 Groq `openai/gpt-oss-120b`로
+정상 16과제 × 3회 기준선을 측정했다: 42/48 통과, INVALID 0, 모델 호출 117회.
+변환·일괄 삭제 1/3, 단일 삭제·HTML 읽기 2/3, 나머지 12과제 3/3.
+결과와 비교 조건은 [기준선 보고서](evaluations/2026-10-04-groq-baseline.md)에 보존했다.
 
 ## 5. 3단계: lesson을 "후보 → 비교 → 채택"으로 바꾸기 (코드 완료)
 
