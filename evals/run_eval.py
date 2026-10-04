@@ -3,6 +3,10 @@
 uv run python evals/run_eval.py                       # every task, scripted model turns
 uv run python evals/run_eval.py --live --repeat 3     # model from config (costs API calls)
 uv run python evals/run_eval.py --live --lesson "..." # same, with one candidate lesson
+
+Grading checks state and side effects only (files, approvals, outcome status, required tools
+run), not the quality of a summary. Negative "control" tasks validate the grader with
+scripted turns and are left out of --live runs.
 """
 
 import argparse
@@ -20,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from main import error_message  # noqa: E402
 from voice_action.config import Config, load_config  # noqa: E402
 from voice_action.feedback import FeedbackLoop  # noqa: E402
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient  # noqa: E402
@@ -31,6 +36,7 @@ from voice_action.planner import (  # noqa: E402
     Completed,
     ModelTurn,
     Planner,
+    PlannerEventType,  # noqa: E402
     ToolCall,
 )
 from voice_action.runtime import RuntimeController  # noqa: E402
@@ -115,12 +121,14 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
             (root / path).parent.mkdir(parents=True, exist_ok=True)
             (root / path).write_text(content, encoding="utf-8")
         initial = manifest(root)
+        client = None
         if config is None:
             trial_config = Config("openai", "scripted", "unused", (root,))
             model = Scripted(task["script"], root)
         else:
             trial_config = replace(config, allowed_directories=(root,), feedback_enabled=False)
-            model = Counting(live_model(trial_config))
+            inner, client = live_model(trial_config)  # closed in finally, once per trial
+            model = Counting(inner)
         feedback = None
         if lessons:  # throwaway store: trial lessons never reach ~/.voice-action
             feedback = FeedbackLoop(root / ".eval" / "feedback.sqlite3")
@@ -134,7 +142,7 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         manager = MCPManager({"filesystem": MCPClient(trial_config, allowed_tools=SUPPORTED_TOOLS)})
         user = task.get("user", {})
         answers, decisions = list(user.get("clarify", [])), list(user.get("approve", []))
-        violations, status, text = [], None, ""
+        violations, status, text, tools_run = [], None, "", []
         started = time.monotonic()
         try:
             async with manager.connect():
@@ -145,7 +153,13 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                     tools=await manager.list_tools(),
                     undo_journal=undo,
                 )
-                controller = RuntimeController(planner, feedback=feedback)
+                controller = RuntimeController(
+                    planner,
+                    feedback=feedback,
+                    planner_event_observer=lambda event: tools_run.append(event.tool_name)
+                    if event.type is PlannerEventType.TOOL_STARTED
+                    else None,
+                )
 
                 async def converse():
                     outcome = await controller.submit(task["request"])
@@ -188,13 +202,18 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                 inner = inner.exceptions[0]
             # Exhausted script = broken task/harness; anything else here is provider/network.
             status = "harness_failure" if isinstance(inner, LookupError) else "provider_failure"
-            text = f"{type(inner).__name__}: {inner}"
+            # Same redaction as the app: SDK errors can carry request bodies and headers.
+            text = error_message(inner)
         finally:
             if feedback is not None:
                 await feedback.close()
+            if client is not None:
+                await client.close()
         expect = task["expect"]
         files = {} if expect.get("undo") else expect.get("files", {})
         problems = diff(expected_manifest(initial, files), manifest(root))
+        problems += [f"{name}: not run" for name in expect.get("must_run", [])
+                     if name not in tools_run]
         valid = status in {"completed", "error"}
         passed = (
             valid
@@ -213,6 +232,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
             "problems": problems,
             "violations": violations,
             "model_calls": model.calls,
+            "tools_run": tools_run,
+            "graded": "state_and_side_effects",
             "seconds": round(time.monotonic() - started, 2),
             "reply": text[:200],
         }
@@ -229,7 +250,14 @@ def live_model(config: Config):
         timeout=config.llm_timeout_seconds,
         max_retries=0,
     )
-    return OpenAICompatibleModel(client, config.model)
+    return OpenAICompatibleModel(client, config.model), client
+
+
+def code_files() -> list[Path]:
+    """Everything that decides a trial's behavior, for the results' code_hash."""
+    return sorted(
+        [*(ROOT / "voice_action").glob("*.py"), ROOT / "main.py", Path(__file__).resolve()]
+    )
 
 
 def versions(config: Config | None, lessons: list[str], tasks: list[dict]) -> dict:
@@ -239,7 +267,7 @@ def versions(config: Config | None, lessons: list[str], tasks: list[dict]) -> di
         ).stdout.strip()
 
     code = hashlib.sha256()
-    for path in sorted((ROOT / "voice_action").glob("*.py")):
+    for path in code_files():
         code.update(path.read_bytes())
     return {
         "commit": git("rev-parse", "--short", "HEAD"),
@@ -262,6 +290,8 @@ async def main(argv=None) -> int:
     tasks = [t for t in tasks if not args.task or t["id"] in args.task]
     if not args.live:
         tasks = [t for t in tasks if "script" in t]
+    else:  # controls pass only when a run goes wrong; they would invert a live score
+        tasks = [t for t in tasks if not t.get("negative")]
     config = load_config() if args.live else None
     trials = [await run_trial(t, config, args.lesson) for _ in range(args.repeat) for t in tasks]
     for r in trials:

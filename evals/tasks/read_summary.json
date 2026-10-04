@@ -6,5 +6,5 @@
     {"calls": [{"name": "filesystem__read_text_file", "args": {"path": "{root}/notes.txt"}}]},
     {"text": "금요일 배포로 결론이 났습니다."}
   ],
-  "expect": {"files": {}}
+  "expect": {"files": {}, "must_run": ["filesystem__read_text_file"]}
 }
