@@ -1,5 +1,6 @@
 # 진행 중
-- (없음)
+- Claude Code, 2026-10-04 23:37, 자가 개선 지침서 2단계(평가 과제 추가)·3단계(lesson 후보→채택),
+  evals/tasks/*.json·voice_action/feedback.py·main.py·tests/test_feedback*.py·docs/status.md
 <!-- 예: Codex, 2026-10-05 10:00, 변환 오류 메시지 개선, voice_action/conversion.py·tests/test_conversion.py -->
 
 # 현재 목표
