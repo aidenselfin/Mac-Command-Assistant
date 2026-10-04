@@ -26,3 +26,4 @@ Final/.venv/
 .claude/settings.local.json
 .claude/worktrees/
 *.mov
+evals/results/

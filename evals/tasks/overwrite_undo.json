@@ -1,0 +1,11 @@
+{
+  "id": "overwrite_undo", "family": "file.write.overwrite",
+  "files": {"todo.txt": "before"},
+  "request": "todo.txt 내용을 after로 바꿔줘",
+  "user": {"approve": [true]},
+  "script": [
+    {"calls": [{"name": "filesystem__write_file", "args": {"path": "{root}/todo.txt", "content": "after"}}]},
+    {"text": "바꿨습니다."}
+  ],
+  "expect": {"undo": true}
+}

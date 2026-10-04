@@ -1,0 +1,7 @@
+{
+  "id": "neg_claims_done", "family": "control", "negative": true,
+  "files": {"notes.txt": "x"},
+  "request": "summary.txt에 ok라고 저장해줘",
+  "script": [{"text": "저장했습니다."}],
+  "expect": {"files": {"summary.txt": "ok"}}
+}
