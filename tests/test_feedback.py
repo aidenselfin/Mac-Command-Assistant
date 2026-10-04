@@ -107,6 +107,9 @@ async def test_repeated_error_learns_lesson_and_injects_it(tmp_path):
     await asyncio.gather(*loop._tasks)
     assert [text for _, text in loop.active_lessons()] == [LESSON["lesson"]]
     assert "[FEEDBACK] 폴더 이름을 명령에 함께 적어 주세요." in emitted
+    assert any(m.startswith("[FEEDBACK] 문제 감지 R1") for m in emitted)
+    assert any(m.startswith("[FEEDBACK] 분석 완료 R1") for m in emitted)
+    assert loop.recent_incidents()[0][4]["action"] == "lesson"
 
     model = FakeModel([ModelTurn("ok", [])])
     planner_messages = [

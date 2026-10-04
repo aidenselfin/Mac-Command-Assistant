@@ -297,11 +297,25 @@ def manage_lessons(console: Console, lesson_off: int | None) -> int:
                 markup=False,
             )
             return 0 if found else 1
+        out = lambda text: console.print(text, markup=False, highlight=False)  # noqa: E731
+        out("[활성 lesson]")
         rows = loop.active_lessons()
         for lesson_id, text in rows:
-            console.print(f"#{lesson_id} {text}", markup=False, highlight=False)
+            out(f"  #{lesson_id} {text}")
         if not rows:
-            console.print("활성 lesson이 없습니다.", markup=False)
+            out("  없음")
+        out("[최근 감지·분석]")
+        incidents = loop.recent_incidents()
+        for stamp, rule, signature, status, analysis in incidents:
+            out(f"  {stamp} {rule} {status} · {signature[:60]}")
+            if analysis:
+                out(f"    원인: {analysis['root_cause']}")
+                detail = analysis.get("lesson") or analysis.get("user_hint") or "-"
+                out(f"    조치: {analysis['action']} · {detail}")
+        if not incidents:
+            out("  없음")
+        if loop.report_path.exists():
+            out(f"[개발자 리포트] {loop.report_path}")
         return 0
     finally:
         loop.db.close()

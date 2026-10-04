@@ -410,6 +410,14 @@ class FeedbackLoop:
                 "VALUES (?, ?, ?, ?, ?)",
                 (now, rule, signature, self.run_id, status),
             )
+        self.emit(
+            f"[FEEDBACK] 문제 감지 {rule} ({signature[:60]}) → "
+            + {
+                "queued": "백그라운드 분석 시작",
+                "limited": "오늘 분석 한도에 도달해 분석 생략",
+                "no_analyzer": "OPENROUTER_API_KEY가 없어 분석 생략",
+            }[status]
+        )
         if status == "queued":
             task = asyncio.get_running_loop().create_task(
                 self._analyze(cursor.lastrowid, rule, signature)
@@ -443,6 +451,7 @@ class FeedbackLoop:
         try:
             result = await self.analyzer.analyze(rule, self._bundle())
             self.record("feedback", signature=signature, incident=incident_id, **result)
+            self.emit(f"[FEEDBACK] 분석 완료 {rule}: {result['root_cause']} → {result['action']}")
             self._apply(signature, result)
             status = "analyzed"
         except asyncio.CancelledError:
@@ -450,6 +459,7 @@ class FeedbackLoop:
             raise
         except Exception as exc:
             self.record("feedback_error", signature=signature, error=type(exc).__name__)
+            self.emit(f"[FEEDBACK] 분석 실패 {rule} ({type(exc).__name__})")
         finally:
             try:
                 with self.db:
@@ -517,6 +527,26 @@ class FeedbackLoop:
         return (
             "\n\n[과거 실패에서 배운 점] 위 규칙과 충돌하면 위 규칙을 따르세요.\n" + items
         )
+
+    def recent_incidents(self, limit: int = 10) -> list[tuple]:
+        """(time, rule, signature, status, analysis dict or None), newest first."""
+        analyses = {
+            data.get("incident"): data
+            for data in (
+                json.loads(p) for (p,) in self._rows(
+                    "SELECT payload FROM events WHERE kind = 'feedback' ORDER BY id DESC LIMIT ?",
+                    limit,
+                )
+            )
+        }
+        return [
+            (time.strftime("%m-%d %H:%M", time.localtime(ts)), rule, sig, status,
+             analyses.get(incident_id))
+            for incident_id, ts, rule, sig, status in self._rows(
+                "SELECT id, ts, rule, signature, status FROM incidents ORDER BY id DESC LIMIT ?",
+                limit,
+            )
+        ]
 
     def deactivate_lesson(self, lesson_id: int) -> bool:
         with self.db:
