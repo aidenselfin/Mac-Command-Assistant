@@ -651,3 +651,58 @@ def test_tk_view_shows_folder_and_renders_only_model_text():
         assert "**원문**" in view.approval_output.get("1.0", "end")  # what will be written
     finally:
         root.destroy()
+
+
+def test_redesigned_view_status_tool_cards_and_delete_panel():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root, (Path("/tmp/work"),))
+        presenter = UIPresenter(FakeAdapter(), view)
+        view.bind_presenter(presenter)
+        assert "아직 대화 기록이 없어요" in view.output.get("1.0", "end")
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+        assert view.status_var.get() == "요청 분석 중"
+        assert str(view.hint_label.cget("fg")).upper() == ui_module.RED
+        presenter.handle(
+            UIMessage(
+                UIMessageType.PLANNER_EVENT,
+                PlannerEvent(PlannerEventType.TOOL_STARTED, 1, "filesystem__read_text_file"),
+            )
+        )
+        root.update()
+        assert view.tool_line.winfo_ismapped()
+        assert view.tool_var.get() == "filesystem__read_text_file"
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        root.update()
+        assert view.status_var.get() == "준비됨" and not view.tool_line.winfo_ismapped()
+        assert str(view.hint_label.cget("fg")).upper() == ui_module.MUTED
+
+        view.show_request("목록 보여줘")
+        shown = view.output.get("1.0", "end")
+        assert "아직 대화 기록이 없어요" not in shown and "내 요청\n목록 보여줘" in shown
+        assert int(view.output.tag_cget("request", "lmargin1")) > int(
+            view.output.tag_cget("result", "lmargin1")
+        )
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_APPROVAL))
+        targets = ("/tmp/work/a.log", "/tmp/work/b.log")
+        presenter.handle(
+            UIMessage(
+                UIMessageType.OUTCOME,
+                ApprovalRequired("local__delete_files", targets[0], "delete", 0, "", False,
+                                 {}, targets),
+            )
+        )
+        details = view.approval_output.get("1.0", "end")
+        assert "삭제 대상 2개" in details and "1  /tmp/work/a.log" in details
+        assert view.approve_button.cget("style") == "Danger.TButton"
+        assert str(view.approval_frame.cget("bg")).upper() == ui_module.RED_SOFT
+    finally:
+        root.destroy()

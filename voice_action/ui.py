@@ -695,8 +695,57 @@ def fix_hangul_first_keystroke(widget) -> None:
     widget.bind("<KeyPress>", on_key, add="+")
 
 
+INK, MUTED, BORDER, CANVAS = "#20242C", "#596273", "#E5E7EB", "#FFFFFF"
+BLUE, BLUE_SOFT = "#3659D9", "#EEF1FC"
+AMBER, AMBER_SOFT, AMBER_LINE = "#805B10", "#FBF5E8", "#E6D3A7"
+RED, RED_SOFT, RED_LINE = "#B42318", "#FDF0EF", "#EBB3AE"
+GRAY_SOFT, SUCCESS = "#F2F3F5", "#1F7A4D"
+
+# Status pill per runtime state: (label, text color, background, dot color).
+STATUS_STYLE = {
+    "STARTING": ("연결 준비 중", BLUE, BLUE_SOFT, BLUE),
+    "READY": ("준비됨", INK, GRAY_SOFT, SUCCESS),
+    "PLANNING": ("요청 분석 중", BLUE, BLUE_SOFT, BLUE),
+    "EXECUTING_TOOL": ("작업 실행 중", BLUE, BLUE_SOFT, BLUE),
+    "WAITING_USER_INPUT": ("답변이 필요해요", AMBER, AMBER_SOFT, AMBER),
+    "WAITING_APPROVAL": ("승인이 필요해요", AMBER, AMBER_SOFT, AMBER),
+    "DONE": ("완료", SUCCESS, GRAY_SOFT, SUCCESS),
+    "ERROR": ("오류 발생", RED, RED_SOFT, RED),
+    "RECORDING": ("녹음 중", BLUE, BLUE_SOFT, BLUE),
+    "TRANSCRIBING": ("음성 변환 중", BLUE, BLUE_SOFT, BLUE),
+}
+DEFAULT_HINT = "명령을 입력하세요 · Enter로 실행"
+STATUS_HINT = {
+    "WAITING_USER_INPUT": "후보 번호를 입력하세요 · 취소를 입력하면 요청을 취소합니다",
+    "WAITING_APPROVAL": "대상과 미리보기를 확인한 뒤 승인 또는 거절을 선택하세요",
+    "PLANNING": "취소하면 연결을 정리하고 창을 닫습니다",
+    "EXECUTING_TOOL": "취소하면 연결을 정리하고 창을 닫습니다",
+}
+# Conversation cards: (title color, card background). Requests sit on the right.
+CARD_STYLE = {
+    "request": (BLUE, BLUE_SOFT),
+    "result": (INK, GRAY_SOFT),
+    "question": (AMBER, AMBER_SOFT),
+    "error": (RED, RED_SOFT),
+    "notice": (MUTED, GRAY_SOFT),
+}
+APPROVAL_STYLE = {
+    "create": ("＋  승인 필요 · 새 파일 저장", "승인하고 저장", "Primary.TButton", False),
+    "overwrite": (
+        "⚠  승인 필요 · 기존 파일 덮어쓰기", "승인하고 덮어쓰기", "Primary.TButton", False
+    ),
+    "delete": ("🗑  승인 필요 · 파일 삭제", "🗑  승인하고 삭제", "Danger.TButton", True),
+}
+APPROVAL_PREVIEW_CHARS = 200
+CARD_SIDE_GAP = 96  # the empty side of a card, like a chat bubble
+
+
 class TkView:
-    """Tk widgets; every method is called only by the Tk main thread."""
+    """Tk widgets; every method is called only by the Tk main thread.
+
+    Layout follows the Voice Action redesign: header with a status pill, folder bar,
+    tinted conversation cards, tool line, approval panel, input bar and footer.
+    """
 
     def __init__(self, root, folders: tuple[Path, ...] = ()):
         import tkinter as tk
@@ -708,146 +757,222 @@ class TkView:
         self.closed = False
         self._approval_ready = False
         self._approval_enabled = False
+        self._has_cards = False
         self._status = "STARTING"
-        bg, surface, ink, muted = "#F5F6F8", "#FFFFFF", "#20242C", "#596273"
-        root.title("Voice Action AI")
+        root.title("Voice Action")
         root.geometry("880x680")
         root.minsize(720, 520)
-        root.configure(bg=bg)
+        root.configure(bg=CANVAS)
         family = font.nametofont("TkDefaultFont").actual("family")
+        mono = font.nametofont("TkFixedFont").actual("family")
+        self._family = family
         root.option_add("*Font", (family, 12))
+
         style = ttk.Style(root)
         style.theme_use("clam")
-        style.configure("TButton", padding=(12, 8), foreground=ink, background=surface)
-        style.map(
-            "TButton", background=[("active", "#E8ECF4")], foreground=[("disabled", "#808897")]
+        style.configure(
+            "TButton", padding=(12, 7), foreground=INK, background=CANVAS, bordercolor=BORDER,
+            lightcolor=CANVAS, darkcolor=CANVAS, focuscolor=BLUE_SOFT,
         )
-        style.configure("Primary.TButton", foreground=surface, background="#3659D9")
         style.map(
-            "Primary.TButton",
-            background=[("disabled", "#D9DEE7"), ("active", "#2847BC")],
-            foreground=[("disabled", muted)],
+            "TButton", background=[("active", GRAY_SOFT)], foreground=[("disabled", "#A0A6B1")]
         )
-        style.configure("Danger.TButton", foreground=surface, background="#B42318")
+        for name, color, active in (
+            ("Primary.TButton", BLUE, "#2847BC"),
+            ("Danger.TButton", RED, "#912018"),
+        ):
+            style.configure(
+                name, foreground="#FFFFFF", background=color, bordercolor=color,
+                lightcolor=color, darkcolor=color, font=(family, 12, "bold"),
+            )
+            style.map(
+                name,
+                background=[("disabled", "#D9DEE7"), ("active", active)],
+                bordercolor=[("disabled", "#D9DEE7")],
+                lightcolor=[("disabled", "#D9DEE7")],
+                darkcolor=[("disabled", "#D9DEE7")],
+                foreground=[("disabled", MUTED)],
+            )
+        style.configure(
+            "Cancel.TButton", foreground=RED, background=CANVAS, bordercolor=RED_LINE,
+            lightcolor=CANVAS, darkcolor=CANVAS,
+        )
+        style.map("Cancel.TButton", background=[("active", RED_SOFT)])
+        style.configure(
+            "Ghost.TButton", foreground=MUTED, background=CANVAS, bordercolor=CANVAS,
+            lightcolor=CANVAS, darkcolor=CANVAS, padding=(8, 4), font=(family, 11),
+        )
         style.map(
-            "Danger.TButton",
-            background=[("disabled", "#D9DEE7"), ("active", "#912018")],
-            foreground=[("disabled", muted)],
+            "Ghost.TButton",
+            background=[("active", GRAY_SOFT)],
+            bordercolor=[("active", GRAY_SOFT)],
+            foreground=[("disabled", "#B5BAC3"), ("active", INK)],
         )
-        style.configure("TEntry", padding=10, fieldbackground=surface)
+        style.configure(
+            "Mic.TButton", foreground="#A0A6B1", background=CANVAS, bordercolor=BORDER,
+            padding=(8, 7),
+        )
+        style.configure(
+            "TEntry", padding=9, fieldbackground=CANVAS, bordercolor=BORDER,
+            lightcolor=CANVAS, darkcolor=CANVAS,
+        )
+        style.map("TEntry", bordercolor=[("focus", BLUE)], lightcolor=[("focus", BLUE)])
+        style.configure("Vertical.TScrollbar", background=GRAY_SOFT, troughcolor=CANVAS,
+                        bordercolor=CANVAS, arrowcolor=MUTED)
+
         root.grid_columnconfigure(0, weight=1)
-        root.grid_rowconfigure(1, weight=1)
+        root.grid_rowconfigure(4, weight=1)
 
-        header = tk.Frame(root, bg=bg)
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 12))
-        tk.Label(header, text="Voice Action AI", bg=bg, fg=ink, font=(family, 18, "bold")).pack(
-            side="left"
+        def rule(row):
+            tk.Frame(root, bg=BORDER, height=1).grid(row=row, column=0, sticky="ew")
+
+        # ---- header: logo, name, status pill, quit --------------------------------------
+        header = tk.Frame(root, bg=CANVAS, padx=20, pady=12)
+        header.grid(row=0, column=0, sticky="ew")
+        tk.Label(
+            header, text="♪", bg=INK, fg="#FFFFFF", width=2, font=(family, 13, "bold")
+        ).pack(side="left")
+        tk.Label(
+            header, text="Voice Action", bg=CANVAS, fg=INK, font=(family, 14, "bold")
+        ).pack(side="left", padx=(8, 12))
+        self.status_pill = tk.Frame(header, bg=BLUE_SOFT, padx=10, pady=3)
+        self.status_pill.pack(side="left")
+        self.status_dot = tk.Label(
+            self.status_pill, text="●", bg=BLUE_SOFT, fg=BLUE, font=(family, 9)
         )
-        ttk.Button(header, text="종료", command=self._shutdown).pack(side="right")
-        self.status_var = tk.StringVar(value="● 연결 준비 중")
+        self.status_dot.pack(side="left", padx=(0, 5))
+        self.status_var = tk.StringVar(value="연결 준비 중")
         self.status_label = tk.Label(
-            header, textvariable=self.status_var, bg=bg, fg=muted, font=(family, 10)
+            self.status_pill, textvariable=self.status_var, bg=BLUE_SOFT, fg=BLUE,
+            font=(family, 11, "bold"),
         )
-        self.status_label.pack(side="right", padx=16)
+        self.status_label.pack(side="left")
+        ttk.Button(header, text="⏻  종료", style="Ghost.TButton", command=self._shutdown).pack(
+            side="right"
+        )
+        rule(1)
 
-        workspace = tk.Frame(root, bg=bg)
-        workspace.grid(row=1, column=0, sticky="nsew", padx=24)
-        workspace.grid_columnconfigure(0, weight=1)
-        workspace.grid_rowconfigure(1, weight=1)
-        # The folders the assistant may read and write (allowed_directories), always visible.
+        # ---- folder bar: the folders the assistant may read and write ---------------------
         self.folder_text = "작업 폴더 · " + (
             ", ".join(str(folder) for folder in folders) or "설정되지 않음"
         )
+        bar = tk.Frame(root, bg=GRAY_SOFT, padx=20, pady=7)
+        bar.grid(row=2, column=0, sticky="ew")
+        tk.Label(bar, text="📂  작업 폴더", bg=GRAY_SOFT, fg=MUTED, font=(family, 11, "bold")).pack(
+            side="left", anchor="n"
+        )
         tk.Label(
-            workspace,
-            text=self.folder_text,
-            bg=bg,
-            fg=muted,
-            font=(family, 11),
+            bar,
+            text=", ".join(str(folder) for folder in folders) or "설정되지 않음",
+            bg=GRAY_SOFT,
+            fg=INK,
+            font=(mono, 11),
             anchor="w",
             justify="left",
-            wraplength=820,
-        ).grid(row=0, column=0, sticky="ew", pady=(0, 12))
+            wraplength=640,
+        ).pack(side="left", fill="x", expand=True, padx=(8, 0))
+        rule(3)
 
-        output_frame = tk.Frame(
-            workspace, bg=surface, highlightthickness=1, highlightbackground="#D9DEE7"
-        )
-        output_frame.grid(row=1, column=0, sticky="nsew")
+        # ---- conversation -----------------------------------------------------------------
+        log = tk.Frame(root, bg=CANVAS)
+        log.grid(row=4, column=0, sticky="nsew")
         self.output = tk.Text(
-            output_frame,
+            log,
             wrap="word",
             state="disabled",
-            height=6,
-            bg=surface,
-            fg=ink,
-            bd=0,
-            padx=16,
-            pady=16,
-            spacing1=4,
-            spacing3=8,
-            selectbackground="#DCE5FF",
-        )
-        self.output.pack(side="left", fill="both", expand=True)
-        scrollbar = ttk.Scrollbar(output_frame, command=self.output.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.output.configure(yscrollcommand=scrollbar.set)
-        for tag, color in (
-            ("request", "#3659D9"),
-            ("result", ink),
-            ("error", "#B42318"),
-            ("notice", muted),
-            ("question", "#805B10"),
-        ):
-            self.output.tag_configure(tag, foreground=color)
-            self.output.tag_configure(
-                tag + "_title", foreground=color, font=(family, 11, "bold"), spacing1=14
-            )
-        # Markdown styles, configured later so their fonts win over the base tags.
-        mono = font.nametofont("TkFixedFont").actual("family")
-        self.output.tag_configure("md_bold", font=(family, 12, "bold"))
-        self.output.tag_configure("md_italic", font=(family, 12, "italic"))
-        self.output.tag_configure("md_code", font=(mono, 11), background="#F1F3F7")
-        self.output.tag_configure("md_table", font=(mono, 11))
-        self.output.tag_configure("md_heading", font=(family, 14, "bold"), spacing1=6)
-
-        self.tool_var = tk.StringVar(value="")
-        tk.Label(
-            workspace, textvariable=self.tool_var, bg=bg, fg=muted, anchor="w", font=(family, 10)
-        ).grid(row=2, column=0, sticky="ew", pady=(8, 4))
-        self.approval_frame = tk.Frame(
-            workspace,
-            bg="#FFF8E8",
-            padx=16,
-            pady=12,
-            highlightthickness=1,
-            highlightbackground="#E6D3A7",
-        )
-        self.approval_title = tk.StringVar()
-        tk.Label(
-            self.approval_frame,
-            textvariable=self.approval_title,
-            bg="#FFF8E8",
-            fg=ink,
-            font=(family, 12, "bold"),
-        ).pack(anchor="w")
-        details = tk.Frame(self.approval_frame, bg="#FFF8E8")
-        details.pack(fill="both", expand=True, pady=(8, 8))
-        self.approval_output = tk.Text(
-            details,
-            height=5,
-            wrap="word",
-            state="disabled",
-            bg="#FFF8E8",
-            fg=ink,
+            height=4,
+            bg=CANVAS,
+            fg=INK,
             bd=0,
             highlightthickness=0,
+            padx=20,
+            pady=14,
+            selectbackground="#DCE5FF",
+            cursor="arrow",
+        )
+        self.output.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(log, command=self.output.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.output.configure(yscrollcommand=scrollbar.set)
+        for kind, (title_color, card) in CARD_STYLE.items():
+            left = CARD_SIDE_GAP if kind == "request" else 0
+            right = 0 if kind == "request" else CARD_SIDE_GAP
+            margins = {
+                "background": card,
+                "lmargin1": left + 14,
+                "lmargin2": left + 14,
+                "rmargin": right + 14,
+                # The margins inside the card share its color; the empty side stays canvas.
+                "lmargincolor": card,
+                "rmargincolor": card,
+            }
+            self.output.tag_configure(kind, foreground=INK, **margins)
+            self.output.tag_configure(
+                kind + "_title", foreground=title_color, font=(family, 11, "bold"), spacing1=10,
+                **margins,
+            )
+            self.output.tag_configure(kind + "_end", font=(family, 5), **margins)
+        self.output.tag_configure("gap", font=(family, 6))
+        self.output.tag_configure(
+            "empty", foreground=MUTED, justify="center", font=(family, 12), spacing1=160
+        )
+        # Markdown styles, configured after the card tags so their fonts win.
+        self.output.tag_configure("md_bold", font=(family, 12, "bold"))
+        self.output.tag_configure("md_italic", font=(family, 12, "italic"))
+        self.output.tag_configure("md_code", font=(mono, 11), background="#E8EAEE")
+        self.output.tag_configure("md_table", font=(mono, 11))
+        self.output.tag_configure("md_heading", font=(family, 14, "bold"), spacing1=6)
+        self._show_empty()
+
+        # ---- current tool -------------------------------------------------------------------
+        self.tool_var = tk.StringVar(value="")
+        self.tool_line = tk.Frame(
+            root, bg=CANVAS, padx=10, pady=4, highlightthickness=1, highlightbackground=BORDER
+        )
+        tk.Label(self.tool_line, text="⟳  🔧  현재 도구", bg=CANVAS, fg=MUTED,
+                 font=(family, 11)).pack(side="left")
+        tk.Label(self.tool_line, textvariable=self.tool_var, bg=CANVAS, fg=INK,
+                 font=(mono, 11)).pack(side="left", padx=(8, 0))
+
+        # ---- approval panel -------------------------------------------------------------
+        self.approval_frame = tk.Frame(
+            root, bg=AMBER_SOFT, highlightthickness=1, highlightbackground=AMBER_LINE
+        )
+        self.approval_title = tk.StringVar()
+        self._approval_title_label = tk.Label(
+            self.approval_frame, textvariable=self.approval_title, bg=AMBER_SOFT, fg=AMBER,
+            font=(family, 12, "bold"), anchor="w",
+        )
+        self._approval_title_label.pack(fill="x", padx=14, pady=(10, 6))
+        details = tk.Frame(self.approval_frame, bg=CANVAS, highlightthickness=1,
+                           highlightbackground=BORDER)
+        details.pack(fill="both", expand=True, padx=14)
+        self.approval_output = tk.Text(
+            details,
+            height=6,
+            wrap="word",
+            state="disabled",
+            bg=CANVAS,
+            fg=INK,
+            bd=0,
+            highlightthickness=0,
+            padx=10,
+            pady=6,
+            font=(mono, 11),
         )
         self.approval_output.pack(side="left", fill="both", expand=True)
         approval_scroll = ttk.Scrollbar(details, command=self.approval_output.yview)
         approval_scroll.pack(side="right", fill="y")
         self.approval_output.configure(yscrollcommand=approval_scroll.set)
-        actions = tk.Frame(self.approval_frame, bg="#FFF8E8")
-        actions.pack(fill="x")
+        self.approval_output.tag_configure("label", foreground=MUTED, font=(family, 11))
+        self.approval_output.tag_configure("warn", foreground=AMBER, font=(family, 11, "bold"))
+        self.approval_output.tag_configure("note", foreground=MUTED, font=(family, 11))
+        self.approval_output.tag_configure("count", font=(family, 12, "bold"))
+        self._approval_bg = [self.approval_frame, self._approval_title_label]
+        actions = tk.Frame(self.approval_frame, bg=AMBER_SOFT)
+        actions.pack(fill="x", padx=14, pady=10)
+        self._approval_bg.append(actions)
+        # Approve must never take keyboard focus, so Enter or Space can't approve by accident.
         self.approve_button = ttk.Button(
             actions,
             text="승인하고 실행",
@@ -862,29 +987,39 @@ class TkView:
         )
         self.reject_button.pack(side="right", padx=8)
 
-        bottom = tk.Frame(root, bg=bg)
-        bottom.grid(row=2, column=0, sticky="ew", padx=24, pady=(12, 20))
-        command_row = tk.Frame(bottom, bg=bg)
-        command_row.pack(fill="x")
-        self.entry = ttk.Entry(command_row)
+        # ---- input bar --------------------------------------------------------------------
+        rule(7)
+        command_row = tk.Frame(root, bg=CANVAS, padx=20, pady=10)
+        command_row.grid(row=8, column=0, sticky="ew")
+        ttk.Button(
+            command_row, text="🎙", style="Mic.TButton", state="disabled", takefocus=False,
+            width=3,
+        ).pack(side="left", padx=(0, 8))
+        self.entry = ttk.Entry(command_row, font=(family, 12))
         self.entry.pack(side="left", fill="x", expand=True)
         self.run_button = ttk.Button(
-            command_row, text="실행", style="Primary.TButton", command=self._execute
+            command_row, text="↵  실행", style="Primary.TButton", command=self._execute
         )
-        self.run_button.pack(side="left", padx=(8, 0))
-        self.cancel_button = ttk.Button(command_row, text="취소", command=self._cancel)
-        self.input_hint = tk.StringVar(value="명령을 입력하세요 · Enter로 실행")
-        tk.Label(
-            bottom,
-            textvariable=self.input_hint,
-            bg=bg,
-            fg=muted,
-            font=(family, 10),
+        self.run_button.pack(side="right", padx=(8, 0))
+        self.cancel_button = ttk.Button(
+            command_row, text="✕  취소", style="Cancel.TButton", command=self._cancel
+        )
+        self._command_row = command_row
+
+        # ---- footer: hint and undo ----------------------------------------------------------
+        footer = tk.Frame(root, bg=CANVAS, padx=20)
+        footer.grid(row=9, column=0, sticky="ew", pady=(0, 10))
+        self.input_hint = tk.StringVar(value=DEFAULT_HINT)
+        self.hint_label = tk.Label(
+            footer, textvariable=self.input_hint, bg=CANVAS, fg=MUTED, font=(family, 11),
             anchor="w",
-            wraplength=650,
-        ).pack(fill="x", pady=(8, 4))
-        self.undo_button = ttk.Button(bottom, text="최근 변경 되돌리기", command=self._undo)
-        self.undo_button.pack(anchor="e")
+        )
+        self.hint_label.pack(side="left", fill="x", expand=True)
+        self.undo_button = ttk.Button(
+            footer, text="↺  최근 변경 되돌리기", style="Ghost.TButton", command=self._undo
+        )
+        self.undo_button.pack(side="right")
+
         self.entry.bind("<Return>", self._enter)
         self.entry.bind("<<Paste>>", self._paste)
         self.entry.bind("<Control-v>", self._paste)
@@ -905,37 +1040,30 @@ class TkView:
 
     def set_status(self, value: str) -> None:
         self._status = value
-        labels = {
-            "STARTING": "연결 준비 중",
-            "READY": "준비됨",
-            "PLANNING": "요청 분석 중",
-            "EXECUTING_TOOL": "작업 실행 중",
-            "WAITING_USER_INPUT": "답변이 필요해요",
-            "WAITING_APPROVAL": "승인이 필요해요",
-            "DONE": "완료",
-            "ERROR": "오류 발생",
-            "RECORDING": "녹음 중",
-            "TRANSCRIBING": "음성 변환 중",
-        }
-        self.status_var.set("● " + labels.get(value, value))
-        color = "#B42318" if value == "ERROR" else "#596273"
-        if value == "WAITING_APPROVAL":
-            color = "#805B10"
-        self.status_label.configure(fg=color)
+        label, color, background, dot = STATUS_STYLE.get(value, (value, MUTED, GRAY_SOFT, MUTED))
+        self.status_var.set(label)
+        self.status_pill.configure(bg=background)
+        self.status_dot.configure(bg=background, fg=dot)
+        self.status_label.configure(bg=background, fg=color)
         if value in {"READY", "DONE", "ERROR"}:
-            self.tool_var.set("")
+            self.set_tool("없음")
+        hint = STATUS_HINT.get(value, DEFAULT_HINT)
+        self.input_hint.set(hint)
+        # Cancelling a running command closes the window, so that hint is shown as a warning.
+        warn = value in {"PLANNING", "EXECUTING_TOOL"}
+        self.hint_label.configure(
+            fg=RED if warn else MUTED, font=(self._family, 11, "bold" if warn else "normal")
+        )
         if value == "WAITING_USER_INPUT":
-            self.input_hint.set("후보 번호를 입력하세요 · 취소를 입력하면 요청을 취소합니다")
             self.entry.focus_set()
-        elif value == "WAITING_APPROVAL":
-            self.input_hint.set("대상과 미리보기를 확인한 뒤 승인 또는 거절을 선택하세요")
-        elif value in {"PLANNING", "EXECUTING_TOOL"}:
-            self.input_hint.set("취소하면 연결을 정리하고 창을 닫습니다")
-        else:
-            self.input_hint.set("명령을 입력하세요 · Enter로 실행")
 
     def set_tool(self, value: str) -> None:
-        self.tool_var.set("현재 도구 · " + value if value != "없음" else "")
+        if value == "없음":
+            self.tool_var.set("")
+            self.tool_line.grid_remove()
+        else:
+            self.tool_var.set(value)
+            self.tool_line.grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 8))
 
     def set_controls(
         self,
@@ -949,11 +1077,11 @@ class TkView:
         self.cancel_button.configure(state="normal" if cancel_enabled else "disabled")
         self.undo_button.configure(state="normal" if undo_enabled else "disabled")
         if cancel_enabled and not approval_visible:
-            self.cancel_button.pack(side="left", padx=(8, 0))
+            self.cancel_button.pack(side="right", padx=(8, 0), before=self.run_button)
         else:
             self.cancel_button.pack_forget()
         if approval_visible:
-            self.approval_frame.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+            self.approval_frame.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 10))
         else:
             self.approval_frame.grid_remove()
             self._approval_ready = False
@@ -965,14 +1093,27 @@ class TkView:
         self.approve_button.configure(state=state)
         self.reject_button.configure(state=state)
 
+    def _show_empty(self) -> None:
+        self.output.configure(state="normal")
+        self.output.insert(
+            "end", "아직 대화 기록이 없어요. 아래 입력창에 명령을 입력해 보세요.", "empty"
+        )
+        self.output.configure(state="disabled")
+
     def _append(self, title: str, body: str, tag: str, *, markdown: bool = False) -> None:
         at_bottom = self.output.yview()[1] >= 0.99
         self.output.configure(state="normal")
-        self.output.insert("end", title + "\n", tag + "_title")
+        if not self._has_cards:
+            self._has_cards = True
+            self.output.delete("1.0", "end")
+        else:
+            self.output.insert("end", "\n", "gap")
+        self.output.insert("end", title + "\n", (tag, tag + "_title"))
         # Only model-written text is markdown; requests, errors and previews stay verbatim.
         for text, styles in render_markdown(body) if markdown else [(body, ())]:
             self.output.insert("end", text, (tag, *styles))
-        self.output.insert("end", "\n\n", tag)
+        self.output.insert("end", "\n", tag)
+        self.output.insert("end", "\n", (tag, tag + "_end"))
         self.output.configure(state="disabled")
         if at_bottom:
             self.output.see("end")
@@ -983,47 +1124,64 @@ class TkView:
     def show_output(self, value: str) -> None:
         self._append("안내", value, "notice")
 
+    def _approval_details(self, outcome: ApprovalRequired) -> list[tuple[str, tuple[str, ...]]]:
+        """Panel text as (text, tags). Paths and the preview are shown exactly as written."""
+        if outcome.operation == "delete":
+            width = len(str(len(outcome.targets)))
+            return [
+                ("삭제 대상 ", ("label",)),
+                (f"{len(outcome.targets)}개\n", ("count",)),
+                *[
+                    (f"{index:>{width}}  {path}\n", ())
+                    for index, path in enumerate(outcome.targets, 1)
+                ],
+                (
+                    "삭제 전에 백업을 만들어요. 승인 후에도 하단의 최근 변경 되돌리기로 "
+                    "복구할 수 있어요.",
+                    ("note",),
+                ),
+            ]
+        preview = outcome.preview[:APPROVAL_PREVIEW_CHARS]
+        truncated = outcome.preview_truncated or len(outcome.preview) > APPROVAL_PREVIEW_CHARS
+        segments = [
+            ("대상  ", ("label",)),
+            (f"{outcome.target_path}\n", ()),
+            ("내용  ", ("label",)),
+            (f"{outcome.content_chars}자\n", ()),
+        ]
+        if outcome.operation == "overwrite":
+            segments.append(("⚠ 기존 파일 내용을 덮어씁니다.\n", ("warn",)))
+        note = f" · 앞 {APPROVAL_PREVIEW_CHARS}자, 일부 내용만 표시됩니다" if truncated else ""
+        segments += [(f"\n미리보기{note}\n", ("label",)), (preview, ())]
+        return segments
+
     def show_outcome(self, outcome: RuntimeResult) -> None:
         if isinstance(outcome, ApprovalRequired):
-            operation = {
-                "create": "새 파일 저장",
-                "overwrite": "기존 파일 덮어쓰기",
-                "delete": "파일 삭제",
-            }.get(outcome.operation, outcome.operation)
-            self.approval_title.set("승인 필요 · " + operation)
-            if outcome.operation == "delete":
-                import json
-
-                targets = "\n".join(
-                    json.dumps(path, ensure_ascii=False) for path in outcome.targets
-                )
-                body = (
-                    f"삭제 대상: {len(outcome.targets)}개 파일\n{targets}\n\n"
-                    "승인하면 백업 후 삭제합니다. 최근 변경 되돌리기로 일괄 복원할 수 있습니다."
-                )
-                button_text, button_style = "승인하고 삭제", "Danger.TButton"
-            else:
-                preview = outcome.preview[:200]
-                truncated = outcome.preview_truncated or len(outcome.preview) > 200
-                warning = (
-                    "기존 파일 내용을 덮어씁니다.\n" if outcome.operation == "overwrite" else ""
-                )
-                body = (
-                    f"대상: {outcome.target_path}\n{warning}내용: {outcome.content_chars}자\n"
-                    f"\n미리보기\n{preview}" + ("\n일부 내용만 표시됩니다." if truncated else "")
-                )
-                button_text = (
-                    "승인하고 덮어쓰기" if outcome.operation == "overwrite" else "승인하고 저장"
-                )
-                button_style = "Primary.TButton"
+            title, button_text, button_style, danger = APPROVAL_STYLE.get(
+                outcome.operation,
+                (f"승인 필요 · {outcome.operation}", "승인하고 실행", "Primary.TButton", False),
+            )
+            background, line, accent = (
+                (RED_SOFT, RED_LINE, RED) if danger else (AMBER_SOFT, AMBER_LINE, AMBER)
+            )
+            for widget in self._approval_bg:
+                widget.configure(bg=background)
+            self.approval_frame.configure(highlightbackground=line)
+            self._approval_title_label.configure(fg=accent)
+            self.approval_title.set(title)
+            segments = self._approval_details(outcome)
             self.approval_output.configure(state="normal")
             self.approval_output.delete("1.0", "end")
-            self.approval_output.insert("end", body)
+            for text, tags in segments:
+                self.approval_output.insert("end", text, tags)
             self.approval_output.configure(state="disabled")
             self.approval_output.yview_moveto(0)
             self.approve_button.configure(text=button_text, style=button_style)
             self._approval_ready = True
-            self._append("승인 요청 · " + operation, body, "question")
+            operation = title.split("· ", 1)[-1]
+            self._append(
+                "승인 요청 · " + operation, "".join(text for text, _ in segments), "question"
+            )
         elif isinstance(outcome, Clarification):
             options = "\n".join(f"{i}. {option}" for i, option in enumerate(outcome.options, 1))
             self._append(
