@@ -269,3 +269,43 @@ def test_bundle_is_cut_on_whole_records(tmp_path, monkeypatch):
     assert "line 19" in bundle and "line 0\"" not in bundle
     assert "뺀 오래된 기록" in bundle
     loop.db.close()
+
+
+# ---- F05 lesson snapshot, F06 applied recurrence ------------------------------------------
+
+
+async def test_lessons_are_fixed_for_the_whole_run(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    model = FakeModel([ModelTurn("a", []), ModelTurn("b", []), ModelTurn("c", [])])
+    wrapped = loop.wrap(model)
+    messages = [{"role": "system", "content": "base"}]
+    loop.user_input("first", new_run=True)
+    await wrapped.generate(messages, [])
+    loop._add_lesson("sig", "MID_RUN_LESSON")  # an analysis finishing mid-command
+    loop.user_input("1", new_run=False)  # clarification answer / approval stays in the run
+    await wrapped.generate(messages, [])
+    assert all("MID_RUN_LESSON" not in seen[0]["content"] for seen in model.seen)
+    loop.user_input("next command", new_run=True)
+    await wrapped.generate(messages, [])
+    assert "MID_RUN_LESSON" in model.seen[2][0]["content"]
+
+
+async def test_recurrence_counts_only_distinct_runs_that_received_the_lesson(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    loop._add_lesson("error:x", "지침")
+    (lesson_id,) = [i for i, _ in loop.active_lessons()]
+    for _ in range(3):  # failures in runs that never sent the lesson to the model
+        loop.user_input("no model call", new_run=True)
+        loop._queue("R1", "error:x")
+    assert lesson_id in [i for i, _ in loop.active_lessons()]
+
+    for index in range(3):
+        loop.user_input(f"run {index}", new_run=True)
+        await loop.wrap(FakeModel([ModelTurn("x", [])])).generate(
+            [{"role": "system", "content": "base"}], []
+        )
+        loop._queue("R1", "error:x")
+        loop._queue("R1", "error:x")  # the same run detected twice counts once
+        active = [i for i, _ in loop.active_lessons()]
+        assert (lesson_id in active) == (index < 2)
+    assert "재발을 막지 못해" in loop.report_path.read_text()

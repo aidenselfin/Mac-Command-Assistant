@@ -73,6 +73,8 @@ CREATE INDEX IF NOT EXISTS events_run ON events(run_id);
 CREATE TABLE IF NOT EXISTS incidents (
   id INTEGER PRIMARY KEY, ts REAL NOT NULL, rule TEXT NOT NULL, signature TEXT NOT NULL,
   run_id TEXT, status TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lesson_failures (
+  lesson_id INTEGER NOT NULL, run_id TEXT NOT NULL, PRIMARY KEY (lesson_id, run_id));
 CREATE TABLE IF NOT EXISTS lessons (
   id INTEGER PRIMARY KEY, signature TEXT NOT NULL, text TEXT NOT NULL, created_ts REAL NOT NULL,
   last_seen_ts REAL NOT NULL, recurrences INTEGER NOT NULL DEFAULT 0,
@@ -230,11 +232,12 @@ class RecordingModel:
         self.inner, self.loop = inner, loop
 
     async def generate(self, messages, tools, *, allow_tools=True, allow_clarification=True):
-        suffix = self.loop.system_suffix()
+        suffix, sent = self.loop.system_suffix(), ()
         if suffix and messages and messages[0].get("role") == "system":
             # A copy: the planner's own message state never sees the lessons.
             messages = [{**messages[0], "content": messages[0]["content"] + suffix}, *messages[1:]]
-        self.loop.llm_request(messages, tools, allow_tools)
+            sent = tuple(lesson_id for lesson_id, _ in self.loop.run_lessons)
+        self.loop.llm_request(messages, tools, allow_tools, sent)
         started = time.perf_counter()
         try:
             turn: ModelTurn = await self.inner.generate(
@@ -303,6 +306,8 @@ class FeedbackLoop:
         self.daily_limit, self.clock = daily_limit, clock
         self.session_id = uuid.uuid4().hex
         self.run_id: str | None = None
+        # Lessons are frozen when a command starts; analyses finishing mid-run wait for the next.
+        self.run_lessons: list[tuple[int, str]] = []
         self._tasks: set[asyncio.Task] = set()
         self._hints_shown: set[str] = set()
         self._warned = False
@@ -343,12 +348,15 @@ class FeedbackLoop:
         return _clip(redact(text, self.secrets), limit) if text else text
 
     @_safe
-    def llm_request(self, messages: list[dict], tools, allow_tools: bool) -> None:
+    def llm_request(
+        self, messages: list[dict], tools, allow_tools: bool, lessons: tuple[int, ...] = ()
+    ) -> None:
         self.record(
             "llm_request",
             messages=[_summarize_message(m, self.secrets) for m in messages],
             tools=[tool.name for tool in tools],
             allow_tools=allow_tools,
+            lessons=list(lessons),
         )
 
     @_safe
@@ -372,12 +380,14 @@ class FeedbackLoop:
     def user_input(self, text: str, *, new_run: bool) -> None:
         if new_run or self.run_id is None:
             self.run_id = uuid.uuid4().hex
+            self.run_lessons = []  # stays empty, not stale, if the lookup below fails
+            self.run_lessons = self.active_lessons()
         self.record("user_input", signature=self._sig(text, 60), text=self._text(text, FIELD_CHARS))
 
     @_safe
     def decision(self, action: str, tool: str | None = None) -> None:
         if action == "undo":
-            self.run_id = uuid.uuid4().hex
+            self.run_id, self.run_lessons = uuid.uuid4().hex, []
         self.record("user_decision", signature=action, action=action, tool=tool)
 
     @_safe
@@ -516,13 +526,18 @@ class FeedbackLoop:
         # Pinned now: by the time the task runs the user may have started another command.
         evidence = tuple(dict.fromkeys((*evidence, origin))) if origin else tuple(evidence)
         with self.db:
-            lesson = self.db.execute(
-                "SELECT id, recurrences, text FROM lessons WHERE signature = ? AND active = 1",
-                (signature,),
-            ).fetchone()
-            if lesson is not None:
-                lesson_id, recurrences, text = lesson
-                recurrences += 1
+            for lesson_id, text in self._rows(
+                "SELECT id, text FROM lessons WHERE signature = ? AND active = 1", signature
+            ):
+                # A recurrence counts only in a run that actually sent this lesson, once per run.
+                for run in self._runs_that_sent(lesson_id, evidence):
+                    self.db.execute(
+                        "INSERT OR IGNORE INTO lesson_failures (lesson_id, run_id) VALUES (?, ?)",
+                        (lesson_id, run),
+                    )
+                (recurrences,) = self.db.execute(
+                    "SELECT COUNT(*) FROM lesson_failures WHERE lesson_id = ?", (lesson_id,)
+                ).fetchone()
                 self.db.execute(
                     "UPDATE lessons SET recurrences = ?, last_seen_ts = ?, active = ? WHERE id = ?",
                     (recurrences, now, int(recurrences < LESSON_FAILURE_LIMIT), lesson_id),
@@ -573,6 +588,18 @@ class FeedbackLoop:
             )
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
+
+    def _runs_that_sent(self, lesson_id: int, runs: tuple[str, ...]) -> list[str]:
+        if not runs:
+            return []
+        rows = self._rows(
+            f"SELECT run_id, payload FROM events WHERE kind = 'llm_request' "
+            f"AND run_id IN ({','.join('?' * len(runs))})",
+            *runs,
+        )
+        return list(dict.fromkeys(
+            run for run, payload in rows if lesson_id in (_load(payload) or {}).get("lessons", [])
+        ))
 
     # ---- analysis and application ----------------------------------------------------
 
@@ -695,10 +722,7 @@ class FeedbackLoop:
         return self._rows("SELECT id, text FROM lessons WHERE active = 1 ORDER BY id")
 
     def system_suffix(self) -> str:
-        try:
-            lessons = self.active_lessons()
-        except Exception:
-            return ""
+        lessons = self.run_lessons
         if not lessons:
             return ""
         # Appended last and framed as hints so it can never outrank the safety rules above.

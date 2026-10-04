@@ -112,6 +112,7 @@ async def test_repeated_error_learns_lesson_and_injects_it(tmp_path):
     assert loop.recent_incidents()[0][4]["action"] == "lesson"
 
     model = FakeModel([ModelTurn("ok", [])])
+    loop.user_input("다음 명령", new_run=True)  # lessons apply from the next command on
     planner_messages = [
         {"role": "system", "content": "기본 규칙"},
         {"role": "user", "content": "x"},
@@ -125,16 +126,6 @@ async def test_repeated_error_learns_lesson_and_injects_it(tmp_path):
     loop.outcome(Error("LLM 응답 시간 초과"))
     loop.run_finished()
     assert len(analyzer.calls) == 1
-
-
-def test_lesson_that_keeps_failing_is_retired(tmp_path):
-    loop, _ = make_loop(tmp_path)
-    loop._add_lesson("error:x", "지침")
-    for _ in range(3):
-        loop._queue("R1", "error:x")
-    texts = [text for _, text in loop.active_lessons()]
-    assert "지침" not in texts
-    assert "재발을 막지 못해" in loop.report_path.read_text()
 
 
 async def test_unsafe_lesson_goes_to_report_not_prompt(tmp_path):
