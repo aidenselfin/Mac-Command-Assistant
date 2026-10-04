@@ -6,6 +6,7 @@ import json
 import secrets
 import sqlite3
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -213,8 +214,13 @@ class RiskGuard:
         on_started: Callable[[], None] | None,
         on_finished: Callable[[], None] | None,
     ) -> ToolResult:
-        changed = await asyncio.to_thread(conversion.changed_since, prepared.targets[0],
-                                          prepared.file_state, prepared.target_path)
+        changed = await asyncio.to_thread(
+            conversion.changed_since,
+            prepared.targets[0],
+            prepared.file_state,
+            prepared.target_path,
+            self._roots,
+        )
         if expected != prepared.digest or changed:
             # The source changed or the output name got taken: convert again, ask again.
             refreshed = await asyncio.to_thread(
@@ -223,28 +229,36 @@ class RiskGuard:
             raise ApprovalChangedError(refreshed)
         if self._undo_journal is None:
             raise RiskGuardError("Undo journal이 없어 변환 파일을 만들지 않았습니다.")
+        # A cancelled to_thread keeps running, so each step is shielded and awaited to its end
+        # before the journal is settled, as the delete path does.
+        journal_task = asyncio.create_task(asyncio.to_thread(
+            self._undo_journal.prepare_write, prepared.target_path, "create", prepared.payload
+        ))
         try:
-            entry = await asyncio.to_thread(
-                self._undo_journal.prepare_write,
-                prepared.target_path,
-                "create",
-                prepared.payload,
-            )
+            entry = await asyncio.shield(journal_task)
+        except asyncio.CancelledError:
+            with suppress(Exception):
+                await asyncio.to_thread(self._undo_journal.mark_write_failed, await journal_task)
+            raise
         except UndoJournalError as exc:
             raise RiskGuardError(
                 "Undo journal을 준비하지 못해 변환 파일을 만들지 않았습니다."
             ) from exc
         if on_started is not None:
             on_started()
+        write_task = asyncio.create_task(asyncio.to_thread(
+            conversion.write_new_file, prepared.target_path, prepared.payload, self._roots
+        ))
         try:
-            await asyncio.to_thread(
-                conversion.write_new_file, prepared.target_path, prepared.payload
-            )
-        except BaseException:
             try:
+                await asyncio.shield(write_task)
+            except asyncio.CancelledError:
+                with suppress(Exception):
+                    await write_task  # the file is now either complete or removed
+                raise
+        except BaseException:
+            with suppress(UndoJournalError):
                 await asyncio.to_thread(self._undo_journal.reconcile_uncertain_write, entry)
-            except UndoJournalError:
-                pass
             raise
         finally:
             if on_finished is not None:

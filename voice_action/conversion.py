@@ -5,6 +5,7 @@ file and the target format. Conversions run in a temporary folder before approva
 approval shows the real result, and the output is always a new file next to the source.
 """
 
+import contextlib
 import csv
 import hashlib
 import io
@@ -297,9 +298,12 @@ def prepare_conversion(arguments: dict, roots: tuple[Path, ...]) -> PreparedConv
     return PreparedConversion(str(source), str(output), target_format, state, output_bytes)
 
 
-def changed_since(source: str, state: str, output: str) -> bool:
-    """True if the source is no longer the approved file or the output name got taken."""
+def changed_since(source: str, state: str, output: str, roots: tuple[Path, ...]) -> bool:
+    """True if the source is no longer the approved file, a path left the allowed folders
+    (e.g. a parent swapped for a symlink while waiting), or the output name got taken."""
     try:
+        _inside(source, roots, exists=True)
+        _inside(output, roots, exists=False)
         current = _read_source(Path(source))[1]
     except ToolRejectedError:
         return True
@@ -307,9 +311,13 @@ def changed_since(source: str, state: str, output: str) -> bool:
     return current != state or target.exists() or target.is_symlink()
 
 
-def write_new_file(raw: str, data: bytes) -> None:
-    """Create the output only if nothing is there yet, durably."""
-    path = Path(raw)
+def write_new_file(raw: str, data: bytes, roots: tuple[Path, ...]) -> None:
+    """Create the output only if nothing is there yet, durably, inside the allowed folders.
+
+    The boundary is checked here, at the write itself, not only when the conversion was
+    prepared. A partial write removes its own file, so a failure never leaves an orphan.
+    """
+    path = _inside(raw, roots, exists=False)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags, 0o644)
@@ -317,13 +325,21 @@ def write_new_file(raw: str, data: bytes) -> None:
         raise ToolRejectedError(
             "출력 파일이 승인 대기 중에 생겼습니다. 덮어쓰지 않습니다."
         ) from exc
+    created = os.fstat(descriptor)
     try:
         view = memoryview(data)
         while view:
             view = view[os.write(descriptor, view):]
         os.fsync(descriptor)
-    finally:
+    except BaseException:
         os.close(descriptor)
+        # Remove only the file this call created, not anything put there since.
+        with contextlib.suppress(OSError):
+            current = os.lstat(path)
+            if (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino):
+                os.unlink(path)
+        raise
+    os.close(descriptor)
 
 
 def read_document(arguments: dict, roots: tuple[Path, ...], limit: int) -> ToolResult:

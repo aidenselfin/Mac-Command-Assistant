@@ -51,7 +51,7 @@ def root(tmp_path):
 def convert(root, source, fmt, **extra):
     arguments = {"source": str(source), "target_format": fmt, **extra}
     prepared = prepare_conversion(arguments, (root,))
-    write_new_file(prepared.output, prepared.data)
+    write_new_file(prepared.output, prepared.data, (root,))
     return prepared
 
 
