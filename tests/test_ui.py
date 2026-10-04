@@ -548,3 +548,13 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
         assert view.output.yview()[0] < 0.1
     finally:
         root.destroy()
+
+
+def test_lost_hangul_keystroke_detection():
+    real_g = (5 << 24) | ord("ㅎ")  # TkAqua: virtual key 5 ('g') typed with the Korean IME
+    commit = (0x80 << 24) | ord("ㅎ")
+    assert ui_module.is_lost_hangul_keystroke("ㅎ", real_g, composing=False)
+    assert not ui_module.is_lost_hangul_keystroke("ㅎ", real_g, composing=True)
+    assert not ui_module.is_lost_hangul_keystroke("ㅎ", commit, composing=False)
+    assert not ui_module.is_lost_hangul_keystroke("한", real_g, composing=False)
+    assert not ui_module.is_lost_hangul_keystroke("g", (5 << 24) | ord("g"), composing=False)

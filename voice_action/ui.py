@@ -1,6 +1,7 @@
 """Minimal Tkinter UI over the existing runtime controller."""
 
 import asyncio
+import os
 import queue
 import sys
 import threading
@@ -525,6 +526,69 @@ class AsyncRuntimeWorker:
             self._shutdown_event.set()
 
 
+TK_IME_COMMIT_KEY = 0x80  # TkAqua keycode high byte for text committed by an input method
+SHIFT_STATE = 0x1
+
+
+def is_lost_hangul_keystroke(char: str, keycode: int, composing: bool) -> bool:
+    """Apple's Korean IME commits the first key after focus or a 한/영 switch as a lone jamo.
+
+    A healthy IME sends Hangul keys as marked text (composing) or as commits (0x80 keycode),
+    so a lone compatibility jamo (U+3131-U+318E) from a real key outside composition is the bug.
+    """
+    return (
+        not composing
+        and len(char) == 1
+        and "\u3131" <= char <= "\u318e"
+        and (keycode >> 24) & 0xFF != TK_IME_COMMIT_KEY
+    )
+
+
+def fix_hangul_first_keystroke(widget) -> None:
+    """Replay the lost first keystroke so Apple's Korean IME composes it (macOS only).
+
+    Same idea as cmux PR #11806, which re-interprets the key inside keyDown. Tk runs bindings
+    after keyDown, where re-interpreting still commits a lone jamo, so the key is posted to this
+    process again and goes through Tk's normal keyDown path once the IME is ready.
+    """
+    # The keycode layout (virtual key << 24 | char) used below is TkAqua 9's.
+    if float(widget.tk.call("info", "tclversion")) < 9.0:
+        return
+    try:
+        import Quartz
+    except ImportError:
+        return
+    composing = False
+    replayed = False
+
+    def set_composing(value: bool) -> None:
+        nonlocal composing
+        composing = value
+
+    def on_key(event) -> str | None:
+        nonlocal replayed
+        if replayed or not is_lost_hangul_keystroke(event.char, event.keycode, composing):
+            replayed = False  # one replay per key: a second loss is inserted as typed
+            return None
+        # Without permission the post is dropped silently; a split syllable beats a lost key.
+        if not Quartz.CGPreflightPostEventAccess():
+            return None
+        replayed = True
+        # ponytail: the replay is queued behind any key already pending, so a key typed within
+        # a few ms of the first one could land before it; never seen at human typing speed.
+        pid = os.getpid()
+        for down in (True, False):
+            key = Quartz.CGEventCreateKeyboardEvent(None, (event.keycode >> 24) & 0xFF, down)
+            if event.state & SHIFT_STATE:
+                Quartz.CGEventSetFlags(key, Quartz.kCGEventFlagMaskShift)
+            Quartz.CGEventPostToPid(pid, key)
+        return "break"
+
+    widget.bind("<<TkStartIMEMarkedText>>", lambda _e: set_composing(True), add="+")
+    widget.bind("<<TkEndIMEMarkedText>>", lambda _e: set_composing(False), add="+")
+    widget.bind("<KeyPress>", on_key, add="+")
+
+
 class TkView:
     """Tk widgets; every method is called only by the Tk main thread."""
 
@@ -731,6 +795,7 @@ class TkView:
         if sys.platform == "darwin":
             self.entry.bind("<Button-2>", self._show_entry_menu)
             self.entry.bind("<Control-Button-1>", self._show_entry_menu)
+            fix_hangul_first_keystroke(self.entry)
         root.protocol("WM_DELETE_WINDOW", self._shutdown)
         self.entry.focus_set()
 
