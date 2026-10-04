@@ -295,6 +295,8 @@ class FeedbackLoop:
         with contextlib.suppress(sqlite3.Error):
             self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        with contextlib.suppress(sqlite3.OperationalError):  # stores made before evidence
+            self.db.execute("ALTER TABLE incidents ADD COLUMN evidence TEXT")
         os.chmod(path, 0o600)  # ponytail: -wal/-shm side files keep the process umask
         self.report_path = path.with_name("feedback-report.md")
         self.analyzer, self.emit, self.secrets = analyzer, emit, secrets
@@ -419,9 +421,9 @@ class FeedbackLoop:
         """Run detection rules for the current run and queue analysis. Never raises."""
         try:
             incidents = self._detect()
-            for rule, signature in incidents:
-                self._queue(rule, signature)
-            return incidents
+            for rule, signature, evidence in incidents:
+                self._queue(rule, signature, evidence)
+            return [(rule, signature) for rule, signature, _ in incidents]
         except Exception:
             self._warn()
             return []
@@ -429,10 +431,11 @@ class FeedbackLoop:
     def _rows(self, sql: str, *args) -> list[tuple]:
         return self.db.execute(sql, args).fetchall()
 
-    def _detect(self) -> list[tuple[str, str]]:
+    def _detect(self) -> list[tuple[str, str, tuple[str, ...]]]:
+        """(rule, signature, evidence run ids) for the current run."""
         if self.run_id is None:
             return []
-        now, found = self.clock(), []
+        now, found, run = self.clock(), [], self.run_id
         events = []
         for kind, signature, payload, ts in self._rows(
             "SELECT kind, signature, payload, ts FROM events WHERE run_id = ? ORDER BY id",
@@ -446,28 +449,31 @@ class FeedbackLoop:
         for kind, signature, data, _ in events:
             # R1: the same error in three separate runs within a day.
             if kind in ERROR_KINDS and signature:
-                (runs,) = self.db.execute(
-                    f"SELECT COUNT(DISTINCT run_id) FROM events WHERE signature = ? "
-                    f"AND kind IN ({','.join('?' * len(ERROR_KINDS))}) AND ts >= ?",
-                    (signature, *ERROR_KINDS, now - ERROR_WINDOW),
-                ).fetchone()
-                if runs >= ERROR_REPEAT_COUNT:
-                    found.append(("R1", f"error:{signature}"))
+                runs = tuple(
+                    r for (r,) in self._rows(
+                        f"SELECT DISTINCT run_id FROM events WHERE signature = ? "
+                        f"AND kind IN ({','.join('?' * len(ERROR_KINDS))}) AND ts >= ?",
+                        signature, *ERROR_KINDS, now - ERROR_WINDOW,
+                    )
+                )
+                if len(runs) >= ERROR_REPEAT_COUNT:
+                    found.append(("R1", f"error:{signature}", runs))
             # R6: clarification budget exhausted.
             if kind == "error_outcome" and "clarification 최대" in data.get("message", ""):
-                found.append(("R6", f"clarify:{signature}"))
+                found.append(("R6", f"clarify:{signature}", (run,)))
             # R4: the user rejected a proposed write.
             if kind == "user_decision" and data.get("action") == "reject":
-                found.append(("R4", f"reject:{data.get('tool')}"))
+                found.append(("R4", f"reject:{data.get('tool')}", (run,)))
             if kind == "user_decision" and data.get("action") == "undo":
                 approved = self._rows(
-                    "SELECT payload FROM events WHERE kind = 'user_decision' "
+                    "SELECT run_id, payload FROM events WHERE kind = 'user_decision' "
                     "AND signature = 'approve' AND ts >= ? ORDER BY id DESC LIMIT 1",
                     now - UNDO_WINDOW,
                 )
                 if approved:
-                    tool = (_load(approved[0][0]) or {}).get("tool")
-                    found.append(("R4", f"undo:{tool}"))
+                    approve_run, payload = approved[0]
+                    tool = (_load(payload) or {}).get("tool")
+                    found.append(("R4", f"undo:{tool}", (approve_run, run)))
         # R2: the model repeated the same tool call within one run.
         calls = [
             f"{call.get('name')}:{call.get('digest') or _call_digest(call.get('arguments'))}"
@@ -476,33 +482,39 @@ class FeedbackLoop:
             for call in data.get("tool_calls", [])
         ]
         for call in sorted({c for c in calls if calls.count(c) >= 2}):
-            found.append(("R2", f"loop:{call}"))
+            found.append(("R2", f"loop:{call}", (run,)))
         inputs = [(d.get("text") or "", ts) for k, _, d, ts in events if k == "user_input"]
         if inputs:
             text, ts = inputs[0]
-            earlier = self._rows(
-                "SELECT payload FROM events WHERE kind = 'user_input' AND run_id != ? "
-                "AND ts >= ? AND ts < ? ORDER BY id",
-                self.run_id,
-                ts - RETRY_WINDOW,
-                ts,
-            )
-            earlier_texts = [(_load(p) or {}).get("text") or "" for (p,) in earlier]
+            earlier = [
+                (r, (_load(p) or {}).get("text") or "")
+                for r, p in self._rows(
+                    "SELECT run_id, payload FROM events WHERE kind = 'user_input' "
+                    "AND run_id != ? AND ts >= ? AND ts < ? ORDER BY id",
+                    run, ts - RETRY_WINDOW, ts,
+                )
+            ]
             # R3: near-identical commands retried within ten minutes.
-            similar = [
-                t for t in earlier_texts
+            similar = tuple(
+                r for r, t in earlier
                 if difflib.SequenceMatcher(None, normalize(t), normalize(text)).ratio()
                 >= RETRY_RATIO
-            ]
+            )
             if len(similar) + 1 >= RETRY_COUNT:
-                found.append(("R3", f"retry:{normalize(text, 60)}"))
+                found.append(("R3", f"retry:{normalize(text, 60)}", (*similar, run)))
             # R5: the user opened with a correction right after a previous command.
-            if CORRECTION_PATTERN.search(text) and earlier_texts:
-                found.append(("R5", f"correction:{normalize(earlier_texts[-1], 60)}"))
-        return list(dict.fromkeys(found))
+            if CORRECTION_PATTERN.search(text) and earlier:
+                previous_run, previous = earlier[-1]
+                found.append(("R5", f"correction:{normalize(previous, 60)}", (previous_run, run)))
+        unique = {}
+        for rule, signature, evidence in found:
+            unique.setdefault((rule, signature), tuple(dict.fromkeys(evidence)))
+        return [(rule, signature, evidence) for (rule, signature), evidence in unique.items()]
 
-    def _queue(self, rule: str, signature: str) -> None:
-        now = self.clock()
+    def _queue(self, rule: str, signature: str, evidence: tuple[str, ...] = ()) -> None:
+        now, origin = self.clock(), self.run_id
+        # Pinned now: by the time the task runs the user may have started another command.
+        evidence = tuple(dict.fromkeys((*evidence, origin))) if origin else tuple(evidence)
         with self.db:
             lesson = self.db.execute(
                 "SELECT id, recurrences, text FROM lessons WHERE signature = ? AND active = 1",
@@ -520,6 +532,7 @@ class FeedbackLoop:
                         signature,
                         f"lesson #{lesson_id}이 {recurrences}회 재발을 막지 못해 비활성화했습니다.",
                         f"비활성화된 lesson: {text}",
+                        origin,
                     )
             recent = self.db.execute(
                 "SELECT 1 FROM incidents WHERE signature = ? AND ts >= ?",
@@ -542,9 +555,9 @@ class FeedbackLoop:
                 else "queued"
             )
             cursor = self.db.execute(
-                "INSERT INTO incidents (ts, rule, signature, run_id, status) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (now, rule, signature, self.run_id, status),
+                "INSERT INTO incidents (ts, rule, signature, run_id, status, evidence) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (now, rule, signature, origin, status, json.dumps(evidence)),
             )
         self._say(
             f"[FEEDBACK] 문제 감지 {rule} ({signature[:60]}) → "
@@ -556,7 +569,7 @@ class FeedbackLoop:
         )
         if status == "queued":
             task = asyncio.get_running_loop().create_task(
-                self._analyze(cursor.lastrowid, rule, signature)
+                self._analyze(cursor.lastrowid, rule, signature, origin, evidence)
             )
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
@@ -589,34 +602,34 @@ class FeedbackLoop:
             + ("\n".join(lessons) or "(없음)")
         )
 
-    def _recent_session_runs(self) -> tuple[str, ...]:
-        return tuple(
-            run for (run,) in self._rows(
-                "SELECT run_id FROM events WHERE session_id = ? AND run_id IS NOT NULL "
-                "GROUP BY run_id ORDER BY MAX(id) DESC LIMIT 3",
-                self.session_id,
-            )
-        )
-
-    async def _analyze(self, incident_id: int, rule: str, signature: str) -> None:
+    async def _analyze(
+        self,
+        incident_id: int,
+        rule: str,
+        signature: str,
+        origin: str | None,
+        evidence: tuple[str, ...],
+    ) -> None:
         status = "failed"
         try:
-            raw = await self.analyzer.analyze(
-                rule, self._bundle(signature, self._recent_session_runs())
-            )
+            raw = await self.analyzer.analyze(rule, self._bundle(signature, evidence))
             # One sanitized result feeds the event, lesson, hint and report alike.
             result = scrub(raw, self.secrets)
             if result.get("lesson") != raw.get("lesson"):
                 result["action"] = "dev_report"  # never adopt a lesson that carried a credential
-            self.record("feedback", signature=signature, incident=incident_id, **result)
+            self.record(
+                "feedback", signature=signature, run_id=origin, incident=incident_id, **result
+            )
             self._say(f"[FEEDBACK] 분석 완료 {rule}: {result['root_cause']} → {result['action']}")
-            self._apply(signature, result)
+            self._apply(signature, result, origin)
             status = "analyzed"
         except asyncio.CancelledError:
             status = "cancelled"
             raise
         except Exception as exc:
-            self.record("feedback_error", signature=signature, error=type(exc).__name__)
+            self.record(
+                "feedback_error", signature=signature, run_id=origin, error=type(exc).__name__
+            )
             self._say(f"[FEEDBACK] 분석 실패 {rule} ({type(exc).__name__})")
         finally:
             try:
@@ -627,7 +640,7 @@ class FeedbackLoop:
             except Exception:
                 self._warn()
 
-    def _apply(self, signature: str, result: dict) -> None:
+    def _apply(self, signature: str, result: dict, origin: str | None = None) -> None:
         lesson = (result.get("lesson") or "").strip()
         hint = (result.get("user_hint") or "").strip()
         if result["action"] == "lesson" and lesson:
@@ -636,9 +649,11 @@ class FeedbackLoop:
             ):
                 self._add_lesson(signature, lesson)
             else:
-                self._report(signature, result["root_cause"], f"채택하지 않은 lesson: {lesson}")
+                self._report(
+                    signature, result["root_cause"], f"채택하지 않은 lesson: {lesson}", origin
+                )
         elif result["action"] == "dev_report":
-            self._report(signature, result["root_cause"], f"분류: {result['category']}")
+            self._report(signature, result["root_cause"], f"분류: {result['category']}", origin)
         if hint and hint not in self._hints_shown:
             self._hints_shown.add(hint)
             self._say(f"[FEEDBACK] {hint}")
@@ -660,11 +675,13 @@ class FeedbackLoop:
         self._say("[FEEDBACK] 반복된 문제에서 새 지침을 배웠습니다. 다음 명령부터 적용합니다.")
 
     @_safe
-    def _report(self, signature: str, cause: str, detail: str) -> None:
+    def _report(
+        self, signature: str, cause: str, detail: str, run_id: str | None = None
+    ) -> None:
         stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(self.clock()))
         entry = (
             f"\n## {stamp} · {signature}\n\n- 원인: {cause}\n- {detail}\n"
-            f"- run_id: {self.run_id}\n"
+            f"- run_id: {run_id or self.run_id}\n"
         )
         # O_NOFOLLOW: a report path swapped for a symlink is refused, not followed.
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)

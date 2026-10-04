@@ -209,3 +209,63 @@ def test_store_refuses_symlinks_and_keeps_logs_private(tmp_path):
     loop._report("sig", "cause", "detail")
     assert stat.S_IMODE(os.stat(loop.report_path).st_mode) == 0o600
     loop.db.close()
+
+
+# ---- F04 incident context ----------------------------------------------------------------
+
+
+class RecordingAnalyzer:
+    def __init__(self, result=None):
+        self.bundles = []
+        self.result = result or {
+            "action": "dev_report", "root_cause": "r", "category": "code_bug", "confidence": 0.9
+        }
+
+    async def analyze(self, rule, bundle):
+        self.bundles.append(bundle)
+        return self.result
+
+    async def close(self):
+        pass
+
+
+async def test_analysis_stays_with_its_origin_run(tmp_path):
+    analyzer = RecordingAnalyzer()
+    loop, _ = make_loop(tmp_path, analyzer)
+    loop.user_input("ORIGIN_RUN", new_run=True)
+    origin = loop.run_id
+    loop._queue("R4", "reject:tool", (origin,))
+    loop.user_input("UNRELATED_NEXT_RUN", new_run=True)  # starts before the task runs
+    await asyncio.gather(*loop._tasks)
+    assert "ORIGIN_RUN" in analyzer.bundles[0]
+    assert "UNRELATED_NEXT_RUN" not in analyzer.bundles[0]
+    assert "signature: reject:tool" in analyzer.bundles[0]
+    (run,) = loop.db.execute("SELECT run_id FROM events WHERE kind='feedback'").fetchone()
+    assert run == origin and origin in loop.report_path.read_text()
+
+
+async def test_repeated_error_across_sessions_keeps_all_evidence(tmp_path):
+    analyzer = RecordingAnalyzer()
+    for index in range(3):
+        loop = FeedbackLoop(tmp_path / "fb.sqlite3", analyzer=analyzer)
+        loop.user_input(f"SESSION_{index}", new_run=True)
+        loop.outcome(Error("repeated synthetic failure"))
+        found = loop.run_finished()
+        await loop.close()
+    assert "R1" in [rule for rule, _ in found]
+    (r1_bundle,) = [b for b in analyzer.bundles if b.startswith("signature: error:")]
+    assert all(f"SESSION_{index}" in r1_bundle for index in range(3))
+
+
+def test_bundle_is_cut_on_whole_records(tmp_path, monkeypatch):
+    monkeypatch.setattr("voice_action.feedback.BUNDLE_CHARS", 300)
+    loop, _ = make_loop(tmp_path)
+    loop.user_input("x", new_run=True)
+    for index in range(20):
+        loop.record("outcome", text=f"line {index}")
+    bundle = loop._bundle("sig", (loop.run_id,))
+    lines = bundle.split("\n\n")[0].splitlines()[2:]
+    assert lines and all(json.loads(line) for line in lines)
+    assert "line 19" in bundle and "line 0\"" not in bundle
+    assert "뺀 오래된 기록" in bundle
+    loop.db.close()
