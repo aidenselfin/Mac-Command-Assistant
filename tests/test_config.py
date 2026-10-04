@@ -38,6 +38,19 @@ def test_local_groq_env(tmp_path):
     assert config.api_key == "local-secret"
 
 
+def test_openrouter_provider(tmp_path):
+    (tmp_path / "voice-action-test").mkdir()
+    config = load_config(
+        {"provider": "openrouter"},
+        cwd=tmp_path,
+        home=tmp_path / "home",
+        environ={"OPENROUTER_API_KEY": "router-secret", "GROQ_API_KEY": "unused"},
+    )
+    assert config.model == "anthropic/claude-sonnet-5.5"
+    assert config.base_url == "https://openrouter.ai/api/v1"
+    assert config.api_key == "router-secret"
+
+
 @pytest.mark.parametrize(
     "override",
     [

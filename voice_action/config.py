@@ -15,6 +15,18 @@ class ConfigError(ValueError):
     pass
 
 
+# provider -> (API key variable, default model, default base_url)
+PROVIDERS = {
+    "openai": ("OPENAI_API_KEY", "gpt-4o-mini", None),
+    "groq": ("GROQ_API_KEY", "openai/gpt-oss-20b", "https://api.groq.com/openai/v1"),
+    "openrouter": (
+        "OPENROUTER_API_KEY",
+        "anthropic/claude-sonnet-5.5",
+        "https://openrouter.ai/api/v1",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class Config:
     provider: str
@@ -83,10 +95,10 @@ def load_config(
             data[key] = value
     data.update({k: v for k, v in (overrides or {}).items() if v is not None})
     provider = data["provider"]
-    if provider not in ("openai", "groq"):
-        raise ConfigError("지원 provider: openai, groq")
-    data.setdefault("model", "openai/gpt-oss-20b" if provider == "groq" else "gpt-4o-mini")
-    key_name = "GROQ_API_KEY" if provider == "groq" else "OPENAI_API_KEY"
+    if provider not in PROVIDERS:
+        raise ConfigError("지원 provider: " + ", ".join(PROVIDERS))
+    key_name, default_model, default_base_url = PROVIDERS[provider]
+    data.setdefault("model", default_model)
     api_key = env.get(key_name)
     if not isinstance(api_key, str) or not api_key.strip():
         raise ConfigError(f"{key_name} 환경변수가 필요합니다.")
@@ -125,8 +137,8 @@ def load_config(
             raise ConfigError(f"{key}는 양수{' 정수' if kind is int else ''}여야 합니다.") from exc
         numbers[key] = number
     base_url = data.get("base_url")
-    if base_url is None and provider == "groq":
-        base_url = "https://api.groq.com/openai/v1"
+    if base_url is None:
+        base_url = default_base_url
     if base_url is not None:
         if not isinstance(base_url, str):
             raise ConfigError("base_url은 URL 문자열이어야 합니다.")

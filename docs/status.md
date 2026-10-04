@@ -40,7 +40,9 @@
 - 작업은 이 폴더에서 직접 한다. 별도 git worktree를 쓰지 않는다 (2026-10-04 사용자 요청).
 - `.voice-action/undo.sqlite3`는 원본에서 복사되어 원본 경로를 가리키는 항목이 있다.
   깨끗한 테스트가 필요하면 삭제해도 된다 (git 추적 대상 아님).
-- 피드백 루프는 메인 LLM(Groq) 설정과 호출을 바꾸지 않는다. 분석에만 OpenRouter를 쓴다.
+- 메인 LLM은 2026-10-04부터 OpenRouter `anthropic/claude-sonnet-5.5` (로컬 `config.json`).
+  Claude 3.5 Sonnet은 OpenRouter에서 더 이상 제공되지 않아 최신 Sonnet을 썼다.
+  피드백 분석은 별도 설정(`VOICE_ACTION_FEEDBACK_MODEL`, 기본 `x-ai/grok-4.3`)이다.
 - 홈 `~/.voice-action/config.json`의 `model: anthropic/claude-3-haiku`는 프로젝트 `config.json`이
   덮어쓴다. `config.json`이 없는 복사본에서 실행하면 Groq가 404를 낸다.
 - 테스트는 conftest의 autouse fixture로 피드백 DB를 tmp_path에 둔다.

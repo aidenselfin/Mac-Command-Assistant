@@ -330,7 +330,7 @@ def main(argv=None) -> int:
     command_mode.add_argument("--ui", action="store_true")
     command_mode.add_argument("--lessons", action="store_true", help="활성 피드백 lesson 목록")
     command_mode.add_argument("--lesson-off", type=int, metavar="ID", help="lesson 비활성화")
-    parser.add_argument("--provider", choices=("openai", "groq"))
+    parser.add_argument("--provider", choices=("openai", "groq", "openrouter"))
     parser.add_argument("--model")
     parser.add_argument("--base-url")
     parser.add_argument("--allowed-directory", action="append", dest="allowed_directories")

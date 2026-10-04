@@ -116,7 +116,7 @@ batch와 journal 기록이 끝나기를 기다린 뒤 창을 닫습니다. 재�
 - [uv](https://docs.astral.sh/uv/)
 - Node.js와 npm
 - Playwright Chromium
-- Groq 또는 OpenAI API key
+- OpenRouter, Groq 또는 OpenAI API key
 - macOS 활성 앱 조회를 사용할 경우 Accessibility 권한
 
 Python 주요 의존성은 `mcp`, `openai`, `anyio`, `jsonschema`, `rich`, `python-dotenv`입니다. Node 의존성은 다음 버전으로 고정되어 있습니다.
@@ -216,7 +216,7 @@ Tk main thread와 별도의 non-daemon worker thread가 동작합니다. worker�
 공통 override:
 
 ```text
---provider {openai,groq}
+--provider {openai,groq,openrouter}
 --model MODEL
 --base-url URL
 --allowed-directory PATH   # 반복 가능
@@ -273,14 +273,15 @@ VOICE_ACTION_MAX_TOOL_RESULT_CHARS
 
 provider별 기본 모델:
 
-- Groq: `openai/gpt-oss-20b`
-- OpenAI: `gpt-4o-mini`
+- OpenRouter: `anthropic/claude-sonnet-5.5` (키 `OPENROUTER_API_KEY`, base URL `https://openrouter.ai/api/v1`)
+- Groq: `openai/gpt-oss-20b` (키 `GROQ_API_KEY`, base URL `https://api.groq.com/openai/v1`)
+- OpenAI: `gpt-4o-mini` (키 `OPENAI_API_KEY`)
 
-Groq의 기본 base URL은 `https://api.groq.com/openai/v1`입니다. 한 명령에서는 하나의 provider와 하나의 모델만 사용합니다.
+OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합니다. 모델은 OpenRouter의 도구 호출 지원 모델 ID로 바꿀 수 있습니다. 한 명령에서는 하나의 provider와 하나의 모델만 사용합니다.
 
 ## 자기 피드백 루프
 
-기본으로 켜져 있습니다. 명령을 처리하는 동안 사용자 입력, 메인 LLM(Groq) 요청·응답, 상태 전이, 결과를 `.voice-action/feedback.sqlite3`(권한 600)에 기록하고, 명령이 끝날 때마다 아래 규칙으로 문제를 감지합니다.
+기본으로 켜져 있습니다. 명령을 처리하는 동안 사용자 입력, 메인 LLM 요청·응답, 상태 전이, 결과를 `.voice-action/feedback.sqlite3`(권한 600)에 기록하고, 명령이 끝날 때마다 아래 규칙으로 문제를 감지합니다.
 
 기록 정책:
 
@@ -300,7 +301,7 @@ Groq의 기본 base URL은 `https://api.groq.com/openai/v1`입니다. 한 명령
 | R5 | 직전 명령 10분 안의 정정·지시 ("아니…", "다시…", "왜…", "…말고", "다음부턴…", "앞으로는…", "제대로") |
 | R6 | clarification 최대 횟수 초과 |
 
-감지되면 백그라운드에서 OpenRouter 모델이 그 사건의 근거 run만 보고 원인을 분석해 다음 중 하나를 적용합니다. 메인 Groq 모델과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
+감지되면 백그라운드에서 OpenRouter 모델이 그 사건의 근거 run만 보고 원인을 분석해 다음 중 하나를 적용합니다. 메인 LLM 설정과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
 
 - lesson: 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
 - user_hint: `[FEEDBACK] …` 한 줄 출력
