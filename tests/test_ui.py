@@ -11,6 +11,8 @@ from voice_action.planner import (
     Clarification,
     ClarificationContext,
     Completed,
+    Error,
+    PlannerError,
     PlannerEvent,
     PlannerEventType,
 )
@@ -452,6 +454,33 @@ def test_worker_exception_is_redacted_and_closes_owned_resources(config):
     assert manager.closed.is_set()
     assert client.closed.is_set()
     assert worker.thread is not None and not worker.thread.is_alive()
+
+
+class PlannerFailingModel:
+    async def generate(self, *_args, **_kwargs):
+        raise PlannerError("LLM API 요청 실패 (HTTP 404)")
+
+
+def test_worker_planner_error_is_reported_and_keeps_window_open(config):
+    messages = queue.Queue()
+    manager, client = FakeManager(), FakeClient()
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: manager,
+        client_factory=lambda _config: client,
+        model_factory=lambda _client, _model_name: PlannerFailingModel(),
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+
+    for _ in range(2):  # still accepts commands after the first failure
+        assert worker.submit("실패 요청")
+        outcome, seen = wait_for_message(messages, UIMessageType.OUTCOME)
+        assert outcome.value == Error("LLM API 요청 실패 (HTTP 404)")
+        assert not [m for m in seen if m.type in {UIMessageType.FAILURE, UIMessageType.STOPPED}]
+    assert not manager.closed.is_set()
+    worker.shutdown()
 
 
 def test_outcome_rendering_keeps_clarification_contract():
