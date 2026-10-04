@@ -306,7 +306,7 @@ OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합
 
 감지되면 백그라운드에서 OpenRouter 모델이 그 사건의 근거 run만 보고 원인을 분석해 다음 중 하나를 적용합니다. 메인 LLM 설정과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
 
-- lesson: 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
+- lesson: 분석 결과는 **후보**로만 저장됩니다. 사람이 평가(`evals/run_eval.py --live`)로 비교한 뒤 `--lesson-on ID`로 채택하면 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
 - user_hint: `[FEEDBACK] …` 한 줄 출력
 - dev_report: `.voice-action/feedback-report.md`(권한 600)에 기록, 코드 수정은 사람이 판단
 
@@ -323,7 +323,7 @@ VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 최근 24시간 분석 요청 한�
 
 종료 시 진행 중인 분석은 CLI에서 최대 15초, UI에서 최대 5초 기다린 뒤 취소합니다. 취소해도 이미 보낸 요청은 한도에 포함됩니다.
 
-lesson 관리: `uv run python main.py --lessons`(목록), `uv run python main.py --lesson-off ID`(비활성화).
+lesson 관리: `uv run python main.py --lessons`(활성·후보 목록), `--lesson-on ID`(후보 채택), `--lesson-off ID`(비활성화·후보 거절). 채택 절차는 `docs/self-improvement-guide.md` 5.2절.
 
 ## 노출되는 도구
 

@@ -3,7 +3,8 @@
 - 작성일: 2026-10-04
 - 원문: `~/Downloads/voice_action_self_improvement_guide.md` (설계 지침 v1.0, 1308행)
 - 이 문서: 원문을 실제 코드와 대조해 검토하고, 이 저장소에서 바로 실행할 수 있게 줄인 판
-- 1단계(EvalRunner)는 `evals/`에 구현·검증되어 있다. 2단계부터 이 문서의 순서대로 진행한다.
+- 1단계(EvalRunner)·2단계(과제 22개)·3단계(lesson 후보→채택) 코드는 구현·검증되어 있다.
+  2단계의 `--live --repeat 3` 기준선과 3단계의 실제 후보 비교는 사용자 확인 후(과금) 진행한다.
 
 ## 1. 검토 결론
 
@@ -119,7 +120,7 @@ uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장
 - `--live` (당시 메인 모델 OpenRouter `anthropic/claude-sonnet-5.5`, 이후 Groq로 변경): `read_summary`, `write_reject` 2/2 통과.
 - `ruff check` 통과. 기존 서비스 코드는 수정하지 않았다.
 
-## 4. 2단계: 과제 늘리기 (다음 작업)
+## 4. 2단계: 과제 늘리기 (재생 모드 완료, `--live` 기준선 남음)
 
 목표: `--live` 기준선(baseline)을 잴 수 있는 과제 15~25개. 개수보다 서로 다른 상황을 우선한다.
 
@@ -141,9 +142,15 @@ uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장
 
 완료 기준: 재생 모드 전부 통과, `--live --repeat 3` 결과 요약이 `docs/status.md`에 기록됨.
 
-## 5. 3단계: lesson을 "후보 → 비교 → 채택"으로 바꾸기
+진행 (2026-10-04): 정상 10개·negative 4개를 추가해 22개. 재생 모드 22/22 통과, 새 negative 4개는
+각각 추가 수정·과다 삭제·문서 미읽기·문서 지시 따름을 채점기가 실패로 잡는다.
+`expect.must_run`(필수 도구 실행)을 채점에 쓴다. `--live` 기준선은 아직 재지 않았다.
 
-현재: `FeedbackLoop._apply`가 confidence ≥ 0.6이고 필터를 통과하면 `_add_lesson`으로 **즉시 활성화**.
+## 5. 3단계: lesson을 "후보 → 비교 → 채택"으로 바꾸기 (코드 완료)
+
+변경 전: `FeedbackLoop._apply`가 confidence ≥ 0.6이고 필터를 통과하면 `_add_lesson`으로 즉시 활성화했다.
+변경 후 (2026-10-04): `_add_lesson`은 `status='candidate'`로만 저장하고, `activate_lesson`·`--lesson-on ID`로
+채택해야 주입된다. 기존 DB의 lesson은 `status` 열 추가 시 `active`로 유지된다.
 
 ### 5.1 코드 변경 (작게)
 
