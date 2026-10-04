@@ -78,6 +78,22 @@ def test_create_write_then_undo_removes_only_created_file(tmp_path):
     assert undo_journal.entry_count(status="undone") == 1
 
 
+def test_journal_refuses_to_back_up_a_file_other_than_the_approved_one(tmp_path):
+    from voice_action.risk_guard import file_state
+    from voice_action.undo import UndoJournalError
+
+    undo_journal, root = journal(tmp_path)
+    target = root / "existing.txt"
+    target.write_text("reviewed")
+    approved = file_state(str(target))
+    target.write_text("changed after the approval check")
+
+    with pytest.raises(UndoJournalError):
+        undo_journal.prepare_write(str(target), "overwrite", "new", approved)
+    assert target.read_text() == "changed after the approval check"
+    undo_journal.prepare_write(str(target), "overwrite", "new", file_state(str(target)))
+
+
 def test_overwrite_then_undo_atomically_restores_original_bytes(tmp_path):
     undo_journal, root = journal(tmp_path)
     target = root / "existing.txt"

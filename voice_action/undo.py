@@ -178,7 +178,11 @@ class UndoJournal:
             raise UndoJournalError("Undo journal 경계를 확인할 수 없습니다.")
 
     def prepare_write(
-        self, canonical_path: str, operation: str, content: str
+        self,
+        canonical_path: str,
+        operation: str,
+        content: str,
+        expected_state: str | None = None,
     ) -> JournalEntry:
         """Persist the recovery data before the approved transport call."""
         path = Path(canonical_path)
@@ -188,7 +192,13 @@ class UndoJournal:
             raise UndoJournalError("Undo journal은 텍스트 write만 지원합니다.")
         try:
             if operation == "overwrite":
-                original, _metadata = _read_regular_file(path)
+                original, metadata = _read_regular_file(path)
+                # The bytes backed up must be the file that was approved (risk_guard.file_state).
+                state = f"{metadata.st_dev}:{metadata.st_ino}:{_fingerprint(original)}"
+                if expected_state is not None and state != expected_state:
+                    raise UndoJournalError(
+                        "Undo journal 준비 중 write 대상 상태가 변경되었습니다."
+                    )
                 original.decode("utf-8")
             else:
                 try:
