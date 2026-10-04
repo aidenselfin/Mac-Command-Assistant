@@ -10,10 +10,10 @@ LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케
 
 ## 현재 구현 상태
 
-2026-09-21 기준 검증 결과:
+2026-10-04 기준 검증 결과 (`env -u FORCE_COLOR uv run --locked pytest -q`, UI 테스트 포함):
 
 ```text
-pytest: 228 passed in 28.89s
+pytest: 372 passed
 ruff:   All checks passed!
 ```
 
@@ -280,7 +280,16 @@ Groq의 기본 base URL은 `https://api.groq.com/openai/v1`입니다. 한 명령
 
 ## 자기 피드백 루프
 
-명령을 처리하는 동안 사용자 입력, 메인 LLM(Groq) 요청·응답, 상태 전이, 결과를 `.voice-action/feedback.sqlite3`에 기록합니다. 보관 기간은 14일이고, API 키는 가리며, 도구 결과는 앞 500자와 해시만 남깁니다. 명령이 끝날 때마다 아래 규칙으로 문제를 감지합니다.
+기본으로 켜져 있습니다. 명령을 처리하는 동안 사용자 입력, 메인 LLM(Groq) 요청·응답, 상태 전이, 결과를 `.voice-action/feedback.sqlite3`(권한 600)에 기록하고, 명령이 끝날 때마다 아래 규칙으로 문제를 감지합니다.
+
+기록 정책:
+
+- 모든 문자열은 저장 전에 API 키·`Bearer` 토큰을 가린 뒤 자르고 직렬화합니다. signature도 같습니다.
+- 도구 결과(파일·웹 본문), system 프롬프트, 쓰기 `content`는 길이와 해시만 저장합니다. 도구 인자는 200자 이하 값만 남깁니다.
+- 사용자 입력은 4,000자, assistant 응답과 결과 문장은 앞 300자만 저장합니다. 응답이 파일 내용을 다시 인용하면 그 앞부분은 남을 수 있습니다.
+- event는 14일 보관하며, 오래된 기록은 다음 실행 시작 때 지웁니다. 이미 저장된 예전 형식의 기록은 자동으로 다시 정제되지 않으니, 필요하면 DB 파일을 직접 지우세요.
+- DB가 다른 프로세스에 잠겨 있으면 50ms만 기다리고 해당 기록을 건너뜁니다. 피드백 오류는 명령 실행을 막지 않습니다.
+- DB·report·`.voice-action` 폴더가 symlink면 피드백을 끕니다.
 
 | 규칙 | 조건 |
 | --- | --- |
@@ -291,20 +300,24 @@ Groq의 기본 base URL은 `https://api.groq.com/openai/v1`입니다. 한 명령
 | R5 | 직전 명령 10분 안의 정정·지시 ("아니…", "다시…", "왜…", "…말고", "다음부턴…", "앞으로는…", "제대로") |
 | R6 | clarification 최대 횟수 초과 |
 
-감지되면 백그라운드에서 OpenRouter 모델이 원인을 분석해 다음 중 하나를 적용합니다. 메인 Groq 모델과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
+감지되면 백그라운드에서 OpenRouter 모델이 그 사건의 근거 run만 보고 원인을 분석해 다음 중 하나를 적용합니다. 메인 Groq 모델과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
 
-- lesson: 다음 명령부터 system 프롬프트 끝에 힌트로 추가 (최대 5개, 3회 더 재발하면 자동 폐기)
+- lesson: 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
 - user_hint: `[FEEDBACK] …` 한 줄 출력
-- dev_report: `.voice-action/feedback-report.md`에 기록, 코드 수정은 사람이 판단
+- dev_report: `.voice-action/feedback-report.md`(권한 600)에 기록, 코드 수정은 사람이 판단
 
-설정은 `.voice-action/config.env`에 둡니다.
+URL·경로·승인 관련 단어가 든 lesson과 credential이 섞인 분석 결과는 채택하지 않습니다. 이 키워드 필터는 보조 장치이지 보안 경계가 아니며, 실제 안전은 코드의 RiskGuard·URL·경로 검증이 보장합니다.
+
+설정은 `.voice-action/config.env` 또는 환경변수에서만 읽습니다(`config.json`의 값은 쓰지 않음).
 
 ```
 OPENROUTER_API_KEY=...                     # 없으면 기록·감지만 하고 분석은 생략
 VOICE_ACTION_FEEDBACK=on                   # off면 전부 끔
 VOICE_ACTION_FEEDBACK_MODEL=x-ai/grok-4.3  # OpenRouter의 아무 모델 ID
-VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 하루 분석 호출 한도
+VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 최근 24시간 분석 요청 한도 (취소된 요청 포함)
 ```
+
+종료 시 진행 중인 분석은 CLI에서 최대 15초, UI에서 최대 5초 기다린 뒤 취소합니다. 취소해도 이미 보낸 요청은 한도에 포함됩니다.
 
 lesson 관리: `uv run python main.py --lessons`(목록), `uv run python main.py --lesson-off ID`(비활성화).
 
