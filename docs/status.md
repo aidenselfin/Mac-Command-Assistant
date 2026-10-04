@@ -24,6 +24,14 @@
 - 테스트 자료 11개 추가: 회의록 3개(하위 폴더 포함), 요구사항·제품 비교·번역·문서 정리,
   덮어쓰기·삭제 2개·문서 내 지시 안전성 연습. 기존 2개와 합쳐 13개
   - interactive 명령 예시와 예상 결과: `docs/test-data.md`
+- 최근 Git 변경 코드 리뷰 (production 기준 `a4e44f1`, 추가 정적 검토 `c8e441f`)
+  - 문서: `docs/reviews/2026-10-04-recent-changes-review.md`
+  - 재현/interactive 인수: `docs/reviews/reproduce_recent_changes_review.py`
+  - C01~C07: 변환 승인 후 부모 symlink 경계 우회, 취소 후 Undo 이력 상실,
+    미노출 도구 실행, 문서 후보 읽기 정책 누락, CSV 중복 열 손실, 출력 limit 우회,
+    변환 artifact/입력 오류의 일반 예외 전파
+  - UI 승인 경로의 제어 문자 표시와 EvalRunner의 live/control·로그·client 정리도 정적으로 검토
+  - 이번 리뷰는 production 미수정. 기존 F01~F10과 별도 신규 발견 사항
 
 # 검증
 - 2026-10-04 리뷰 수정 후: pytest 372 passed (UI 테스트 포함, FORCE_COLOR 해제), ruff All checks passed
@@ -33,8 +41,15 @@
 - 샘플 자료 검증: 전체 13개 UTF-8 읽기/빈 내용 없음, 회의록 후보 3개, 삭제 대상 2개,
   덮어쓰기 원본 표식 확인. 기존 product.md/expenses.csv 무변경
   - 자료만 추가했으며 앱 실행·실제 모델 응답 검증은 재실행하지 않음
+- 최근 변경 리뷰: UI 제외 pytest 349 passed, 25 deselected (31.15초), Ruff 통과
+- 기존 interactive 인수 17/17 PASS. 신규 인수는 실제 stdin/Filesystem MCP와 macOS 변환기,
+  scripted LLM으로 CSV→JSON 승인·거절·Undo, txt→PDF·PDF 읽기·binary Undo 검증
+  - C01~C07 재현. HTML helper 샌드박스 차단은 권한 승인 후 재실행해 확인
+  - GUI 실행·실제 외부 LLM/API·Eval CLI는 이번 리뷰에서 실행하지 않음
 
 # 다음 작업
+- Claude Code: 최근 리뷰의 C01~C07을 회귀로 고정하고 최소 수정. 특히 경계(C01)와
+  취소/복구(C02)를 먼저 처리하고, 앱 인수는 interactive로 진행
 - 필요하면 실제 API smoke 재실행 (임시 cwd·allowed root·journal·feedback DB에서)
 - M5: 2주 사용 후 lesson별 노출 run 수, 재발률, 오탐률, 시작한 분석 요청 수로 임계값 조정
 - 남은 문제 목록은 `docs/reviews/2026-10-04-fixes.md` 참고
