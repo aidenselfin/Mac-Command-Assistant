@@ -282,7 +282,8 @@ async def test_lessons_are_fixed_for_the_whole_run(tmp_path):
     messages = [{"role": "system", "content": "base"}]
     loop.user_input("first", new_run=True)
     await wrapped.generate(messages, [])
-    loop._add_lesson("sig", "MID_RUN_LESSON")  # an analysis finishing mid-command
+    loop._add_lesson("sig", "MID_RUN_LESSON")  # an analysis finishing mid-command...
+    loop.activate_lesson(loop.candidate_lessons()[0][0])  # ...and adopted at once
     loop.user_input("1", new_run=False)  # clarification answer / approval stays in the run
     await wrapped.generate(messages, [])
     assert all("MID_RUN_LESSON" not in seen[0]["content"] for seen in model.seen)
@@ -294,6 +295,7 @@ async def test_lessons_are_fixed_for_the_whole_run(tmp_path):
 async def test_recurrence_counts_only_distinct_runs_that_received_the_lesson(tmp_path):
     loop, _ = make_loop(tmp_path)
     loop._add_lesson("error:x", "지침")
+    loop.activate_lesson(loop.candidate_lessons()[0][0])
     (lesson_id,) = [i for i, _ in loop.active_lessons()]
     for _ in range(3):  # failures in runs that never sent the lesson to the model
         loop.user_input("no model call", new_run=True)

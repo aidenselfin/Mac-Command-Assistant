@@ -290,7 +290,9 @@ def error_message(exc: BaseException) -> str:
     return f"실행 실패 ({type(exc).__name__}); 설정과 MCP/네트워크 연결을 확인하세요."
 
 
-def manage_lessons(console: Console, lesson_off: int | None) -> int:
+def manage_lessons(
+    console: Console, lesson_off: int | None, lesson_on: int | None = None
+) -> int:
     loop = FeedbackLoop(Path.cwd() / DEFAULT_DB_PATH)
     try:
         if lesson_off is not None:
@@ -300,12 +302,27 @@ def manage_lessons(console: Console, lesson_off: int | None) -> int:
                 markup=False,
             )
             return 0 if found else 1
+        if lesson_on is not None:
+            adopted = loop.activate_lesson(lesson_on)
+            console.print(
+                f"lesson #{lesson_on} 채택 (다음 명령부터 적용)"
+                if adopted
+                else f"후보 lesson #{lesson_on} 없음",
+                markup=False,
+            )
+            return 0 if adopted else 1
         out = lambda text: console.print(text, markup=False, highlight=False)  # noqa: E731
         out("[활성 lesson]")
         rows = loop.active_lessons()
         for lesson_id, text in rows:
             out(f"  #{lesson_id} {text}")
         if not rows:
+            out("  없음")
+        out("[후보 lesson] 평가로 비교한 뒤 --lesson-on ID로 채택, --lesson-off ID로 거절")
+        candidates = loop.candidate_lessons()
+        for lesson_id, text in candidates:
+            out(f"  #{lesson_id} {text}")
+        if not candidates:
             out("  없음")
         out("[최근 감지·분석]")
         incidents = loop.recent_incidents()
@@ -332,16 +349,18 @@ def main(argv=None) -> int:
     command_mode.add_argument("--ui", action="store_true")
     command_mode.add_argument("--lessons", action="store_true", help="활성 피드백 lesson 목록")
     command_mode.add_argument("--lesson-off", type=int, metavar="ID", help="lesson 비활성화")
+    command_mode.add_argument("--lesson-on", type=int, metavar="ID", help="후보 lesson 채택")
     parser.add_argument("--provider", choices=("openai", "groq", "openrouter"))
     parser.add_argument("--model")
     parser.add_argument("--base-url")
     parser.add_argument("--allowed-directory", action="append", dest="allowed_directories")
     args = vars(parser.parse_args(argv))
     lessons, lesson_off = args.pop("lessons"), args.pop("lesson_off")
-    if lessons or lesson_off is not None:
+    lesson_on = args.pop("lesson_on")
+    if lessons or lesson_off is not None or lesson_on is not None:
         console = Console()
         try:
-            return manage_lessons(console, lesson_off)
+            return manage_lessons(console, lesson_off, lesson_on)
         except (OSError, sqlite3.Error):
             console.print(
                 "[ERROR] 피드백 기록을 읽을 수 없습니다. .voice-action/feedback.sqlite3를 "

@@ -311,6 +311,12 @@ class FeedbackLoop:
         self.db.executescript(SCHEMA)
         with contextlib.suppress(sqlite3.OperationalError):  # stores made before evidence
             self.db.execute("ALTER TABLE incidents ADD COLUMN evidence TEXT")
+        # candidate (analysis output) -> active (adopted by a person) | inactive | retired.
+        # Older stores only had adopted lessons, so their rows default to active.
+        with contextlib.suppress(sqlite3.OperationalError):
+            self.db.execute(
+                "ALTER TABLE lessons ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
+            )
         os.chmod(path, 0o600)  # ponytail: -wal/-shm side files keep the process umask
         self.report_path = path.with_name("feedback-report.md")
         self.analyzer, self.emit, self.secrets = analyzer, emit, secrets
@@ -326,7 +332,8 @@ class FeedbackLoop:
         with self.db:
             self.db.execute("DELETE FROM events WHERE ts < ?", (now - RETENTION_SECONDS,))
             self.db.execute(
-                "UPDATE lessons SET active = 0 WHERE active = 1 AND last_seen_ts < ?",
+                "UPDATE lessons SET active = 0, status = 'inactive' "
+                "WHERE active = 1 AND last_seen_ts < ?",
                 (now - RETENTION_SECONDS,),
             )
 
@@ -550,8 +557,15 @@ class FeedbackLoop:
                     "SELECT COUNT(*) FROM lesson_failures WHERE lesson_id = ?", (lesson_id,)
                 ).fetchone()
                 self.db.execute(
-                    "UPDATE lessons SET recurrences = ?, last_seen_ts = ?, active = ? WHERE id = ?",
-                    (recurrences, now, int(recurrences < LESSON_FAILURE_LIMIT), lesson_id),
+                    "UPDATE lessons SET recurrences = ?, last_seen_ts = ?, active = ?, "
+                    "status = ? WHERE id = ?",
+                    (
+                        recurrences,
+                        now,
+                        int(recurrences < LESSON_FAILURE_LIMIT),
+                        "active" if recurrences < LESSON_FAILURE_LIMIT else "retired",
+                        lesson_id,
+                    ),
                 )
                 if recurrences >= LESSON_FAILURE_LIMIT:
                     self._report(
@@ -699,20 +713,44 @@ class FeedbackLoop:
             self._say(f"[FEEDBACK] {hint}")
 
     def _add_lesson(self, signature: str, text: str) -> None:
+        """Store an analysis lesson as a candidate. It reaches the prompt only after a person
+        compares it with evals and adopts it (activate_lesson, `--lesson-on ID`)."""
         now = self.clock()
         with self.db:
-            self.db.execute("UPDATE lessons SET active = 0 WHERE signature = ?", (signature,))
             self.db.execute(
-                "INSERT INTO lessons (signature, text, created_ts, last_seen_ts) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO lessons (signature, text, created_ts, last_seen_ts, active, status) "
+                "VALUES (?, ?, ?, ?, 0, 'candidate')",
                 (signature, text, now, now),
             )
+        self._say("[FEEDBACK] 후보 lesson이 생겼습니다. `--lessons`로 확인하세요.")
+
+    def candidate_lessons(self) -> list[tuple[int, str]]:
+        return self._rows("SELECT id, text FROM lessons WHERE status = 'candidate' ORDER BY id")
+
+    def activate_lesson(self, lesson_id: int) -> bool:
+        """Adopt a candidate: it replaces lessons for the same signature, newest LESSON_LIMIT
+        stay active, and it applies from the next command on."""
+        row = self.db.execute(
+            "SELECT signature FROM lessons WHERE id = ? AND status = 'candidate'", (lesson_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        with self.db:
             self.db.execute(
-                "UPDATE lessons SET active = 0 WHERE active = 1 AND id NOT IN "
+                "UPDATE lessons SET active = 0, status = 'inactive' "
+                "WHERE signature = ? AND status = 'active'",
+                row,
+            )
+            self.db.execute(
+                "UPDATE lessons SET active = 1, status = 'active', last_seen_ts = ? WHERE id = ?",
+                (self.clock(), lesson_id),
+            )
+            self.db.execute(
+                "UPDATE lessons SET active = 0, status = 'inactive' WHERE active = 1 AND id NOT IN "
                 "(SELECT id FROM lessons WHERE active = 1 ORDER BY id DESC LIMIT ?)",
                 (LESSON_LIMIT,),
             )
-        self._say("[FEEDBACK] 반복된 문제에서 새 지침을 배웠습니다. 다음 명령부터 적용합니다.")
+        return True
 
     @_safe
     def _report(
@@ -766,7 +804,11 @@ class FeedbackLoop:
 
     def deactivate_lesson(self, lesson_id: int) -> bool:
         with self.db:
-            cursor = self.db.execute("UPDATE lessons SET active = 0 WHERE id = ?", (lesson_id,))
+            cursor = self.db.execute(
+                "UPDATE lessons SET active = 0, status = 'inactive' "
+                "WHERE id = ? AND status IN ('candidate', 'active')",
+                (lesson_id,),
+            )
         return cursor.rowcount > 0
 
     async def close(self, wait_seconds: float = 15) -> None:
