@@ -24,4 +24,5 @@ Final/.venv/
 *.swp
 .vscode/
 .claude/settings.local.json
+.claude/worktrees/
 *.mov
