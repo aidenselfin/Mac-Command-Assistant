@@ -12,6 +12,7 @@ from typing import Protocol
 
 from openai import AsyncOpenAI
 
+from voice_action.feedback import build_feedback
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
@@ -322,12 +323,14 @@ class AsyncRuntimeWorker:
         manager_factory: Callable = _manager_factory,
         client_factory: Callable = _client_factory,
         model_factory: Callable = OpenAICompatibleModel,
+        feedback_factory: Callable = build_feedback,
     ):
         self.config = config
         self.messages = messages
         self._allow_local_web = allow_local_web
         self._manager_factory = manager_factory
         self._client_factory = client_factory
+        self._feedback_factory = feedback_factory
         self._model_factory = model_factory
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -407,17 +410,22 @@ class AsyncRuntimeWorker:
         self._loop = asyncio.get_running_loop()
         self._lifecycle_task = asyncio.current_task()
         self._shutdown_event = asyncio.Event()
+        feedback = None
         try:
             if self._pre_shutdown.is_set():
                 return
             manager = self._manager_factory(self.config)
+            feedback = self._feedback_factory(
+                self.config, lambda text: self.messages.put(UIMessage(UIMessageType.NOTICE, text))
+            )
             async with manager.connect():
                 async with self._client_factory(self.config) as client:
                     tools = await manager.list_tools()
+                    model = self._model_factory(client, self.config.model)
                     planner = Planner(
                         self.config,
                         manager,
-                        self._model_factory(client, self.config.model),
+                        feedback.wrap(model) if feedback else model,
                         tools=tools,
                         allow_local_web=self._allow_local_web,
                         undo_journal=self._build_undo_journal(),
@@ -430,6 +438,7 @@ class AsyncRuntimeWorker:
                         planner_event_observer=lambda event: self.messages.put(
                             UIMessage(UIMessageType.PLANNER_EVENT, event)
                         ),
+                        feedback=feedback,
                     )
                     self._ready = True
                     self.messages.put(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
@@ -448,6 +457,8 @@ class AsyncRuntimeWorker:
                 )
             )
         finally:
+            if feedback is not None:
+                await feedback.close(wait_seconds=5)
             self._ready = False
             self._controller = None
             self._active_task = None

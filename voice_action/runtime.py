@@ -112,11 +112,13 @@ class RuntimeController:
         *,
         state_observer: StateObserver | None = None,
         planner_event_observer: PlannerEventObserver | None = None,
+        feedback=None,
     ):
         self.planner = planner
         self.emit = emit or (lambda _: None)
         self._state_observer = state_observer
         self._planner_event_observer = planner_event_observer
+        self._feedback = feedback
         self.state = RuntimeState.IDLE
         self._history: list[StateTransition] = []
         self._pending: Clarification | None = None
@@ -144,13 +146,19 @@ class RuntimeController:
             return Busy("다른 명령을 처리 중입니다.", self.state)
 
         self._in_flight = True
+        if self._feedback is not None:
+            self._feedback.user_input(
+                text, new_run=self.state is not RuntimeState.WAITING_USER_INPUT
+            )
         try:
             if self.state is RuntimeState.WAITING_USER_INPUT:
                 return await self._submit_clarification_answer(text)
             self._transition(RuntimeState.PLANNING, "command_started")
             outcome = await self.planner.run(text)
             return self._finish(outcome)
-        except BaseException:
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             self._pending = None
             self._pending_approval = None
             if self.state is not RuntimeState.ERROR:
@@ -167,11 +175,15 @@ class RuntimeController:
         if self.state is not RuntimeState.WAITING_APPROVAL or pending is None:
             raise RuntimeTransitionError("대기 중인 승인이 없습니다.")
         self._in_flight = True
+        if self._feedback is not None:
+            self._feedback.decision("approve", pending.tool_name)
         try:
             self._transition(RuntimeState.RESUMING_PLAN, "approval_granted")
             outcome = await self.planner.approve(pending.context)
             return self._finish(outcome)
-        except BaseException:
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             self._pending_approval = None
             if self.state is not RuntimeState.ERROR:
                 self._transition(RuntimeState.ERROR, "exception")
@@ -187,9 +199,13 @@ class RuntimeController:
         if self.state is not RuntimeState.WAITING_APPROVAL or pending is None:
             raise RuntimeTransitionError("대기 중인 승인이 없습니다.")
         self._in_flight = True
+        if self._feedback is not None:
+            self._feedback.decision("reject", pending.tool_name)
         try:
             return self._finish(self.planner.reject(pending.context))
-        except BaseException:
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             self._pending_approval = None
             if self.state is not RuntimeState.ERROR:
                 self._transition(RuntimeState.ERROR, "exception")
@@ -202,10 +218,14 @@ class RuntimeController:
         if self._in_flight or self.state is not RuntimeState.IDLE:
             return Busy("다른 명령을 처리 중입니다.", self.state)
         self._in_flight = True
+        if self._feedback is not None:
+            self._feedback.decision("undo")
         try:
             outcome = await self.planner.undo_last_write()
             return self._finish(outcome)
-        except BaseException:
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             if self.state is not RuntimeState.ERROR:
                 self._transition(RuntimeState.ERROR, "exception")
             self._transition(RuntimeState.IDLE, "error_observed")
@@ -245,6 +265,8 @@ class RuntimeController:
         return self._finish(outcome)
 
     def _finish(self, outcome: PlannerOutcome) -> PlannerOutcome:
+        if self._feedback is not None:
+            self._feedback.outcome(outcome)
         if isinstance(outcome, Clarification):
             self._pending = outcome
             self._pending_approval = None
@@ -301,3 +323,7 @@ class RuntimeController:
         )
         if self._state_observer is not None:
             self._state_observer(transition)
+        if self._feedback is not None:
+            self._feedback.state(transition.previous.name, target.name, reason)
+            if target is RuntimeState.IDLE:
+                self._feedback.run_finished()

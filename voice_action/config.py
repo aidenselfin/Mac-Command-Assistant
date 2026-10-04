@@ -26,6 +26,10 @@ class Config:
     llm_timeout_seconds: float = 60
     mcp_timeout_seconds: float = 30
     max_tool_result_chars: int = 50000
+    feedback_enabled: bool = True
+    feedback_api_key: str | None = field(default=None, repr=False)
+    feedback_model: str = "x-ai/grok-4.3"
+    feedback_daily_limit: int = 20
 
 
 def load_config(
@@ -129,4 +133,25 @@ def load_config(
         parsed = urlparse(base_url)
         if parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.username:
             raise ConfigError("base_url은 인증정보 없는 HTTP(S) URL이어야 합니다.")
-    return Config(provider, data["model"], api_key, tuple(resolved), base_url, **numbers)
+    feedback = str(env.get("VOICE_ACTION_FEEDBACK") or "on").strip().casefold()
+    if feedback not in ("on", "off"):
+        raise ConfigError("VOICE_ACTION_FEEDBACK는 on 또는 off여야 합니다.")
+    feedback_model = (env.get("VOICE_ACTION_FEEDBACK_MODEL") or "").strip() or "x-ai/grok-4.3"
+    try:
+        daily_limit = int(env.get("VOICE_ACTION_FEEDBACK_DAILY_LIMIT") or 20)
+        if daily_limit <= 0:
+            raise ValueError
+    except ValueError as exc:
+        raise ConfigError("VOICE_ACTION_FEEDBACK_DAILY_LIMIT는 양의 정수여야 합니다.") from exc
+    return Config(
+        provider,
+        data["model"],
+        api_key,
+        tuple(resolved),
+        base_url,
+        **numbers,
+        feedback_enabled=feedback == "on",
+        feedback_api_key=(env.get("OPENROUTER_API_KEY") or "").strip() or None,
+        feedback_model=feedback_model,
+        feedback_daily_limit=daily_limit,
+    )

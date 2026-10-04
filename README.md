@@ -278,6 +278,36 @@ provider별 기본 모델:
 
 Groq의 기본 base URL은 `https://api.groq.com/openai/v1`입니다. 한 명령에서는 하나의 provider와 하나의 모델만 사용합니다.
 
+## 자기 피드백 루프
+
+명령을 처리하는 동안 사용자 입력, 메인 LLM(Groq) 요청·응답, 상태 전이, 결과를 `.voice-action/feedback.sqlite3`에 기록합니다. 보관 기간은 14일이고, API 키는 가리며, 도구 결과는 앞 500자와 해시만 남깁니다. 명령이 끝날 때마다 아래 규칙으로 문제를 감지합니다.
+
+| 규칙 | 조건 |
+| --- | --- |
+| R1 | 같은 오류가 24시간 안에 서로 다른 실행 3회 |
+| R2 | 한 실행에서 같은 도구·인자 호출 2회 이상 |
+| R3 | 10분 안에 비슷한 명령 3회 |
+| R4 | 쓰기 거절, 또는 승인 후 5분 안에 undo |
+| R5 | 직전 명령 뒤 "아니", "다시" 등으로 시작하는 정정 |
+| R6 | clarification 최대 횟수 초과 |
+
+감지되면 백그라운드에서 OpenRouter 모델이 원인을 분석해 다음 중 하나를 적용합니다. 메인 Groq 모델과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
+
+- lesson: 다음 명령부터 system 프롬프트 끝에 힌트로 추가 (최대 5개, 3회 더 재발하면 자동 폐기)
+- user_hint: `[FEEDBACK] …` 한 줄 출력
+- dev_report: `.voice-action/feedback-report.md`에 기록, 코드 수정은 사람이 판단
+
+설정은 `.voice-action/config.env`에 둡니다.
+
+```
+OPENROUTER_API_KEY=...                     # 없으면 기록·감지만 하고 분석은 생략
+VOICE_ACTION_FEEDBACK=on                   # off면 전부 끔
+VOICE_ACTION_FEEDBACK_MODEL=x-ai/grok-4.3  # OpenRouter의 아무 모델 ID
+VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 하루 분석 호출 한도
+```
+
+lesson 관리: `uv run python main.py --lessons`(목록), `uv run python main.py --lesson-off ID`(비활성화).
+
 ## 노출되는 도구
 
 모델은 startup 시 발견되고 애플리케이션 allowlist를 통과한 다음 도구만 볼 수 있습니다.

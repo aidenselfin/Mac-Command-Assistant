@@ -7,11 +7,13 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from openai import AsyncOpenAI
 from rich.console import Console
 
 from voice_action.config import ConfigError, load_config
+from voice_action.feedback import DEFAULT_DB_PATH, FeedbackLoop, build_feedback
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient, MCPError
 from voice_action.mcp_manager import MCPManager
@@ -136,6 +138,7 @@ async def run_text(
     total_started = time.perf_counter_ns()
     startup_started = time.perf_counter_ns()
     manager = _build_mcp_manager(config)
+    feedback = build_feedback(config, lambda text: console.print(text, markup=False))
     try:
         async with manager.connect():
             timing.mcp_startup_ms = (time.perf_counter_ns() - startup_started) / 1_000_000
@@ -146,10 +149,11 @@ async def run_text(
                 max_retries=0,
             ) as client:
                 tools = await manager.list_tools()
+                model = OpenAICompatibleModel(client, config.model)
                 planner = Planner(
                     config,
                     manager,
-                    OpenAICompatibleModel(client, config.model),
+                    feedback.wrap(model) if feedback else model,
                     emit=lambda text: console.print(text, markup=False, highlight=False),
                     tools=tools,
                     timing=timing.planner,
@@ -159,10 +163,13 @@ async def run_text(
                 controller = RuntimeController(
                     planner,
                     emit=lambda message: console.print(message, markup=False),
+                    feedback=feedback,
                 )
                 await run_command(controller, text, console)
     finally:
         timing.total_ms = (time.perf_counter_ns() - total_started) / 1_000_000
+        if feedback is not None:
+            await feedback.close()
     return timing
 
 
@@ -188,6 +195,15 @@ async def run_interactive(
     config, console: Console, undo_journal: UndoJournal | None = None
 ) -> None:
     manager = _build_mcp_manager(config)
+    feedback = build_feedback(config, lambda text: console.print(text, markup=False))
+    try:
+        await _interactive_loop(config, console, undo_journal, manager, feedback)
+    finally:
+        if feedback is not None:
+            await feedback.close()
+
+
+async def _interactive_loop(config, console, undo_journal, manager, feedback) -> None:
     async with manager.connect():
         async with AsyncOpenAI(
             api_key=config.api_key,
@@ -196,10 +212,11 @@ async def run_interactive(
             max_retries=0,
         ) as client:
             tools = await manager.list_tools()
+            model = OpenAICompatibleModel(client, config.model)
             planner = Planner(
                 config,
                 manager,
-                OpenAICompatibleModel(client, config.model),
+                feedback.wrap(model) if feedback else model,
                 emit=lambda message: console.print(message, markup=False, highlight=False),
                 tools=tools,
                 undo_journal=undo_journal,
@@ -207,6 +224,7 @@ async def run_interactive(
             controller = RuntimeController(
                 planner,
                 emit=lambda message: console.print(message, markup=False),
+                feedback=feedback,
             )
             async with input_reader() as reader:
                 console.print(
@@ -269,17 +287,42 @@ def error_message(exc: BaseException) -> str:
     return f"실행 실패 ({type(exc).__name__}); 설정과 MCP/네트워크 연결을 확인하세요."
 
 
+def manage_lessons(console: Console, lesson_off: int | None) -> int:
+    loop = FeedbackLoop(Path.cwd() / DEFAULT_DB_PATH)
+    try:
+        if lesson_off is not None:
+            found = loop.deactivate_lesson(lesson_off)
+            console.print(
+                f"lesson #{lesson_off} 비활성화" if found else f"lesson #{lesson_off} 없음",
+                markup=False,
+            )
+            return 0 if found else 1
+        rows = loop.active_lessons()
+        for lesson_id, text in rows:
+            console.print(f"#{lesson_id} {text}", markup=False, highlight=False)
+        if not rows:
+            console.print("활성 lesson이 없습니다.", markup=False)
+        return 0
+    finally:
+        loop.db.close()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="허용 폴더 안의 파일 읽기·쓰기·승인 기반 삭제")
     command_mode = parser.add_mutually_exclusive_group(required=True)
     command_mode.add_argument("--text")
     command_mode.add_argument("--interactive", action="store_true")
     command_mode.add_argument("--ui", action="store_true")
+    command_mode.add_argument("--lessons", action="store_true", help="활성 피드백 lesson 목록")
+    command_mode.add_argument("--lesson-off", type=int, metavar="ID", help="lesson 비활성화")
     parser.add_argument("--provider", choices=("openai", "groq"))
     parser.add_argument("--model")
     parser.add_argument("--base-url")
     parser.add_argument("--allowed-directory", action="append", dest="allowed_directories")
     args = vars(parser.parse_args(argv))
+    lessons, lesson_off = args.pop("lessons"), args.pop("lesson_off")
+    if lessons or lesson_off is not None:
+        return manage_lessons(Console(), lesson_off)
     text = args.pop("text")
     interactive = args.pop("interactive")
     ui = args.pop("ui")

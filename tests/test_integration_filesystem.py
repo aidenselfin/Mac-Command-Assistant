@@ -247,7 +247,7 @@ async def record(*args, **kwargs):
 anyio.open_process = record
 raise SystemExit(main.main())
 """
-    env = {**os.environ, "OPENAI_API_KEY": "test-only"}
+    env = {**os.environ, "OPENAI_API_KEY": "test-only", "VOICE_ACTION_FEEDBACK": "off"}
     process = subprocess.Popen(
         [
             sys.executable,
