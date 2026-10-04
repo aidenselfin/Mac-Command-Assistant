@@ -706,3 +706,27 @@ def test_redesigned_view_status_tool_cards_and_delete_panel():
         assert str(view.approval_frame.cget("bg")).upper() == ui_module.RED_SOFT
     finally:
         root.destroy()
+
+
+def test_convert_approval_panel_shows_source_output_and_preview():
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root)
+        presenter = UIPresenter(FakeAdapter(), view)
+        view.bind_presenter(presenter)
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_APPROVAL))
+        pending = ApprovalRequired(
+            "local__convert_file", "/w/사진.jpg", "convert", 2048, "", False, {}, ("/w/사진.heic",)
+        )
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, pending))
+        details = view.approval_output.get("1.0", "end")
+        assert "원본  /w/사진.heic" in details and "출력  /w/사진.jpg" in details
+        assert "2,048 bytes" in details and "미리보기가 없습니다" in details
+        assert view.approve_button.cget("text") == "승인하고 변환"
+    finally:
+        root.destroy()

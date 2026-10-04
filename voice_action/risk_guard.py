@@ -11,6 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
+from voice_action import conversion
+from voice_action.conversion import CONVERT_TOOL, READ_DOCUMENT_TOOL
 from voice_action.deletion import DELETE_TOOL
 from voice_action.mcp_client import ToolRejectedError, ToolResult
 from voice_action.undo import (
@@ -29,9 +31,10 @@ READ_ONLY_TOOLS = frozenset(
         "web__browser_navigate",
         "web__browser_snapshot",
         "macos__get_active_app",
+        READ_DOCUMENT_TOOL,
     }
 )
-WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL})
+WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL, CONVERT_TOOL})
 PREVIEW_LIMIT = 200
 
 
@@ -79,6 +82,7 @@ class PreparedWrite:
     targets: tuple[str, ...] = ()
     snapshots: tuple[tuple, ...] = field(default=(), repr=False)
     file_state: str = field(default="", repr=False)
+    payload: bytes = field(default=b"", repr=False)  # a conversion's output, made before approval
 
 
 def classify_tool(name: str) -> ToolRisk:
@@ -120,10 +124,16 @@ class RiskGuard:
     """Permit fixed read tools and bind each write to one in-memory approval."""
 
     def __init__(
-        self, gateway: GuardedGateway, undo_journal: UndoJournal | None = None
+        self,
+        gateway: GuardedGateway,
+        undo_journal: UndoJournal | None = None,
+        roots: tuple[Path, ...] = (),
+        read_limit: int = 50000,
     ):
         self._gateway = gateway
         self._undo_journal = undo_journal
+        self._roots = tuple(root.resolve() for root in roots)
+        self._read_limit = read_limit
         self._pending: dict[str, str] = {}
 
     async def execute_read_only(self, name: str, arguments: dict) -> ToolResult:
@@ -132,6 +142,10 @@ class RiskGuard:
             if risk is ToolRisk.WRITE:
                 raise RiskGuardError("파일 쓰기는 호출별 승인이 필요합니다.")
             raise ForbiddenToolError(f"금지된 도구입니다: {name}")
+        if name == READ_DOCUMENT_TOOL:
+            return await asyncio.to_thread(
+                conversion.read_document, arguments, self._roots, self._read_limit
+            )
         return await self._gateway.call_tool(name, arguments)
 
     async def prepare_write(self, name: str, arguments: dict) -> PreparedWrite:
@@ -142,6 +156,8 @@ class RiskGuard:
             raise RiskGuardError("쓰기 승인은 write 도구에만 사용할 수 있습니다.")
         if name == DELETE_TOOL:
             return await asyncio.to_thread(self._prepare_delete, arguments)
+        if name == CONVERT_TOOL:
+            return await asyncio.to_thread(self._prepare_convert, arguments)
         normalized = await self._gateway.normalize_tool_arguments(name, arguments)
         return self._new_prepared(name, normalized)
 
@@ -160,6 +176,81 @@ class RiskGuard:
         return PreparedWrite(
             DELETE_TOOL, targets[0] if len(targets) == 1 else f"{len(targets)}개 파일",
             "delete", 0, "", False, canonical, digest, nonce, targets, snapshots,
+        )
+
+    def _prepare_convert(self, arguments: dict) -> PreparedWrite:
+        """Convert into memory now, so the approval shows the real result."""
+        if not self._roots:
+            raise RiskGuardError("허용 폴더가 없어 파일을 변환할 수 없습니다.")
+        result = conversion.prepare_conversion(arguments, self._roots)
+        canonical = _canonical_json(arguments)
+        digest = _digest(
+            CONVERT_TOOL,
+            canonical + result.output,
+            result.source_state + hashlib.sha256(result.data).hexdigest(),
+        )
+        nonce = secrets.token_urlsafe(32)
+        self._pending[nonce] = digest
+        return PreparedWrite(
+            CONVERT_TOOL,
+            result.output,
+            "convert",
+            len(result.data),
+            result.preview,
+            result.preview_truncated,
+            canonical,
+            digest,
+            nonce,
+            (result.source,),
+            file_state=result.source_state,
+            payload=result.data,
+        )
+
+    async def _execute_convert(
+        self,
+        prepared: PreparedWrite,
+        expected: str,
+        on_started: Callable[[], None] | None,
+        on_finished: Callable[[], None] | None,
+    ) -> ToolResult:
+        changed = await asyncio.to_thread(conversion.changed_since, prepared.targets[0],
+                                          prepared.file_state, prepared.target_path)
+        if expected != prepared.digest or changed:
+            # The source changed or the output name got taken: convert again, ask again.
+            refreshed = await asyncio.to_thread(
+                self._prepare_convert, json.loads(prepared.canonical_arguments)
+            )
+            raise ApprovalChangedError(refreshed)
+        if self._undo_journal is None:
+            raise RiskGuardError("Undo journal이 없어 변환 파일을 만들지 않았습니다.")
+        try:
+            entry = await asyncio.to_thread(
+                self._undo_journal.prepare_write,
+                prepared.target_path,
+                "create",
+                prepared.payload,
+            )
+        except UndoJournalError as exc:
+            raise RiskGuardError(
+                "Undo journal을 준비하지 못해 변환 파일을 만들지 않았습니다."
+            ) from exc
+        if on_started is not None:
+            on_started()
+        try:
+            await asyncio.to_thread(
+                conversion.write_new_file, prepared.target_path, prepared.payload
+            )
+        except BaseException:
+            try:
+                await asyncio.to_thread(self._undo_journal.reconcile_uncertain_write, entry)
+            except UndoJournalError:
+                pass
+            raise
+        finally:
+            if on_finished is not None:
+                on_finished()
+        return ToolResult(
+            True, f"변환 완료: {prepared.target_path} ({len(prepared.payload)} bytes)"
         )
 
     def _new_prepared(self, name: str, normalized: dict) -> PreparedWrite:
@@ -208,6 +299,8 @@ class RiskGuard:
         if expected is None:
             raise ApprovalInvalidError("승인이 없거나 이미 사용되었습니다.")
 
+        if prepared.tool_name == CONVERT_TOOL:
+            return await self._execute_convert(prepared, expected, on_started, on_finished)
         arguments = json.loads(prepared.canonical_arguments)
         if prepared.tool_name == DELETE_TOOL:
             refreshed = await asyncio.to_thread(self._prepare_delete, arguments)

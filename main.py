@@ -83,6 +83,8 @@ def print_outcome(console: Console, outcome: RuntimeResult) -> None:
         suffix = "…" if outcome.preview_truncated else ""
         console.print("[APPROVAL REQUIRED]", markup=False, highlight=False)
         console.print(f"tool: {outcome.tool_name}", markup=False, highlight=False)
+        if outcome.operation == "convert" and outcome.targets:
+            console.print(f"source: {outcome.targets[0]}", markup=False, highlight=False)
         console.print(f"target: {outcome.target_path}", markup=False, highlight=False)
         console.print(f"operation: {outcome.operation}", markup=False, highlight=False)
         console.print(

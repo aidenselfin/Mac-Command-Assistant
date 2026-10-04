@@ -16,6 +16,12 @@ from urllib.parse import urlsplit
 from openai import APIError, APITimeoutError, AsyncOpenAI, AuthenticationError
 
 from voice_action.config import Config
+from voice_action.conversion import (
+    CONVERT_DEFINITION,
+    CONVERT_TOOL,
+    READ_DOCUMENT_DEFINITION,
+    READ_DOCUMENT_TOOL,
+)
 from voice_action.deletion import DELETE_DEFINITION, DELETE_TOOL
 from voice_action.mcp_client import (
     MCPError,
@@ -59,7 +65,14 @@ OTHER_TASK_PATTERN = re.compile(
     r"파일|폴더|디렉터리|목록|읽|요약|저장|쓰|검색|찾|웹|페이지|https?://"
 )
 CONTENT_RESULT_TOOLS = frozenset(
-    {FILESYSTEM_READ_TOOL, WEB_NAVIGATE_TOOL, WEB_SNAPSHOT_TOOL}
+    {FILESYSTEM_READ_TOOL, WEB_NAVIGATE_TOOL, WEB_SNAPSHOT_TOOL, READ_DOCUMENT_TOOL}
+)
+# "pdf로 바꿔줘", "jpg로 변환", "docx로 저장" ... the conversion tool is offered only then.
+CONVERSION_REQUEST_PATTERN = re.compile(
+    r"변환|convert|"
+    r"(?:txt|md|rtf|html?|docx?|odt|pdf|png|jpe?g|heic|heif|tiff?|gif|bmp|csv|json)"
+    r"\s*(?:로|으로|파일로|형식으로|포맷으로)",
+    re.IGNORECASE,
 )
 WEB_TOOLS = frozenset({WEB_NAVIGATE_TOOL, WEB_SNAPSHOT_TOOL})
 USER_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
@@ -752,7 +765,9 @@ class Planner:
     ):
         self.config, self._gateway, self.model, self.emit = config, gateway, model, emit
         self._undo_journal = undo_journal
-        self._risk_guard = RiskGuard(gateway, undo_journal)
+        self._risk_guard = RiskGuard(
+            gateway, undo_journal, config.allowed_directories, config.max_tool_result_chars
+        )
         self._tools = tools
         self.timing = timing or PlannerTiming.empty()
         self._event_observer = event_observer
@@ -837,6 +852,10 @@ class Planner:
         tools = list(self._tools if self._tools is not None else await self._gateway.list_tools())
         if _destructive_request(user_text) and not USER_URL_PATTERN.search(user_text):
             tools.append(DELETE_DEFINITION)
+        if not USER_URL_PATTERN.search(user_text):  # web requests keep their own tool set
+            tools.append(READ_DOCUMENT_DEFINITION)
+            if CONVERSION_REQUEST_PATTERN.search(user_text):
+                tools.append(CONVERT_DEFINITION)
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
         resolution_rule = f"\n확정된 사용자 답변: {resolution}" if resolution else ""
         messages = [
@@ -860,6 +879,11 @@ class Planner:
                     "대상입니다. 재귀 삭제는 금지되며 요청에 하위 폴더/재귀가 포함되면 "
                     "지원하지 않는다고 답하세요. 승인 전에는 삭제 완료를 말하지 마세요. "
                     "여러 파일 삭제는 한 번의 local__delete_files 호출로 모으세요. "
+                    "파일 형식 변환은 local__convert_file로 하세요. 원본은 그대로 두고 "
+                    "새 파일을 만들며 승인 후 실행됩니다. 지원하지 않는 변환이라는 결과가 "
+                    "오면 사용자에게 그대로 알리세요. "
+                    "pdf·docx·doc·rtf·odt·html 문서 내용을 읽을 때는 local__read_document를, "
+                    "txt·md·csv 같은 텍스트 파일은 filesystem__read_text_file을 쓰세요. "
                     "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 "
                     "request_clarification contract를 사용하세요. "
                     "복잡하다는 이유로 질문하지 마세요. "
@@ -954,8 +978,10 @@ class Planner:
 
     def reject(self, context: ApprovalContext) -> Completed:
         self._risk_guard.reject(context.prepared_write)
-        action = "삭제" if context.pending_call.name == DELETE_TOOL else "쓰기"
-        return Completed(f"파일 {action}를 거절했습니다. 파일은 변경하지 않았습니다.")
+        action = {DELETE_TOOL: "삭제를", CONVERT_TOOL: "변환을"}.get(
+            context.pending_call.name, "쓰기를"
+        )
+        return Completed(f"파일 {action} 거절했습니다. 파일은 변경하지 않았습니다.")
 
     async def _continue(self, state: _LoopState) -> PlannerOutcome:
         while True:
@@ -1239,6 +1265,8 @@ class Planner:
     async def _policy_error(
         self, state: _LoopState, call: ToolCall, arguments: dict
     ) -> str | None:
+        if call.name == CONVERT_TOOL and state.read_only_candidate_request:
+            return "읽기 전용 요청에서는 파일을 변환할 수 없습니다."
         if call.name == DELETE_TOOL:
             if state.read_only_candidate_request:
                 return "읽기 전용 요청에서는 파일을 삭제할 수 없습니다."
@@ -1473,7 +1501,7 @@ class Planner:
             state.write_completed = True
             if state.web_save_required:
                 state.web_write_completed = True
-        elif call.name == DELETE_TOOL:
+        elif call.name in {DELETE_TOOL, CONVERT_TOOL}:
             state.write_completed = True
         state.messages.append(
             {"role": "tool", "tool_call_id": call.id, "content": result_text}

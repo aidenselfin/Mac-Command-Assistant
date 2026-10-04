@@ -18,6 +18,9 @@
   - 문서: `docs/reviews/2026-10-04-claude-code-review.md`
   - 재현: `docs/reviews/reproduce_feedback_review.py` (합성 데이터·임시 파일만 사용)
 - 2026-10-04 리뷰 F01~F10 수정 (결과: `docs/reviews/2026-10-04-fixes.md`)
+- 파일 변환 `local__convert_file`(승인·Undo)과 문서 읽기 `local__read_document`(읽기 전용):
+  `voice_action/conversion.py`. HEIC→JPG·PNG 포함. 실제 OpenRouter 모델로 txt→pdf,
+  HEIC→jpg, pdf 읽기 확인
 - 테스트 자료 11개 추가: 회의록 3개(하위 폴더 포함), 요구사항·제품 비교·번역·문서 정리,
   덮어쓰기·삭제 2개·문서 내 지시 안전성 연습. 기존 2개와 합쳐 13개
   - interactive 명령 예시와 예상 결과: `docs/test-data.md`

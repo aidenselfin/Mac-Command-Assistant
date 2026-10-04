@@ -735,6 +735,7 @@ APPROVAL_STYLE = {
         "⚠  승인 필요 · 기존 파일 덮어쓰기", "승인하고 덮어쓰기", "Primary.TButton", False
     ),
     "delete": ("🗑  승인 필요 · 파일 삭제", "🗑  승인하고 삭제", "Danger.TButton", True),
+    "convert": ("⇄  승인 필요 · 파일 변환", "승인하고 변환", "Primary.TButton", False),
 }
 APPROVAL_PREVIEW_CHARS = 200
 CARD_SIDE_GAP = 96  # the empty side of a card, like a chat bubble
@@ -1141,6 +1142,22 @@ class TkView:
                     ("note",),
                 ),
             ]
+        if outcome.operation == "convert":
+            segments = [
+                ("원본  ", ("label",)),
+                (f"{outcome.targets[0] if outcome.targets else ''}\n", ()),
+                ("출력  ", ("label",)),
+                (f"{outcome.target_path}\n", ()),
+                ("크기  ", ("label",)),
+                (f"{outcome.content_chars:,} bytes\n", ()),
+                ("원본은 그대로 두고 새 파일을 만듭니다.\n", ("note",)),
+            ]
+            if outcome.preview:
+                more = " · 앞부분만 표시됩니다" if outcome.preview_truncated else ""
+                segments += [(f"\n미리보기{more}\n", ("label",)), (outcome.preview, ())]
+            else:
+                segments.append(("\n이미지·PDF 등은 미리보기가 없습니다.", ("note",)))
+            return segments
         preview = outcome.preview[:APPROVAL_PREVIEW_CHARS]
         truncated = outcome.preview_truncated or len(outcome.preview) > APPROVAL_PREVIEW_CHARS
         segments = [

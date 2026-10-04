@@ -303,6 +303,7 @@ async def test_run_text_uses_manager_and_combined_tools(config, monkeypatch):
     assert {tool.name for tool in model.generate.await_args.args[1]} == {
         "filesystem__list_directory",
         "web__browser_snapshot",
+        "local__read_document",  # offered for every non-web request
     }
 
 

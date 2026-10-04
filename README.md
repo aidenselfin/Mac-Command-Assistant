@@ -353,6 +353,29 @@ MCP server가 추가 도구를 제공하더라도 자동으로 노출되지 않�
 `local__delete_files`는 MCP server에 보내지 않는 앱 내부 도구이며 명시적인 삭제 요청에만
 모델에 노출됩니다. RiskGuard와 Undo journal이 경로 검증, 승인, 백업, 로컬 삭제를 처리합니다.
 
+### 파일 변환과 문서 읽기 (앱 내부 도구, macOS)
+
+```text
+local__convert_file     변환 요청("pdf로 바꿔줘", "jpg로 변환")일 때만 노출, 승인 필요
+local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
+```
+
+| 변환 | 변환기 |
+| --- | --- |
+| txt·md·rtf·html·doc·docx·odt → txt·rtf·html·doc·docx·odt | `textutil` |
+| txt·md → pdf (서식 없는 글) | `cupsfilter` |
+| pdf → txt | PDFKit (pyobjc) |
+| png·jpeg(jpg)·heic·tiff·gif·bmp 서로 (아이폰 HEIC → JPG·PNG 포함) | `sips` |
+| csv ↔ json | Python 표준 라이브러리 |
+
+- 원본은 바꾸지 않고 같은 폴더에 새 파일을 만듭니다. 같은 이름이 있으면 `이름 (1).jpg`처럼 새 이름을 씁니다.
+- 승인 전에 임시 폴더에서 실제로 변환해 결과 크기와 미리보기(글 형식)를 승인 패널에 보여줍니다.
+- 승인하면 Undo journal에 새 파일 생성으로 기록한 뒤 파일을 만들고, `최근 변경 되돌리기`로 지울 수 있습니다.
+- 승인 대기 중 원본이 바뀌거나 출력 이름이 생기면 다시 변환해 새로 승인받습니다.
+- 원본은 허용 폴더 안의 일반 파일(링크 불가), 최대 20 MiB이고, 확장자와 실제 형식이 다르면 거부합니다.
+- 서식 있는 문서의 PDF 변환, 엑셀, 이미지 크기 조절, 스캔 PDF 글자 인식은 지원하지 않습니다.
+- `local__read_document`는 pdf·docx·doc·rtf·odt·html의 글자를 읽어 모델에 돌려주며 파일을 만들지 않습니다.
+
 ## 처리 흐름
 
 ```text
