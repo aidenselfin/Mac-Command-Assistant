@@ -46,7 +46,10 @@ UNDO_WINDOW = 300
 SECRET_PATTERN = re.compile(
     r"sk-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{8,}|xai-[A-Za-z0-9]{8,}|Bearer\s+\S+"
 )
-CORRECTION_PATTERN = re.compile(r"^\s*(아니|그게 아니라|그거 말고|다시|틀렸)")
+# A follow-up that corrects or instructs the assistant ("아니 …", "A 말고 …", "다음부턴 …").
+CORRECTION_PATTERN = re.compile(
+    r"^\s*(아니(?!면)|그게 아니라|다시|틀렸|왜)|말고[,\s]|다음부터|다음부턴|앞으로는?\s|제대로"
+)
 UNSAFE_LESSON_PATTERN = re.compile(
     r"https?://|[~/][\w.-]+/|승인|무시|우회|ignore|approve|bypass", re.IGNORECASE
 )
@@ -351,9 +354,11 @@ class FeedbackLoop:
         if inputs:
             text, ts = inputs[0]
             earlier = self._rows(
-                "SELECT payload FROM events WHERE kind = 'user_input' AND run_id != ? AND ts >= ?",
+                "SELECT payload FROM events WHERE kind = 'user_input' AND run_id != ? "
+                "AND ts >= ? AND ts < ? ORDER BY id",
                 self.run_id,
                 ts - RETRY_WINDOW,
+                ts,
             )
             earlier_texts = [json.loads(p)["text"] for (p,) in earlier]
             # R3: near-identical commands retried within ten minutes.
@@ -365,7 +370,7 @@ class FeedbackLoop:
             if len(similar) + 1 >= RETRY_COUNT:
                 found.append(("R3", f"retry:{normalize(text, 60)}"))
             # R5: the user opened with a correction right after a previous command.
-            if CORRECTION_PATTERN.match(text) and earlier_texts:
+            if CORRECTION_PATTERN.search(text) and earlier_texts:
                 found.append(("R5", f"correction:{normalize(earlier_texts[-1], 60)}"))
         return list(dict.fromkeys(found))
 
@@ -394,6 +399,10 @@ class FeedbackLoop:
                 (signature, now - REANALYZE_AFTER_SECONDS),
             ).fetchone()
             if recent:
+                self.emit(
+                    f"[FEEDBACK] 문제 감지 {rule} ({signature[:60]}) → "
+                    "6시간 안에 이미 분석한 문제라 이번에는 생략"
+                )
                 return
             (today,) = self.db.execute(
                 "SELECT COUNT(*) FROM incidents WHERE status IN ('queued', 'analyzed', 'failed') "
