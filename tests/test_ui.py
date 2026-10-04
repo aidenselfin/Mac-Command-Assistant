@@ -513,8 +513,8 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
         presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
         root.update()
         assert root.minsize() == (720, 520)
-        view.example_buttons[0].invoke()
-        assert view.entry.get() and adapter.submissions == []
+        view.entry.insert(0, "파일 목록 보여줘")
+        assert adapter.submissions == []
         view._execute()
         assert len(adapter.submissions) == 1
         assert view.entry.get() == ""
@@ -587,3 +587,67 @@ def test_lost_hangul_keystroke_detection():
     assert not ui_module.is_lost_hangul_keystroke("ㅎ", commit, composing=False)
     assert not ui_module.is_lost_hangul_keystroke("한", real_g, composing=False)
     assert not ui_module.is_lost_hangul_keystroke("g", (5 << 24) | ord("g"), composing=False)
+
+
+def test_render_markdown_turns_symbols_into_styles():
+    def text(segments):
+        return "".join(t for t, _ in segments)
+
+    def tags_of(segments, needle):
+        return next(tags for t, tags in segments if needle in t)
+
+    rendered = ui_module.render_markdown(
+        "## 요약\n"
+        "**굵게**와 *기울임*, `code.py`\n"
+        "- 첫째\n"
+        "  - 둘째\n"
+        "1. 번호 유지\n"
+        "[문서](https://example.com)\n"
+        "> 인용\n"
+        "---\n"
+        "```\n**그대로** `둠`\n```\n"
+        "| 파일 | 크기 |\n|---|---|\n| **a.md** | 10 |"
+    )
+    plain = text(rendered)
+    assert "요약\n굵게와 기울임, code.py\n• 첫째\n  • 둘째\n1. 번호 유지\n" in plain
+    assert "문서 (https://example.com)\n인용\n────────\n" in plain
+    assert "**그대로** `둠`\n" in plain  # code blocks are shown as written
+    assert "파일  크기\na.md  10" in plain and "|" not in plain and "---" not in plain
+    assert "md_heading" in tags_of(rendered, "요약")
+    assert "md_bold" in tags_of(rendered, "굵게")
+    assert "md_italic" in tags_of(rendered, "기울임")
+    assert "md_code" in tags_of(rendered, "code.py")
+    assert "md_table" in tags_of(rendered, "a.md")
+
+
+def test_render_markdown_leaves_non_markdown_text_alone():
+    for text in ("2 * 3 * 4", "**닫히지 않음", "file_name_v2.txt", "a*b", "평범한 문장"):
+        assert "".join(t for t, _ in ui_module.render_markdown(text)) == text
+
+
+def test_tk_view_shows_folder_and_renders_only_model_text():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root, (Path("/tmp/작업 폴더"),))
+        assert view.folder_text == "작업 폴더 · /tmp/작업 폴더"
+        view.show_request("**요청**은 그대로")
+        view.show_outcome(Completed("## 결과\n**굵게** `코드`"))
+        shown = view.output.get("1.0", "end")
+        assert "**요청**은 그대로" in shown
+        assert "결과\n굵게 코드" in shown and "## " not in shown and "`" not in shown
+
+        context = ClarificationContext("요약", "file_candidate", ("a", "b"), 1)
+        view.show_outcome(
+            ApprovalRequired(
+                "filesystem__write_file", "/tmp/a.md", "create", 9, "**원문**", False, context
+            )
+        )
+        assert "**원문**" in view.approval_output.get("1.0", "end")  # what will be written
+    finally:
+        root.destroy()

@@ -3,12 +3,15 @@
 import asyncio
 import os
 import queue
+import re
 import sys
 import threading
+import unicodedata
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
 from typing import Protocol
 
 from openai import AsyncOpenAI
@@ -531,6 +534,104 @@ class AsyncRuntimeWorker:
             self._shutdown_event.set()
 
 
+MarkdownSegment = tuple[str, tuple[str, ...]]
+MARKDOWN_INLINE = re.compile(
+    r"`([^`\n]+)`"  # code
+    r"|\*\*(?=\S)(.+?)(?<=\S)\*\*"  # bold
+    r"|\*(?=\S)([^*\n]+?)(?<=\S)\*"  # italic; "2 * 3 * 4" has spaces, so it stays as typed
+    r"|\[([^\]\n]+)\]\((\S+?)\)"  # link
+)
+
+
+def _markdown_inline(text: str, tags: tuple[str, ...]) -> list[MarkdownSegment]:
+    segments, position = [], 0
+    for match in MARKDOWN_INLINE.finditer(text):
+        segments.append((text[position:match.start()], tags))
+        code, bold, italic, label, url = match.groups()
+        if code is not None:
+            segments.append((code, (*tags, "md_code")))
+        elif bold is not None:
+            segments.extend(_markdown_inline(bold, (*tags, "md_bold")))
+        elif italic is not None:
+            segments.append((italic, (*tags, "md_italic")))
+        else:
+            segments.append((f"{label} ({url})", tags))
+        position = match.end()
+    segments.append((text[position:], tags))
+    return [segment for segment in segments if segment[0]]
+
+
+def _display_width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def _markdown_table(lines: list[str]) -> list[MarkdownSegment]:
+    rows = [
+        [
+            "".join(t for t, _ in _markdown_inline(cell.strip(), ()))
+            for cell in line.strip().strip("|").split("|")
+        ]
+        for line in lines
+        if not re.fullmatch(r"[\s|:-]+", line)  # the |---|---| separator row
+    ]
+    if not rows:
+        return []
+    widths = [
+        max(_display_width(row[c]) if c < len(row) else 0 for row in rows)
+        for c in range(max(len(row) for row in rows))
+    ]
+    segments = []
+    for index, row in enumerate(rows):
+        cells = [*row, *[""] * (len(widths) - len(row))]
+        line = "  ".join(
+            cell + " " * (width - _display_width(cell))
+            for cell, width in zip(cells, widths, strict=True)
+        )
+        tags = ("md_table", "md_bold") if index == 0 else ("md_table",)
+        segments.append((line.rstrip() + "\n", tags))
+    return segments
+
+
+def render_markdown(text: str) -> list[MarkdownSegment]:
+    """Model replies as (text, tags): markdown symbols become Tk text styles, not characters.
+
+    Covers what LLM replies use: headings, bold/italic, inline and fenced code, lists, links,
+    tables, quotes and rules. Anything else is shown as written.
+    """
+    lines, segments, index, in_code = text.split("\n"), [], 0, False
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        if line.strip().startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            segments.append((line + "\n", ("md_code",)))
+            continue
+        if line.lstrip().startswith("|"):
+            block = [line]
+            while index < len(lines) and lines[index].lstrip().startswith("|"):
+                block.append(lines[index])
+                index += 1
+            segments.extend(_markdown_table(block))
+            continue
+        if re.fullmatch(r"\s*([-*_])(\s*\1){2,}\s*", line):
+            segments.append(("────────", ()))
+        elif heading := re.match(r"\s*#{1,6}\s+(.*)", line):
+            segments.extend(_markdown_inline(heading.group(1), ("md_heading",)))
+        elif item := re.match(r"(\s*)[-*+]\s+(.*)", line):
+            segments.append(("  " * (len(item.group(1)) // 2) + "• ", ()))
+            segments.extend(_markdown_inline(item.group(2), ()))
+        elif quote := re.match(r"\s*>\s?(.*)", line):
+            segments.extend(_markdown_inline(quote.group(1), ()))
+        else:
+            segments.extend(_markdown_inline(line, ()))
+        segments.append(("\n", ()))
+    while segments and segments[-1][0] == "\n":
+        segments.pop()
+    return segments
+
+
 TK_IME_COMMIT_KEY = 0x80  # TkAqua keycode high byte for text committed by an input method
 SHIFT_STATE = 0x1
 
@@ -597,7 +698,7 @@ def fix_hangul_first_keystroke(widget) -> None:
 class TkView:
     """Tk widgets; every method is called only by the Tk main thread."""
 
-    def __init__(self, root):
+    def __init__(self, root, folders: tuple[Path, ...] = ()):
         import tkinter as tk
         from tkinter import font, ttk
 
@@ -607,7 +708,6 @@ class TkView:
         self.closed = False
         self._approval_ready = False
         self._approval_enabled = False
-        self._has_output = False
         self._status = "STARTING"
         bg, surface, ink, muted = "#F5F6F8", "#FFFFFF", "#20242C", "#596273"
         root.title("Voice Action AI")
@@ -654,31 +754,20 @@ class TkView:
         workspace.grid(row=1, column=0, sticky="nsew", padx=24)
         workspace.grid_columnconfigure(0, weight=1)
         workspace.grid_rowconfigure(1, weight=1)
-        self.welcome = tk.Frame(workspace, bg=bg)
-        self.welcome.grid(row=0, column=0, sticky="ew", pady=(8, 16))
+        # The folders the assistant may read and write (allowed_directories), always visible.
+        self.folder_text = "작업 폴더 · " + (
+            ", ".join(str(folder) for folder in folders) or "설정되지 않음"
+        )
         tk.Label(
-            self.welcome, text="무엇을 도와드릴까요?", bg=bg, fg=ink, font=(family, 18, "bold")
-        ).pack(anchor="w")
-        tk.Label(
-            self.welcome,
-            text="허용된 폴더의 파일을 찾거나 문서를 요약할 수 있어요.",
+            workspace,
+            text=self.folder_text,
             bg=bg,
             fg=muted,
-            font=(family, 10),
-        ).pack(anchor="w", pady=(8, 12))
-        examples = tk.Frame(self.welcome, bg=bg)
-        examples.pack(anchor="w")
-        self.example_buttons = []
-        for label, text in (
-            ("파일 목록 보기", "허용된 폴더의 파일 목록을 보여줘"),
-            ("문서 요약하기", "test1.md를 요약해줘"),
-            ("웹 페이지 읽기", "https://example.com 페이지를 읽고 요약해줘"),
-        ):
-            button = ttk.Button(
-                examples, text=label, command=lambda text=text: self._fill_example(text)
-            )
-            button.pack(side="left", padx=(0, 8))
-            self.example_buttons.append(button)
+            font=(family, 11),
+            anchor="w",
+            justify="left",
+            wraplength=820,
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         output_frame = tk.Frame(
             workspace, bg=surface, highlightthickness=1, highlightbackground="#D9DEE7"
@@ -713,6 +802,13 @@ class TkView:
             self.output.tag_configure(
                 tag + "_title", foreground=color, font=(family, 11, "bold"), spacing1=14
             )
+        # Markdown styles, configured later so their fonts win over the base tags.
+        mono = font.nametofont("TkFixedFont").actual("family")
+        self.output.tag_configure("md_bold", font=(family, 12, "bold"))
+        self.output.tag_configure("md_italic", font=(family, 12, "italic"))
+        self.output.tag_configure("md_code", font=(mono, 11), background="#F1F3F7")
+        self.output.tag_configure("md_table", font=(mono, 11))
+        self.output.tag_configure("md_heading", font=(family, 14, "bold"), spacing1=6)
 
         self.tool_var = tk.StringVar(value="")
         tk.Label(
@@ -852,10 +948,6 @@ class TkView:
         self.run_button.configure(state="normal" if run_enabled else "disabled")
         self.cancel_button.configure(state="normal" if cancel_enabled else "disabled")
         self.undo_button.configure(state="normal" if undo_enabled else "disabled")
-        for button in self.example_buttons:
-            button.configure(
-                state="normal" if run_enabled and self._status == "READY" else "disabled"
-            )
         if cancel_enabled and not approval_visible:
             self.cancel_button.pack(side="left", padx=(8, 0))
         else:
@@ -873,14 +965,14 @@ class TkView:
         self.approve_button.configure(state=state)
         self.reject_button.configure(state=state)
 
-    def _append(self, title: str, body: str, tag: str) -> None:
-        if not self._has_output:
-            self.welcome.grid_remove()
-            self._has_output = True
+    def _append(self, title: str, body: str, tag: str, *, markdown: bool = False) -> None:
         at_bottom = self.output.yview()[1] >= 0.99
         self.output.configure(state="normal")
         self.output.insert("end", title + "\n", tag + "_title")
-        self.output.insert("end", body + "\n\n", tag)
+        # Only model-written text is markdown; requests, errors and previews stay verbatim.
+        for text, styles in render_markdown(body) if markdown else [(body, ())]:
+            self.output.insert("end", text, (tag, *styles))
+        self.output.insert("end", "\n\n", tag)
         self.output.configure(state="disabled")
         if at_bottom:
             self.output.see("end")
@@ -934,19 +1026,15 @@ class TkView:
             self._append("승인 요청 · " + operation, body, "question")
         elif isinstance(outcome, Clarification):
             options = "\n".join(f"{i}. {option}" for i, option in enumerate(outcome.options, 1))
-            self._append("선택이 필요해요", outcome.question + "\n" + options, "question")
+            self._append(
+                "선택이 필요해요", outcome.question + "\n" + options, "question", markdown=True
+            )
         elif isinstance(outcome, Completed):
-            self._append("결과", outcome.text, "result")
+            self._append("결과", outcome.text, "result", markdown=True)
         elif isinstance(outcome, Error):
             self._append("오류 발생", outcome.message, "error")
         elif isinstance(outcome, Busy):
             self._append("작업 중", outcome.message, "notice")
-
-    def _fill_example(self, text: str) -> None:
-        if self.presenter is not None and self.presenter.state is RuntimeState.IDLE:
-            self.entry.delete(0, "end")
-            self.entry.insert(0, text)
-            self.entry.focus_set()
 
     def close(self) -> None:
         if not self.closed:
@@ -1013,7 +1101,7 @@ def run_ui(config) -> None:
     root = tk.Tk()
     messages: queue.Queue[UIMessage] = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
-    view = TkView(root)
+    view = TkView(root, config.allowed_directories)
     presenter = UIPresenter(worker, view)
     view.bind_presenter(presenter)
 
