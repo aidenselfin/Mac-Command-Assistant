@@ -9,7 +9,7 @@
 - 자기 피드백 루프 M1~M4: `voice_action/feedback.py`
   - 기록: `RecordingModel`(LLM 입출력) + `RuntimeController(feedback=...)`(입력·결정·결과·상태)
   - 감지: R1~R6 규칙, 같은 signature 6시간 재분석 억제, 일일 분석 한도
-  - 분석: OpenRouter(기본 `x-ai/grok-4.3`, 모델은 설정으로 교체), JSON 스키마 검증, 백그라운드 task
+  - 분석: OpenRouter(기본 `anthropic/claude-sonnet-5.5`, 모델은 설정으로 교체), JSON 스키마 검증, 백그라운드 task
   - 적용: lesson은 RecordingModel이 보내는 system 메시지 사본 끝에 추가(Planner 미수정),
     user_hint 출력, dev_report는 `.voice-action/feedback-report.md`
   - CLI `--lessons`, `--lesson-off ID`. `--text` / `--interactive` / `--ui` 모두 연결
@@ -58,9 +58,8 @@
 - 작업은 이 폴더에서 직접 한다. 별도 git worktree를 쓰지 않는다 (2026-10-04 사용자 요청).
 - `.voice-action/undo.sqlite3`는 원본에서 복사되어 원본 경로를 가리키는 항목이 있다.
   깨끗한 테스트가 필요하면 삭제해도 된다 (git 추적 대상 아님).
-- 메인 LLM은 2026-10-04부터 OpenRouter `anthropic/claude-sonnet-5.5` (로컬 `config.json`).
-  Claude 3.5 Sonnet은 OpenRouter에서 더 이상 제공되지 않아 최신 Sonnet을 썼다.
-  피드백 분석은 별도 설정(`VOICE_ACTION_FEEDBACK_MODEL`, 기본 `x-ai/grok-4.3`)이다.
+- 메인 LLM은 2026-10-04부터 Groq `openai/gpt-oss-20b` (로컬 `config.json`, 사용자 지정).
+  피드백 분석은 OpenRouter `anthropic/claude-sonnet-5.5`(기본값, `VOICE_ACTION_FEEDBACK_MODEL`로 교체)이다.
 - 홈 `~/.voice-action/config.json`의 `model: anthropic/claude-3-haiku`는 프로젝트 `config.json`이
   덮어쓴다. `config.json`이 없는 복사본에서 실행하면 Groq가 404를 낸다.
 - 테스트는 conftest의 autouse fixture로 피드백 DB를 tmp_path에 둔다.

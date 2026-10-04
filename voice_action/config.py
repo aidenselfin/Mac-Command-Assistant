@@ -40,7 +40,7 @@ class Config:
     max_tool_result_chars: int = 50000
     feedback_enabled: bool = True
     feedback_api_key: str | None = field(default=None, repr=False)
-    feedback_model: str = "x-ai/grok-4.3"
+    feedback_model: str = "anthropic/claude-sonnet-5.5"
     feedback_daily_limit: int = 20
 
 
@@ -148,7 +148,9 @@ def load_config(
     feedback = str(env.get("VOICE_ACTION_FEEDBACK") or "on").strip().casefold()
     if feedback not in ("on", "off"):
         raise ConfigError("VOICE_ACTION_FEEDBACK는 on 또는 off여야 합니다.")
-    feedback_model = (env.get("VOICE_ACTION_FEEDBACK_MODEL") or "").strip() or "x-ai/grok-4.3"
+    feedback_model = (
+        env.get("VOICE_ACTION_FEEDBACK_MODEL") or ""
+    ).strip() or "anthropic/claude-sonnet-5.5"
     try:
         daily_limit = int(env.get("VOICE_ACTION_FEEDBACK_DAILY_LIMIT") or 20)
         if daily_limit <= 0:

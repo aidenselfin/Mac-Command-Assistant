@@ -314,7 +314,7 @@ URL·경로·승인 관련 단어가 든 lesson과 credential이 섞인 분석 �
 ```
 OPENROUTER_API_KEY=...                     # 없으면 기록·감지만 하고 분석은 생략
 VOICE_ACTION_FEEDBACK=on                   # off면 전부 끔
-VOICE_ACTION_FEEDBACK_MODEL=x-ai/grok-4.3  # OpenRouter의 아무 모델 ID
+VOICE_ACTION_FEEDBACK_MODEL=anthropic/claude-sonnet-5.5  # OpenRouter의 아무 모델 ID
 VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 최근 24시간 분석 요청 한도 (취소된 요청 포함)
 ```
 

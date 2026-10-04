@@ -34,7 +34,7 @@ from voice_action.planner import (
 
 DEFAULT_DB_PATH = Path(".voice-action/feedback.sqlite3")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_FEEDBACK_MODEL = "x-ai/grok-4.3"
+DEFAULT_FEEDBACK_MODEL = "anthropic/claude-sonnet-5.5"
 RETENTION_SECONDS = 14 * 86400
 LESSON_LIMIT = 5
 LESSON_MIN_CONFIDENCE = 0.6

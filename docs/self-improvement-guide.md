@@ -116,7 +116,7 @@ uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장
   negative 2개(엉뚱한 파일 수정, 아무것도 안 하고 완료 주장 → 둘 다 grader가 실패 처리).
 - 대본 소진 시 `harness_failure`(INVALID)로 분류되어 에이전트 실패와 섞이지 않음을 확인.
 - `--lesson`의 문장이 trial 전용 DB를 거쳐 실제 system 프롬프트에 들어감을 확인.
-- `--live` (OpenRouter `anthropic/claude-sonnet-5.5`): `read_summary`, `write_reject` 2/2 통과.
+- `--live` (당시 메인 모델 OpenRouter `anthropic/claude-sonnet-5.5`, 이후 Groq로 변경): `read_summary`, `write_reject` 2/2 통과.
 - `ruff check` 통과. 기존 서비스 코드는 수정하지 않았다.
 
 ## 4. 2단계: 과제 늘리기 (다음 작업)
