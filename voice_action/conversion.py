@@ -146,11 +146,16 @@ def _read_source(path: Path) -> tuple[bytes, str]:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise ToolRejectedError("일반 파일만 변환할 수 있습니다.")
+        too_big = ToolRejectedError("원본 파일은 최대 20 MiB까지 변환할 수 있습니다.")
         if metadata.st_size > MAX_SOURCE_BYTES:
-            raise ToolRejectedError("원본 파일은 최대 20 MiB까지 변환할 수 있습니다.")
-        chunks = []
-        while chunk := os.read(descriptor, 1024 * 1024):
+            raise too_big
+        chunks, size = [], 0
+        # Bounded even if the file grows after the size check.
+        while chunk := os.read(descriptor, min(1024 * 1024, MAX_SOURCE_BYTES + 1 - size)):
             chunks.append(chunk)
+            size += len(chunk)
+            if size > MAX_SOURCE_BYTES:
+                raise too_big
         data = b"".join(chunks)
     finally:
         os.close(descriptor)
@@ -195,14 +200,45 @@ def _pdf_text(path: Path) -> str:
     return str(document.string() or "")
 
 
+def _decode(data: bytes, kind: str) -> str:
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ToolRejectedError(f"{kind}이 UTF-8 텍스트가 아닙니다.") from exc
+
+
 def _csv_to_json(data: bytes) -> bytes:
-    rows = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"))))
-    return json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8")
+    """A header row plus rows of the same width, as an array of string-valued objects.
+
+    Anything that would silently drop or shift a value is refused instead: an empty or
+    duplicate header, a row with a different number of cells, or broken quoting.
+    """
+    try:
+        rows = [row for row in csv.reader(io.StringIO(_decode(data, "CSV")), strict=True) if row]
+    except csv.Error as exc:
+        raise ToolRejectedError("CSV 형식이 올바르지 않습니다 (따옴표 등).") from exc
+    if not rows:
+        raise ToolRejectedError("CSV가 비어 있습니다.")
+    header = rows[0]
+    if any(not name.strip() for name in header) or len(set(header)) != len(header):
+        raise ToolRejectedError("CSV 헤더에 빈 이름이나 중복된 이름이 있습니다.")
+    for number, row in enumerate(rows[1:], 2):
+        if len(row) != len(header):
+            raise ToolRejectedError(f"CSV {number}번째 행의 열 수가 헤더와 다릅니다.")
+    records = [dict(zip(header, row, strict=True)) for row in rows[1:]]
+    return json.dumps(records, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _csv_cell(value: object) -> str:
+    """JSON scalars as CSV text: null is empty, numbers and booleans keep their JSON form."""
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else json.dumps(value)
 
 
 def _json_to_csv(data: bytes) -> bytes:
     try:
-        rows = json.loads(data.decode("utf-8-sig"))
+        rows = json.loads(_decode(data, "JSON"))
     except ValueError as exc:
         raise ToolRejectedError("JSON을 읽을 수 없습니다.") from exc
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
@@ -213,7 +249,7 @@ def _json_to_csv(data: bytes) -> bytes:
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=header, lineterminator="\n")
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows({key: _csv_cell(value) for key, value in row.items()} for row in rows)
     return out.getvalue().encode("utf-8")
 
 
@@ -235,9 +271,9 @@ def supported(source_format: str, target_format: str) -> bool:
 def convert(source: Path, data: bytes, source_format: str, target_format: str) -> bytes:
     """Convert in a private temporary folder and return the output bytes."""
     if source_format == "csv" and target_format == "json":
-        return _csv_to_json(data)
+        return _checked_output(_csv_to_json(data))
     if source_format == "json" and target_format == "csv":
-        return _json_to_csv(data)
+        return _checked_output(_json_to_csv(data))
     with tempfile.TemporaryDirectory(prefix="voice-action-convert-") as folder:
         # Work on a private copy, so a source swapped mid-run can't change the input.
         copy = Path(folder) / f"source.{source_format}"
@@ -249,12 +285,31 @@ def convert(source: Path, data: bytes, source_format: str, target_format: str) -
             output = _run([CUPSFILTER, "-m", "application/pdf", "-i", "text/plain", str(copy)])
         elif source_format in IMAGES:
             _run([SIPS, "-s", "format", target_format, str(copy), "--out", str(out)])
-            output = out.read_bytes()
+            output = _read_artifact(out)
         else:
             textutil_format = ["-format", "txt"] if source_format == "md" else []
             _run([TEXTUTIL, *textutil_format, "-convert", target_format, "-output", str(out),
                   str(copy)])
-            output = out.read_bytes()
+            output = _read_artifact(out)
+    return _checked_output(output)
+
+
+def _read_artifact(path: Path) -> bytes:
+    """A converter's result file. Exit status 0 alone is not proof it exists."""
+    try:
+        metadata = os.lstat(path)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ToolRejectedError("변환 결과 파일이 만들어지지 않았습니다.")
+        if metadata.st_size > MAX_OUTPUT_BYTES:
+            raise ToolRejectedError("변환 결과가 50 MiB를 넘습니다.")
+        return path.read_bytes()
+    except FileNotFoundError as exc:
+        raise ToolRejectedError("변환 결과 파일이 만들어지지 않았습니다.") from exc
+    except OSError as exc:
+        raise ToolRejectedError("변환 결과 파일을 읽을 수 없습니다.") from exc
+
+
+def _checked_output(output: bytes) -> bytes:
     if not output:
         raise ToolRejectedError("변환 결과가 비어 있습니다.")
     if len(output) > MAX_OUTPUT_BYTES:
