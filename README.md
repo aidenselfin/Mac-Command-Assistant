@@ -277,7 +277,10 @@ provider별 기본 모델:
 - Groq: `openai/gpt-oss-20b` (키 `GROQ_API_KEY`, base URL `https://api.groq.com/openai/v1`)
 - OpenAI: `gpt-4o-mini` (키 `OPENAI_API_KEY`)
 
-OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합니다. 모델은 OpenRouter의 도구 호출 지원 모델 ID로 바꿀 수 있습니다. 한 명령에서는 하나의 provider와 하나의 모델만 사용합니다.
+OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합니다. CLI에서
+`--provider`만 바꾸면 `config.json`의 `model`·`base_url`이 그대로 남으므로, 바꿀 때는
+`--provider openrouter --model anthropic/claude-sonnet-5.5 --base-url https://openrouter.ai/api/v1`처럼
+함께 지정하세요. 모델은 OpenRouter의 도구 호출 지원 모델 ID로 바꿀 수 있습니다. 한 명령에서는 하나의 provider와 하나의 모델만 사용합니다.
 
 ## 자기 피드백 루프
 
@@ -368,13 +371,17 @@ local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
 | png·jpeg(jpg)·heic·tiff·gif·bmp 서로 (아이폰 HEIC → JPG·PNG 포함) | `sips` |
 | csv ↔ json | Python 표준 라이브러리 |
 
-- 원본은 바꾸지 않고 같은 폴더에 새 파일을 만듭니다. 같은 이름이 있으면 `이름 (1).jpg`처럼 새 이름을 씁니다.
+- 원본은 바꾸지 않고 새 파일을 만듭니다. 기본은 같은 폴더이고 같은 이름이 있으면 `이름 (1).jpg`처럼 새 이름을 씁니다. 출력 경로를 직접 지정하면 다른 허용 폴더도 되지만, 이미 있는 파일이면 거부합니다.
 - 승인 전에 임시 폴더에서 실제로 변환해 결과 크기와 미리보기(글 형식)를 승인 패널에 보여줍니다.
 - 승인하면 Undo journal에 새 파일 생성으로 기록한 뒤 파일을 만들고, `최근 변경 되돌리기`로 지울 수 있습니다.
-- 승인 대기 중 원본이 바뀌거나 출력 이름이 생기면 다시 변환해 새로 승인받습니다.
+- 승인 대기 중 원본이 바뀌거나 출력 이름이 생기면 다시 변환해 새로 승인받습니다. 실행 직전에 원본·출력 경로가 여전히 허용 폴더 안인지(폴더가 링크로 바뀌지 않았는지) 다시 검사하고, 파일을 쓰는 함수도 같은 검사를 합니다.
+- 실행 중 취소돼도 쓰기를 끝까지 기다린 뒤 Undo 기록을 확정하므로, 생긴 파일은 되돌릴 수 있습니다. 쓰다가 실패하면 만들던 파일을 지웁니다.
+- CSV→JSON은 헤더가 있는 표만 받습니다. 빈·중복 헤더, 열 수가 다른 행, 깨진 따옴표, UTF-8이 아닌 파일은 값이 사라지지 않도록 거부합니다. 값은 모두 문자열이 됩니다. JSON→CSV는 객체 배열만 받으며 null은 빈 칸, 숫자·불리언은 JSON 표기(`1.5`, `true`)로 씁니다.
+- 결과는 변환기 종류와 관계없이 비어 있거나 50 MiB를 넘으면 거부합니다. 외부 변환기는 60초 제한이 있지만, PDF 글자 읽기(PDFKit)는 앱 안에서 실행되어 시간 제한이 없습니다.
 - 원본은 허용 폴더 안의 일반 파일(링크 불가), 최대 20 MiB이고, 확장자와 실제 형식이 다르면 거부합니다.
 - 서식 있는 문서의 PDF 변환, 엑셀, 이미지 크기 조절, 스캔 PDF 글자 인식은 지원하지 않습니다.
-- `local__read_document`는 pdf·docx·doc·rtf·odt·html의 글자를 읽어 모델에 돌려주며 파일을 만들지 않습니다.
+- `local__read_document`는 pdf·docx·doc·rtf·odt·html의 글자를 읽어 모델에 돌려주며 파일을 만들지 않습니다. 회의록처럼 후보를 찾아 고르는 요청에서는 고른 파일만 읽을 수 있습니다.
+- 모델이 그 단계에 제공되지 않은 도구를 요청하면 실행하지 않고 오류로 돌려줍니다. 웹 요청에서는 변환 도구를 쓸 수 없습니다.
 
 ## 처리 흐름
 

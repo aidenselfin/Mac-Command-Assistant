@@ -32,8 +32,14 @@
     변환 artifact/입력 오류의 일반 예외 전파
   - UI 승인 경로의 제어 문자 표시와 EvalRunner의 live/control·로그·client 정리도 정적으로 검토
   - 이번 리뷰는 production 미수정. 기존 F01~F10과 별도 신규 발견 사항
+- 최근 변경 리뷰 C01~C07·UI·EvalRunner 수정 (결과: `docs/reviews/2026-10-04-recent-changes-fixes.md`)
+  - 변환 실행 직전 경계 재검사·취소 시 journal 일치, 노출한 도구만 실행, 문서 읽기 후보 계약,
+    CSV 손실 거부·결과 크기 제한·변환기 오류 처리, 승인 경로 제어 문자 표시, eval 안전성
 
 # 검증
+- 2026-10-04 최근 변경 리뷰 수정 후: pytest 430 passed (UI 테스트 포함, GUI 수동 확인 없음),
+  non-UI 378 passed / 26 deselected, ruff 통과. 인수 `acceptance_after_fixes.py` 17/17,
+  `acceptance_recent_changes.py` 17/17, `evals/run_eval.py` 재생 8/8
 - 2026-10-04 리뷰 수정 후: pytest 372 passed (UI 테스트 포함, FORCE_COLOR 해제), ruff All checks passed
 - 대화형 인수 `docs/reviews/acceptance_after_fixes.py`: 실제 Filesystem MCP, scripted LLM, 17/17 PASS
 - 리뷰 수정 전(2026-10-04): 실제 OpenRouter 분석 호출 1회, 실제 Groq `--text` 실행 확인.
@@ -48,11 +54,11 @@
   - GUI 실행·실제 외부 LLM/API·Eval CLI는 이번 리뷰에서 실행하지 않음
 
 # 다음 작업
-- Claude Code: 최근 리뷰의 C01~C07을 회귀로 고정하고 최소 수정. 특히 경계(C01)와
-  취소/복구(C02)를 먼저 처리하고, 앱 인수는 interactive로 진행
+- 실제 OpenRouter 모델로 변환·문서 읽기 smoke와 `evals/run_eval.py --live` (비용 발생, 미실행)
+- 변환 쓰기의 디렉터리 fd 기준 open 등 더 강한 경합 방어는 별도 검토
 - 필요하면 실제 API smoke 재실행 (임시 cwd·allowed root·journal·feedback DB에서)
 - M5: 2주 사용 후 lesson별 노출 run 수, 재발률, 오탐률, 시작한 분석 요청 수로 임계값 조정
-- 남은 문제 목록은 `docs/reviews/2026-10-04-fixes.md` 참고
+- 남은 문제 목록은 `docs/reviews/2026-10-04-fixes.md`, `2026-10-04-recent-changes-fixes.md` 참고
 
 # 중요한 결정
 - 작업은 이 폴더에서 직접 한다. 별도 git worktree를 쓰지 않는다 (2026-10-04 사용자 요청).

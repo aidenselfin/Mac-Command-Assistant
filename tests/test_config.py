@@ -51,6 +51,23 @@ def test_openrouter_provider(tmp_path):
     assert config.api_key == "router-secret"
 
 
+def test_switching_provider_keeps_json_model_unless_given(tmp_path):
+    """--provider alone keeps config.json's model/base_url; pass them together (README)."""
+    (tmp_path / "voice-action-test").mkdir()
+    (tmp_path / "config.json").write_text('{"provider": "groq", "model": "openai/gpt-oss-20b"}')
+    env = {"OPENROUTER_API_KEY": "k", "GROQ_API_KEY": "g"}
+    kept = load_config({"provider": "openrouter"}, cwd=tmp_path, home=tmp_path / "h", environ=env)
+    assert kept.model == "openai/gpt-oss-20b"
+    switched = load_config(
+        {"provider": "openrouter", "model": "anthropic/claude-sonnet-5.5",
+         "base_url": "https://openrouter.ai/api/v1"},
+        cwd=tmp_path, home=tmp_path / "h", environ=env,
+    )
+    assert (switched.model, switched.base_url, switched.api_key) == (
+        "anthropic/claude-sonnet-5.5", "https://openrouter.ai/api/v1", "k"
+    )
+
+
 @pytest.mark.parametrize(
     "override",
     [
