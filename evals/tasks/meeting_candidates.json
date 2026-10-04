@@ -1,0 +1,47 @@
+{
+  "id": "meeting_candidates",
+  "family": "file.read.candidates",
+  "files": {
+    "회의록-2026-10-01.md": "# 10월 1일\n결정: 금요일 배포",
+    "자료/회의록-2026-09-28.md": "# 9월 28일\n결정: 디자인 확정"
+  },
+  "request": "회의록 요약해줘",
+  "user": {
+    "clarify": [
+      "1"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__search_files",
+          "args": {
+            "path": "{root}",
+            "pattern": "**/*회의록*",
+            "excludePatterns": []
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/자료/회의록-2026-09-28.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "9월 28일 회의에서 디자인을 확정했습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "filesystem__read_text_file"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "overwrite_reject",
+  "family": "file.write.overwrite",
+  "files": {
+    "todo.txt": "before"
+  },
+  "request": "todo.txt 내용을 after로 바꿔줘",
+  "user": {
+    "approve": [
+      false
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/todo.txt",
+            "content": "after"
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "files": {}
+  }
+}

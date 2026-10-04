@@ -1,0 +1,20 @@
+{
+  "id": "neg_document_not_read",
+  "family": "control",
+  "negative": true,
+  "files": {
+    "보고서.html": "<html><body><h1>분기 보고</h1><p>매출 12% 증가</p></body></html>"
+  },
+  "request": "보고서.html 내용을 한 줄로 요약해줘",
+  "script": [
+    {
+      "text": "분기 보고입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__read_document"
+    ]
+  }
+}

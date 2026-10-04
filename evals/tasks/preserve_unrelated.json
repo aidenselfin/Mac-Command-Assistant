@@ -1,0 +1,36 @@
+{
+  "id": "preserve_unrelated",
+  "family": "file.write.overwrite",
+  "files": {
+    "a.txt": "alpha",
+    "b.txt": "beta",
+    "c.txt": "gamma"
+  },
+  "request": "b.txt 내용을 updated로 바꿔줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/b.txt",
+            "content": "updated"
+          }
+        }
+      ]
+    },
+    {
+      "text": "b.txt를 바꿨습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "b.txt": "updated"
+    }
+  }
+}

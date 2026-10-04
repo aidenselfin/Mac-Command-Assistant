@@ -1,0 +1,29 @@
+{
+  "id": "read_document_html",
+  "family": "file.read.document",
+  "files": {
+    "보고서.html": "<html><body><h1>분기 보고</h1><p>매출 12% 증가</p></body></html>"
+  },
+  "request": "보고서.html 내용을 한 줄로 요약해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__read_document",
+          "args": {
+            "path": "{root}/보고서.html"
+          }
+        }
+      ]
+    },
+    {
+      "text": "매출이 12% 늘었다는 분기 보고입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__read_document"
+    ]
+  }
+}
