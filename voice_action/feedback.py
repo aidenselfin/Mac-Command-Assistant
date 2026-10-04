@@ -37,14 +37,17 @@ LESSON_MIN_CONFIDENCE = 0.6
 LESSON_FAILURE_LIMIT = 3
 REANALYZE_AFTER_SECONDS = 6 * 3600
 FIELD_CHARS = 4000
-TOOL_RESULT_CHARS = 500
+# Assistant replies and results often re-quote file bodies; keep only their opening.
+TEXT_CHARS = 300
+ARG_CHARS = 200
 BUNDLE_CHARS = 30000
 # ponytail: thresholds are guesses; tune after a few weeks of events (design doc M5).
 ERROR_REPEAT_COUNT, ERROR_WINDOW = 3, 86400
 RETRY_COUNT, RETRY_WINDOW, RETRY_RATIO = 3, 600, 0.8
 UNDO_WINDOW = 300
 SECRET_PATTERN = re.compile(
-    r"sk-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{8,}|xai-[A-Za-z0-9]{8,}|Bearer\s+\S+"
+    r"sk-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{8,}|xai-[A-Za-z0-9]{8,}"
+    r"|Bearer\s+[A-Za-z0-9._~+/=-]+"
 )
 # A follow-up that corrects or instructs the assistant ("아니 …", "A 말고 …", "다음부턴 …").
 CORRECTION_PATTERN = re.compile(
@@ -104,6 +107,17 @@ def redact(text: str, secrets: tuple[str, ...] = ()) -> str:
     return SECRET_PATTERN.sub("[REDACTED]", text)
 
 
+def scrub(value: Any, secrets: tuple[str, ...]) -> Any:
+    """Redact every string inside a JSON-like value, before it is clipped or serialized."""
+    if isinstance(value, str):
+        return redact(value, secrets)
+    if isinstance(value, dict):
+        return {key: scrub(item, secrets) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [scrub(item, secrets) for item in value]
+    return value
+
+
 def normalize(text: str, limit: int = 120) -> str:
     text = re.sub(r"(?:[~/][\w.-]+)+", "<path>", text.casefold())
     text = re.sub(r"\d+", "#", text)
@@ -117,24 +131,60 @@ def _clip(value: Any, limit: int = FIELD_CHARS) -> Any:
 
 
 def _digest(value: str) -> dict:
+    """Length and hash only: file bodies, web pages and write contents are never stored."""
+    return {"chars": len(value), "sha256": hashlib.sha256(value.encode()).hexdigest()[:16]}
+
+
+def _load(payload: str) -> dict | None:
+    try:
+        value = json.loads(payload)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _call_digest(arguments: Any) -> str:
+    """Identity of a tool call over its full canonical arguments (R2), not a clipped copy."""
+    try:
+        value = json.loads(arguments) if isinstance(arguments, str) else arguments
+        text = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        text = str(arguments)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _safe_arguments(arguments: Any) -> Any:
+    """Tool arguments without bodies: content and long strings become fingerprints."""
+    try:
+        value = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (TypeError, ValueError):
+        return _digest(str(arguments))
+    if not isinstance(value, dict):
+        return _digest(str(arguments))
     return {
-        "head": value[:TOOL_RESULT_CHARS],
-        "chars": len(value),
-        "sha256": hashlib.sha256(value.encode()).hexdigest()[:16],
+        key: _digest(item)
+        if isinstance(item, str) and (key == "content" or len(item) > ARG_CHARS)
+        else item
+        for key, item in value.items()
     }
 
 
-def _summarize_message(message: dict) -> dict:
-    content = message.get("content")
+def _summarize_message(message: dict, secrets: tuple[str, ...]) -> dict:
+    role, content = message.get("role"), message.get("content")
     content = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-    summary = {
-        "role": message.get("role"),
-        # Tool results hold file contents and web pages; keep only a fingerprint.
-        "content": _digest(content) if message.get("role") == "tool" else _clip(content),
-    }
+    if role in ("tool", "system"):
+        # Tool results hold file and web bodies; the system prompt is fixed and long.
+        stored: Any = _digest(content)
+    else:
+        content = redact(content, secrets)
+        stored = _clip(content, TEXT_CHARS if role == "assistant" else FIELD_CHARS)
+    summary = {"role": role, "content": stored}
     if message.get("tool_calls"):
         summary["tool_calls"] = [
-            {"name": call["function"]["name"], "arguments": _clip(call["function"]["arguments"])}
+            {
+                "name": call["function"]["name"],
+                "arguments": _safe_arguments(call["function"]["arguments"]),
+            }
             for call in message["tool_calls"]
             if isinstance(call, dict) and "function" in call
         ]
@@ -152,28 +202,16 @@ class RecordingModel:
         if suffix and messages and messages[0].get("role") == "system":
             # A copy: the planner's own message state never sees the lessons.
             messages = [{**messages[0], "content": messages[0]["content"] + suffix}, *messages[1:]]
-        self.loop.record(
-            "llm_request",
-            messages=[_summarize_message(m) for m in messages],
-            tools=[tool.name for tool in tools],
-            allow_tools=allow_tools,
-        )
+        self.loop.llm_request(messages, tools, allow_tools)
         started = time.perf_counter()
         try:
             turn: ModelTurn = await self.inner.generate(
                 messages, tools, allow_tools=allow_tools, allow_clarification=allow_clarification
             )
         except PlannerError as exc:
-            message = f"{type(exc).__name__}: {exc}"
-            self.loop.record("llm_error", signature=normalize(message), error=message)
+            self.loop.exception(exc, kind="llm_error")
             raise
-        self.loop.record(
-            "llm_response",
-            text=_clip(turn.text),
-            tool_calls=[{"name": c.name, "arguments": _clip(c.arguments)} for c in turn.tool_calls],
-            clarification=turn.clarification.question if turn.clarification else None,
-            elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
-        )
+        self.loop.llm_response(turn, time.perf_counter() - started)
         return turn
 
 
@@ -242,22 +280,57 @@ class FeedbackLoop:
     def wrap(self, model) -> RecordingModel:
         return RecordingModel(model, self)
 
-    def record(self, kind: str, signature: str | None = None, **payload) -> None:
+    def record(
+        self, kind: str, signature: str | None = None, run_id: str | None = None, **payload
+    ) -> None:
         try:
-            body = redact(json.dumps(payload, ensure_ascii=False, default=str), self.secrets)
+            # Strings are redacted one by one before serialization, so JSON stays valid.
+            body = json.dumps(scrub(payload, self.secrets), ensure_ascii=False, default=str)
+            signature = redact(signature, self.secrets) if signature else signature
             with self.db:
                 self.db.execute(
                     "INSERT INTO events (ts, session_id, run_id, kind, signature, payload) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (self.clock(), self.session_id, self.run_id, kind, signature, body),
+                    (self.clock(), self.session_id, run_id or self.run_id, kind, signature, body),
                 )
         except Exception:
             self._warn()
 
+    def _sig(self, text: str, limit: int = 120) -> str:
+        """Signature from user or error text: redacted first, since normalize() lowercases."""
+        return normalize(redact(text, self.secrets), limit)
+
+    def _text(self, text: str | None, limit: int = TEXT_CHARS) -> str | None:
+        return _clip(redact(text, self.secrets), limit) if text else text
+
+    def llm_request(self, messages: list[dict], tools, allow_tools: bool) -> None:
+        self.record(
+            "llm_request",
+            messages=[_summarize_message(m, self.secrets) for m in messages],
+            tools=[tool.name for tool in tools],
+            allow_tools=allow_tools,
+        )
+
+    def llm_response(self, turn: ModelTurn, elapsed_seconds: float) -> None:
+        self.record(
+            "llm_response",
+            text=self._text(turn.text),
+            tool_calls=[
+                {
+                    "name": call.name,
+                    "arguments": _safe_arguments(call.arguments),
+                    "digest": _call_digest(call.arguments),
+                }
+                for call in turn.tool_calls
+            ],
+            clarification=self._text(turn.clarification.question) if turn.clarification else None,
+            elapsed_ms=round(elapsed_seconds * 1000, 1),
+        )
+
     def user_input(self, text: str, *, new_run: bool) -> None:
         if new_run or self.run_id is None:
             self.run_id = uuid.uuid4().hex
-        self.record("user_input", signature=normalize(text, 60), text=_clip(text))
+        self.record("user_input", signature=self._sig(text, 60), text=self._text(text, FIELD_CHARS))
 
     def decision(self, action: str, tool: str | None = None) -> None:
         if action == "undo":
@@ -267,22 +340,22 @@ class FeedbackLoop:
     def outcome(self, outcome) -> None:
         if isinstance(outcome, Error):
             message = outcome.message
-            self.record("error_outcome", signature=normalize(message), message=message)
+            self.record("error_outcome", signature=self._sig(message), message=self._text(message))
         elif isinstance(outcome, Completed):
-            self.record("outcome", type="Completed", text=_clip(outcome.text))
+            self.record("outcome", type="Completed", text=self._text(outcome.text))
         elif isinstance(outcome, Clarification):
-            self.record("outcome", type="Clarification", question=outcome.question)
+            self.record("outcome", type="Clarification", question=self._text(outcome.question))
         elif isinstance(outcome, ApprovalRequired):
             self.record("outcome", type="ApprovalRequired", tool=outcome.tool_name)
 
-    def exception(self, exc: BaseException) -> None:
+    def exception(self, exc: BaseException, kind: str = "exception") -> None:
         if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
             self.record("cancelled")
             return
         # SDK exception text can carry request bodies; keep only our own messages.
         detail = str(exc) if isinstance(exc, PlannerError) else ""
         message = f"{type(exc).__name__}: {detail}"
-        self.record("exception", signature=normalize(message), error=message)
+        self.record(kind, signature=self._sig(message), error=self._text(message))
 
     def state(self, previous: str, current: str, reason: str) -> None:
         self.record("state", previous=previous, current=current, reason=reason)
@@ -312,12 +385,17 @@ class FeedbackLoop:
         if self.run_id is None:
             return []
         now, found = self.clock(), []
-        events = self._rows(
+        events = []
+        for kind, signature, payload, ts in self._rows(
             "SELECT kind, signature, payload, ts FROM events WHERE run_id = ? ORDER BY id",
             self.run_id,
-        )
-        for kind, signature, payload, _ in events:
-            data = json.loads(payload)
+        ):
+            data = _load(payload)
+            if data is None:
+                self._warn()  # skip only the unreadable row, not the whole run
+                continue
+            events.append((kind, signature, data, ts))
+        for kind, signature, data, _ in events:
             # R1: the same error in three separate runs within a day.
             if kind in ERROR_KINDS and signature:
                 (runs,) = self.db.execute(
@@ -340,17 +418,18 @@ class FeedbackLoop:
                     now - UNDO_WINDOW,
                 )
                 if approved:
-                    found.append(("R4", f"undo:{json.loads(approved[0][0]).get('tool')}"))
+                    tool = (_load(approved[0][0]) or {}).get("tool")
+                    found.append(("R4", f"undo:{tool}"))
         # R2: the model repeated the same tool call within one run.
         calls = [
-            f"{call['name']}:{hashlib.sha256(call['arguments'].encode()).hexdigest()[:8]}"
-            for kind, _, payload, _ in events
+            f"{call.get('name')}:{call.get('digest') or _call_digest(call.get('arguments'))}"
+            for kind, _, data, _ in events
             if kind == "llm_response"
-            for call in json.loads(payload)["tool_calls"]
+            for call in data.get("tool_calls", [])
         ]
         for call in sorted({c for c in calls if calls.count(c) >= 2}):
             found.append(("R2", f"loop:{call}"))
-        inputs = [(json.loads(p)["text"], ts) for k, _, p, ts in events if k == "user_input"]
+        inputs = [(d.get("text") or "", ts) for k, _, d, ts in events if k == "user_input"]
         if inputs:
             text, ts = inputs[0]
             earlier = self._rows(
@@ -360,7 +439,7 @@ class FeedbackLoop:
                 ts - RETRY_WINDOW,
                 ts,
             )
-            earlier_texts = [json.loads(p)["text"] for (p,) in earlier]
+            earlier_texts = [(_load(p) or {}).get("text") or "" for (p,) in earlier]
             # R3: near-identical commands retried within ten minutes.
             similar = [
                 t for t in earlier_texts
@@ -436,29 +515,51 @@ class FeedbackLoop:
 
     # ---- analysis and application ----------------------------------------------------
 
-    def _bundle(self) -> str:
-        runs = [
-            run for (run,) in self._rows(
-                "SELECT run_id FROM events WHERE session_id = ? AND run_id IS NOT NULL "
-                "GROUP BY run_id ORDER BY MAX(id) DESC LIMIT 3",
-                self.session_id,
-            )
-        ]
+    def _bundle(self, signature: str, runs: tuple[str, ...]) -> str:
+        """The incident's evidence runs as whole JSON lines, newest kept when over budget."""
         rows = self._rows(
             f"SELECT run_id, kind, payload FROM events WHERE run_id IN "
             f"({','.join('?' * len(runs))}) AND kind != 'state' ORDER BY id",
             *runs,
         )
-        lines = [f'{{"run": "{run[:8]}", "kind": "{kind}", "data": {data}}}'
-                 for run, kind, data in rows]
+        lines = [
+            json.dumps({"run": run[:8], "kind": kind, "data": _load(data)}, ensure_ascii=False)
+            for run, kind, data in rows
+        ]
+        kept, size = [], 0
+        for line in reversed(lines):
+            if size + len(line) > BUNDLE_CHARS:
+                break
+            kept.append(line)
+            size += len(line) + 1
         lessons = [text for _, text in self.active_lessons()]
-        text = "\n".join(lines)[-BUNDLE_CHARS:]
-        return text + "\n\n현재 활성 lesson:\n" + ("\n".join(lessons) or "(없음)")
+        return (
+            f"signature: {signature}\n근거 run {len(runs)}개, "
+            f"용량 초과로 뺀 오래된 기록 {len(lines) - len(kept)}줄\n"
+            + "\n".join(reversed(kept))
+            + "\n\n현재 활성 lesson:\n"
+            + ("\n".join(lessons) or "(없음)")
+        )
+
+    def _recent_session_runs(self) -> tuple[str, ...]:
+        return tuple(
+            run for (run,) in self._rows(
+                "SELECT run_id FROM events WHERE session_id = ? AND run_id IS NOT NULL "
+                "GROUP BY run_id ORDER BY MAX(id) DESC LIMIT 3",
+                self.session_id,
+            )
+        )
 
     async def _analyze(self, incident_id: int, rule: str, signature: str) -> None:
         status = "failed"
         try:
-            result = await self.analyzer.analyze(rule, self._bundle())
+            raw = await self.analyzer.analyze(
+                rule, self._bundle(signature, self._recent_session_runs())
+            )
+            # One sanitized result feeds the event, lesson, hint and report alike.
+            result = scrub(raw, self.secrets)
+            if result.get("lesson") != raw.get("lesson"):
+                result["action"] = "dev_report"  # never adopt a lesson that carried a credential
             self.record("feedback", signature=signature, incident=incident_id, **result)
             self.emit(f"[FEEDBACK] 분석 완료 {rule}: {result['root_cause']} → {result['action']}")
             self._apply(signature, result)
@@ -542,7 +643,7 @@ class FeedbackLoop:
         analyses = {
             data.get("incident"): data
             for data in (
-                json.loads(p) for (p,) in self._rows(
+                _load(p) or {} for (p,) in self._rows(
                     "SELECT payload FROM events WHERE kind = 'feedback' ORDER BY id DESC LIMIT ?",
                     limit,
                 )

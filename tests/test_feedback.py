@@ -92,7 +92,7 @@ async def test_tool_results_are_stored_as_fingerprints(tmp_path):
     await model.generate([{"role": "tool", "content": "X" * 5000}], [], allow_tools=True)
     (payload,) = loop.db.execute("SELECT payload FROM events WHERE kind='llm_request'").fetchone()
     stored = json.loads(payload)["messages"][0]["content"]
-    assert stored["chars"] == 5000 and len(stored["head"]) == 500
+    assert stored["chars"] == 5000 and "head" not in stored and "X" not in json.dumps(stored)
 
 
 async def test_repeated_error_learns_lesson_and_injects_it(tmp_path):
