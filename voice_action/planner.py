@@ -67,6 +67,8 @@ OTHER_TASK_PATTERN = re.compile(
 CONTENT_RESULT_TOOLS = frozenset(
     {FILESYSTEM_READ_TOOL, WEB_NAVIGATE_TOOL, WEB_SNAPSHOT_TOOL, READ_DOCUMENT_TOOL}
 )
+# Tools that put a file's content in front of the model; they share the candidate rules.
+CONTENT_READ_TOOLS = frozenset({FILESYSTEM_READ_TOOL, READ_DOCUMENT_TOOL})
 # "pdf로 바꿔줘", "jpg로 변환", "docx로 저장" ... the conversion tool is offered only then.
 CONVERSION_REQUEST_PATTERN = re.compile(
     r"변환|convert|"
@@ -182,6 +184,7 @@ class ApprovalContext:
     active_app_name: str | None
     active_app_only: bool
     write_completed: bool
+    exposed_tool_names: frozenset[str] | None = None
 
     @property
     def digest(self) -> str:
@@ -748,6 +751,8 @@ class _LoopState:
     active_app_name: str | None
     active_app_only: bool
     write_completed: bool
+    # Names offered on the model turn whose calls are being processed. Only these run.
+    exposed_tool_names: frozenset[str] | None = None
 
 
 class Planner:
@@ -1054,6 +1059,7 @@ class Planner:
                 if tool.name != MACOS_ACTIVE_APP_TOOL or state.active_app_name is None
             ]
             state.model_calls += 1
+            state.exposed_tool_names = frozenset(tool.name for tool in exposed_tools)
             try:
                 turn = await self.model.generate(
                     list(state.messages),
@@ -1236,6 +1242,21 @@ class Planner:
                 self.emit("[PLAN] 동일 도구 호출 반복 감지")
             state.previous_signature = signature
 
+            # Offering a tool is the permission to run it: a provider returning another
+            # known tool name is refused, not trusted. Checked right before running, so
+            # the more specific policy errors above still explain a refusal first.
+            if (
+                state.exposed_tool_names is not None
+                and call.name not in state.exposed_tool_names
+            ):
+                self._append_tool_error(
+                    state.messages,
+                    call,
+                    state.iteration,
+                    f"tool_error: 이번 단계에서 제공되지 않은 도구입니다: {call.name}",
+                )
+                state.next_call_index += 1
+                continue
             if risk is ToolRisk.WRITE:
                 try:
                     prepared = await self._risk_guard.prepare_write(call.name, arguments)
@@ -1267,6 +1288,8 @@ class Planner:
     ) -> str | None:
         if call.name == CONVERT_TOOL and state.read_only_candidate_request:
             return "읽기 전용 요청에서는 파일을 변환할 수 없습니다."
+        if call.name == CONVERT_TOOL and (state.user_urls or state.web_attempted):
+            return "웹 요청에서는 파일을 변환할 수 없습니다."
         if call.name == DELETE_TOOL:
             if state.read_only_candidate_request:
                 return "읽기 전용 요청에서는 파일을 삭제할 수 없습니다."
@@ -1323,7 +1346,7 @@ class Planner:
             and not state.candidate_read
         ):
             return "검증된 후보 파일을 읽기 전에는 쓸 수 없습니다."
-        if call.name == FILESYSTEM_READ_TOOL and state.single_search_candidate is not None:
+        if call.name in CONTENT_READ_TOOLS and state.single_search_candidate is not None:
             try:
                 requested = await self._gateway.validate_result_path(arguments.get("path"))
             except (MCPError, OSError):
@@ -1493,7 +1516,7 @@ class Planner:
                     return search_outcome
                 state.single_search_candidate = search_outcome
         elif (
-            call.name == FILESYSTEM_READ_TOOL
+            call.name in CONTENT_READ_TOOLS
             and state.single_search_candidate is not None
         ):
             state.candidate_read = True
@@ -1541,6 +1564,7 @@ class Planner:
             active_app_name=state.active_app_name,
             active_app_only=state.active_app_only,
             write_completed=state.write_completed,
+            exposed_tool_names=state.exposed_tool_names,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -1584,6 +1608,7 @@ class Planner:
             active_app_name=context.active_app_name,
             active_app_only=context.active_app_only,
             write_completed=context.write_completed,
+            exposed_tool_names=context.exposed_tool_names,
         )
 
     async def _handle_search_result(

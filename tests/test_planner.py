@@ -28,6 +28,19 @@ from voice_action.planner import Planner as CorePlanner
 from voice_action.runtime import RuntimeController
 from voice_action.undo import UndoJournal
 
+# What the real MCP servers advertise; a call is only executed if its tool was offered.
+ADVERTISED_TOOLS = [
+    ToolDefinition(name, name, {"type": "object"})
+    for name in (
+        "filesystem__list_directory",
+        "filesystem__search_files",
+        "filesystem__read_text_file",
+        "filesystem__write_file",
+        "web__browser_navigate",
+        "web__browser_snapshot",
+        "macos__get_active_app",
+    )
+]
 
 def Planner(config, gateway, model, *args, **kwargs):
     kwargs.setdefault(
@@ -61,7 +74,7 @@ def call(config, arguments=None):
 
 def fake_mcp():
     mcp = AsyncMock(tools=[])
-    mcp.list_tools.return_value = []
+    mcp.list_tools.return_value = list(ADVERTISED_TOOLS)
     mcp.validate_result_path.side_effect = lambda value: Path(value)
 
     async def normalize(_name, arguments):
@@ -760,10 +773,9 @@ async def test_navigation_pending_snapshot_blocks_filesystem_detour(
     ]["content"]
 
 
-async def test_web_search_no_matches_is_general_tool_result(config):
+async def test_web_read_refuses_an_unoffered_search_then_reads_the_page(config):
     gateway = fake_mcp()
     gateway.call_tool.side_effect = [
-        ToolResult(True, "No matches found"),
         web_result("https://example.test/"),
         web_result("https://example.test/", "PAGE TEXT"),
     ]
@@ -798,12 +810,12 @@ async def test_web_search_no_matches_is_general_tool_result(config):
     )
 
     assert outcome == Completed("페이지를 읽었습니다.")
+    # Only navigate was offered on the first turn, so the search never reaches the gateway.
     assert [item.args[0] for item in gateway.call_tool.await_args_list] == [
-        "filesystem__search_files",
         "web__browser_navigate",
         "web__browser_snapshot",
     ]
-    assert model.generate.await_args_list[1].args[0][-1]["content"] == "No matches found"
+    assert "제공되지 않은 도구" in model.generate.await_args_list[1].args[0][-1]["content"]
 
 
 async def test_web_snapshot_then_filesystem_write_is_sequential(config):

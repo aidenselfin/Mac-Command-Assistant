@@ -21,10 +21,23 @@ from voice_action.planner import (
 )
 from voice_action.undo import UndoJournal
 
+# What the real MCP servers advertise; a call is only executed if its tool was offered.
+ADVERTISED_TOOLS = [
+    ToolDefinition(name, name, {"type": "object"})
+    for name in (
+        "filesystem__list_directory",
+        "filesystem__search_files",
+        "filesystem__read_text_file",
+        "filesystem__write_file",
+        "web__browser_navigate",
+        "web__browser_snapshot",
+        "macos__get_active_app",
+    )
+]
 
 def fake_gateway():
     gateway = AsyncMock(tools=[])
-    gateway.list_tools.return_value = []
+    gateway.list_tools.return_value = list(ADVERTISED_TOOLS)
     gateway.validate_result_path.side_effect = lambda value: Path(value)
 
     async def normalize(_name, arguments):
