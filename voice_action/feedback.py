@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS lessons (
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
-        "root_cause": {"type": "string", "minLength": 1},
+        "root_cause": {"type": "string", "minLength": 1, "maxLength": 300},
         "category": {"enum": ["prompt", "user_input", "tool", "code_bug", "provider"]},
         "action": {"enum": ["lesson", "user_hint", "dev_report"]},
         "lesson": {"type": ["string", "null"], "maxLength": 200},
@@ -92,6 +92,17 @@ ANALYSIS_SCHEMA = {
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     },
     "required": ["root_cause", "category", "action", "confidence"],
+    # The action's own value must be present, or the result can't be applied.
+    "allOf": [
+        {
+            "if": {"properties": {"action": {"const": field}}},
+            "then": {
+                "required": [field],
+                "properties": {field: {"type": "string", "minLength": 1}},
+            },
+        }
+        for field in ("lesson", "user_hint")
+    ],
 }
 
 ANALYST_PROMPT = (

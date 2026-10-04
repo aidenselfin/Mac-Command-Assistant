@@ -8,10 +8,11 @@ import stat
 import time
 from dataclasses import replace
 
+import jsonschema
 import pytest
 
 from tests.test_feedback import LESSON, FakeAnalyzer, FakeModel, make_loop
-from voice_action.feedback import FeedbackLoop, build_feedback, scrub
+from voice_action.feedback import ANALYSIS_SCHEMA, FeedbackLoop, build_feedback, scrub
 from voice_action.planner import Completed, Error, ModelTurn, PlannerError, ToolCall
 from voice_action.runtime import RuntimeController
 
@@ -335,3 +336,33 @@ async def test_cancelled_analysis_still_counts_against_the_daily_limit(tmp_path)
     statuses = [s for (s,) in loop.db.execute("SELECT status FROM incidents ORDER BY id")]
     assert statuses == ["cancelled", "limited"]
     await loop.close(wait_seconds=0)
+
+
+# ---- section 4 follow-ups: schema per action, lessons CLI -------------------------------
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {**LESSON, "lesson": None},
+        {**LESSON, "action": "user_hint", "user_hint": None},
+        {**LESSON, "root_cause": "x" * 301},
+    ],
+    ids=["lesson-without-text", "hint-without-text", "long-root-cause"],
+)
+def test_analysis_schema_requires_the_value_its_action_needs(result):
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(result, ANALYSIS_SCHEMA)
+    jsonschema.validate(LESSON, ANALYSIS_SCHEMA)
+
+
+def test_lessons_cli_uses_its_own_db_and_reports_errors_safely(tmp_path, monkeypatch, capsys):
+    import main
+
+    monkeypatch.setattr(main, "DEFAULT_DB_PATH", tmp_path / "fb.sqlite3")
+    assert main.main(["--lessons"]) == 0
+    assert "없음" in capsys.readouterr().out
+    (tmp_path / "fb.sqlite3").write_bytes(b"not a database")
+    assert main.main(["--lessons"]) == 1
+    out = capsys.readouterr().out
+    assert "[ERROR]" in out and "Traceback" not in out

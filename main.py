@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import os
+import sqlite3
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -336,7 +337,16 @@ def main(argv=None) -> int:
     args = vars(parser.parse_args(argv))
     lessons, lesson_off = args.pop("lessons"), args.pop("lesson_off")
     if lessons or lesson_off is not None:
-        return manage_lessons(Console(), lesson_off)
+        console = Console()
+        try:
+            return manage_lessons(console, lesson_off)
+        except (OSError, sqlite3.Error):
+            console.print(
+                "[ERROR] 피드백 기록을 읽을 수 없습니다. .voice-action/feedback.sqlite3를 "
+                "확인하세요.",
+                markup=False,
+            )
+            return 1
     text = args.pop("text")
     interactive = args.pop("interactive")
     ui = args.pop("ui")
