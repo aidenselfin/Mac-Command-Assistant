@@ -2,10 +2,18 @@
 
 import asyncio
 import json
+import os
+import sqlite3
+import stat
+import time
+from dataclasses import replace
+
+import pytest
 
 from tests.test_feedback import LESSON, FakeAnalyzer, FakeModel, make_loop
-from voice_action.feedback import scrub
-from voice_action.planner import Completed, Error, ModelTurn, ToolCall
+from voice_action.feedback import FeedbackLoop, build_feedback, scrub
+from voice_action.planner import Completed, Error, ModelTurn, PlannerError, ToolCall
+from voice_action.runtime import RuntimeController
 
 SECRET = 'syn"the\\tic\nsecret-key'  # quotes, backslash and newline survive JSON escaping
 BODY = "PRIVATE_BODY_MARKER"
@@ -97,3 +105,107 @@ async def test_analysis_result_is_sanitized_once_for_every_sink(tmp_path):
     assert loop.active_lessons() == []  # a lesson that carried a credential is refused
     assert SECRET not in all_stored_text(loop)
     assert all(SECRET not in m for m in emitted)
+
+
+# ---- F03 isolation, F07 lock, F08 symlinks -----------------------------------------------
+
+
+def broken_emit(_text):
+    raise RuntimeError("output failure")
+
+
+class OkPlanner:
+    def set_event_observer(self, observer):
+        pass
+
+    async def run(self, text):
+        return Completed("ok")
+
+
+async def test_feedback_failure_never_breaks_commands(tmp_path):
+    loop = FeedbackLoop(tmp_path / "fb.sqlite3", emit=broken_emit)
+    loop.db.close()  # every write now fails, and so does the warning output
+    controller = RuntimeController(OkPlanner(), feedback=loop)
+    assert await controller.submit("first") == Completed("ok")
+    assert await controller.submit("second") == Completed("ok")
+
+
+async def test_recording_failure_does_not_hide_model_result_or_error(tmp_path):
+    loop = FeedbackLoop(tmp_path / "fb.sqlite3", emit=broken_emit)
+    unsummarizable = [object()]  # summarizing this raises inside the feedback code
+    turn = ModelTurn("ok", [])
+    assert await loop.wrap(FakeModel([turn])).generate(unsummarizable, []) is turn
+    with pytest.raises(PlannerError):
+        await loop.wrap(FakeModel([PlannerError("LLM 인증 실패")])).generate([], [])
+
+
+async def test_close_releases_resources_even_when_output_fails(tmp_path):
+    class SlowAnalyzer:
+        closed = False
+
+        async def analyze(self, rule, bundle):
+            await asyncio.Event().wait()
+
+        async def close(self):
+            SlowAnalyzer.closed = True
+
+    loop = FeedbackLoop(tmp_path / "fb.sqlite3", analyzer=SlowAnalyzer(), emit=broken_emit)
+    loop.user_input("x", new_run=True)
+    loop._queue("R4", "reject:tool")
+    await loop.close(wait_seconds=0)
+    assert SlowAnalyzer.closed and not loop._tasks
+    with pytest.raises(sqlite3.ProgrammingError):
+        loop.db.execute("SELECT 1")
+
+
+def test_analyzer_construction_failure_keeps_recording(config, monkeypatch, tmp_path):
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("bad client")
+
+    monkeypatch.setattr("voice_action.feedback.OpenRouterAnalyzer", fail)
+    loop = build_feedback(replace(config, feedback_api_key="k"), lambda _: None)
+    assert loop is not None and loop.analyzer is None
+    loop.db.close()
+
+
+def test_locked_database_does_not_block_recording(tmp_path):
+    emitted = []
+    loop = FeedbackLoop(tmp_path / "fb.sqlite3", emit=emitted.append)
+    other = sqlite3.connect(tmp_path / "fb.sqlite3")
+    other.execute("BEGIN IMMEDIATE")
+    started = time.perf_counter()
+    loop.record("a")
+    loop.record("b")
+    assert time.perf_counter() - started < 0.5
+    assert len(emitted) == 1  # one warning that records were dropped
+    other.rollback()
+    other.close()
+    loop.db.close()
+
+
+def test_store_refuses_symlinks_and_keeps_logs_private(tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original")
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "feedback.sqlite3").symlink_to(outside)
+    with pytest.raises(OSError):
+        FeedbackLoop(store / "feedback.sqlite3")
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(tmp_path / "real", target_is_directory=True)
+    (tmp_path / "real").mkdir()
+    with pytest.raises(OSError):
+        FeedbackLoop(linked_parent / "feedback.sqlite3")
+
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    (clean / "feedback-report.md").symlink_to(outside)
+    loop = FeedbackLoop(clean / "feedback.sqlite3")
+    loop._report("sig", "cause", "detail")  # refused, and the command path must not see it
+    assert outside.read_text() == "original"
+    assert stat.S_IMODE(os.stat(clean / "feedback.sqlite3").st_mode) == 0o600
+    loop.db.close()
+    loop = FeedbackLoop(tmp_path / "fresh" / "feedback.sqlite3")
+    loop._report("sig", "cause", "detail")
+    assert stat.S_IMODE(os.stat(loop.report_path).st_mode) == 0o600
+    loop.db.close()

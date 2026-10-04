@@ -5,11 +5,15 @@ Lessons are prompt hints only; RiskGuard, approvals and allowed_directories stay
 """
 
 import asyncio
+import contextlib
 import difflib
+import functools
 import hashlib
 import json
+import os
 import re
 import sqlite3
+import stat
 import time
 import uuid
 from collections.abc import Callable
@@ -41,6 +45,8 @@ FIELD_CHARS = 4000
 TEXT_CHARS = 300
 ARG_CHARS = 200
 BUNDLE_CHARS = 30000
+# Recording is optional: give up on a locked DB quickly instead of stalling the command.
+DB_LOCK_TIMEOUT = 0.05
 # ponytail: thresholds are guesses; tune after a few weeks of events (design doc M5).
 ERROR_REPEAT_COUNT, ERROR_WINDOW = 3, 86400
 RETRY_COUNT, RETRY_WINDOW, RETRY_RATIO = 3, 600, 0.8
@@ -191,6 +197,32 @@ def _summarize_message(message: dict, secrets: tuple[str, ...]) -> dict:
     return summary
 
 
+def _safe(method):
+    """Feedback must never break a command: swallow its errors and warn once."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except Exception:
+            self._warn()
+            return None
+
+    return wrapper
+
+
+def _check_store_path(path: Path) -> None:
+    """Refuse a symlinked store or directory, like the Undo journal does."""
+    if path.parent.is_symlink() or not path.parent.is_dir():
+        raise OSError("피드백 저장소 폴더가 일반 디렉터리가 아닙니다.")
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise OSError("피드백 저장소가 일반 파일이 아닙니다.")
+
+
 class RecordingModel:
     """ModelClient wrapper: logs every LLM round and appends active lessons to the prompt."""
 
@@ -257,8 +289,13 @@ class FeedbackLoop:
         clock: Callable[[], float] = time.time,
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
+        _check_store_path(path)
+        # ponytail: lstat-then-connect leaves a small race window; fine for a local log.
+        self.db = sqlite3.connect(path, timeout=DB_LOCK_TIMEOUT)
+        with contextlib.suppress(sqlite3.Error):
+            self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        os.chmod(path, 0o600)  # ponytail: -wal/-shm side files keep the process umask
         self.report_path = path.with_name("feedback-report.md")
         self.analyzer, self.emit, self.secrets = analyzer, emit, secrets
         self.daily_limit, self.clock = daily_limit, clock
@@ -303,6 +340,7 @@ class FeedbackLoop:
     def _text(self, text: str | None, limit: int = TEXT_CHARS) -> str | None:
         return _clip(redact(text, self.secrets), limit) if text else text
 
+    @_safe
     def llm_request(self, messages: list[dict], tools, allow_tools: bool) -> None:
         self.record(
             "llm_request",
@@ -311,6 +349,7 @@ class FeedbackLoop:
             allow_tools=allow_tools,
         )
 
+    @_safe
     def llm_response(self, turn: ModelTurn, elapsed_seconds: float) -> None:
         self.record(
             "llm_response",
@@ -327,16 +366,19 @@ class FeedbackLoop:
             elapsed_ms=round(elapsed_seconds * 1000, 1),
         )
 
+    @_safe
     def user_input(self, text: str, *, new_run: bool) -> None:
         if new_run or self.run_id is None:
             self.run_id = uuid.uuid4().hex
         self.record("user_input", signature=self._sig(text, 60), text=self._text(text, FIELD_CHARS))
 
+    @_safe
     def decision(self, action: str, tool: str | None = None) -> None:
         if action == "undo":
             self.run_id = uuid.uuid4().hex
         self.record("user_decision", signature=action, action=action, tool=tool)
 
+    @_safe
     def outcome(self, outcome) -> None:
         if isinstance(outcome, Error):
             message = outcome.message
@@ -348,6 +390,7 @@ class FeedbackLoop:
         elif isinstance(outcome, ApprovalRequired):
             self.record("outcome", type="ApprovalRequired", tool=outcome.tool_name)
 
+    @_safe
     def exception(self, exc: BaseException, kind: str = "exception") -> None:
         if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
             self.record("cancelled")
@@ -357,13 +400,18 @@ class FeedbackLoop:
         message = f"{type(exc).__name__}: {detail}"
         self.record(kind, signature=self._sig(message), error=self._text(message))
 
+    @_safe
     def state(self, previous: str, current: str, reason: str) -> None:
         self.record("state", previous=previous, current=current, reason=reason)
+
+    def _say(self, text: str) -> None:
+        with contextlib.suppress(Exception):
+            self.emit(text)
 
     def _warn(self) -> None:
         if not self._warned:
             self._warned = True
-            self.emit("[FEEDBACK] 실행 기록을 저장하지 못했습니다. 명령 실행은 계속됩니다.")
+            self._say("[FEEDBACK] 일부 실행 기록을 저장하지 못했습니다. 명령 실행은 계속됩니다.")
 
     # ---- detection -------------------------------------------------------------------
 
@@ -478,7 +526,7 @@ class FeedbackLoop:
                 (signature, now - REANALYZE_AFTER_SECONDS),
             ).fetchone()
             if recent:
-                self.emit(
+                self._say(
                     f"[FEEDBACK] 문제 감지 {rule} ({signature[:60]}) → "
                     "6시간 안에 이미 분석한 문제라 이번에는 생략"
                 )
@@ -498,7 +546,7 @@ class FeedbackLoop:
                 "VALUES (?, ?, ?, ?, ?)",
                 (now, rule, signature, self.run_id, status),
             )
-        self.emit(
+        self._say(
             f"[FEEDBACK] 문제 감지 {rule} ({signature[:60]}) → "
             + {
                 "queued": "백그라운드 분석 시작",
@@ -561,7 +609,7 @@ class FeedbackLoop:
             if result.get("lesson") != raw.get("lesson"):
                 result["action"] = "dev_report"  # never adopt a lesson that carried a credential
             self.record("feedback", signature=signature, incident=incident_id, **result)
-            self.emit(f"[FEEDBACK] 분석 완료 {rule}: {result['root_cause']} → {result['action']}")
+            self._say(f"[FEEDBACK] 분석 완료 {rule}: {result['root_cause']} → {result['action']}")
             self._apply(signature, result)
             status = "analyzed"
         except asyncio.CancelledError:
@@ -569,7 +617,7 @@ class FeedbackLoop:
             raise
         except Exception as exc:
             self.record("feedback_error", signature=signature, error=type(exc).__name__)
-            self.emit(f"[FEEDBACK] 분석 실패 {rule} ({type(exc).__name__})")
+            self._say(f"[FEEDBACK] 분석 실패 {rule} ({type(exc).__name__})")
         finally:
             try:
                 with self.db:
@@ -593,7 +641,7 @@ class FeedbackLoop:
             self._report(signature, result["root_cause"], f"분류: {result['category']}")
         if hint and hint not in self._hints_shown:
             self._hints_shown.add(hint)
-            self.emit(f"[FEEDBACK] {hint}")
+            self._say(f"[FEEDBACK] {hint}")
 
     def _add_lesson(self, signature: str, text: str) -> None:
         now = self.clock()
@@ -609,15 +657,19 @@ class FeedbackLoop:
                 "(SELECT id FROM lessons WHERE active = 1 ORDER BY id DESC LIMIT ?)",
                 (LESSON_LIMIT,),
             )
-        self.emit("[FEEDBACK] 반복된 문제에서 새 지침을 배웠습니다. 다음 명령부터 적용합니다.")
+        self._say("[FEEDBACK] 반복된 문제에서 새 지침을 배웠습니다. 다음 명령부터 적용합니다.")
 
+    @_safe
     def _report(self, signature: str, cause: str, detail: str) -> None:
         stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(self.clock()))
         entry = (
             f"\n## {stamp} · {signature}\n\n- 원인: {cause}\n- {detail}\n"
             f"- run_id: {self.run_id}\n"
         )
-        with self.report_path.open("a", encoding="utf-8") as file:
+        # O_NOFOLLOW: a report path swapped for a symlink is refused, not followed.
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(self.report_path, flags, 0o600)
+        with os.fdopen(descriptor, "a", encoding="utf-8") as file:
             file.write(redact(entry, self.secrets))
 
     # ---- lessons ---------------------------------------------------------------------
@@ -664,37 +716,44 @@ class FeedbackLoop:
         return cursor.rowcount > 0
 
     async def close(self, wait_seconds: float = 15) -> None:
-        if self._tasks:
-            self.emit(f"[FEEDBACK] 실패 분석을 마무리하는 중입니다 (최대 {wait_seconds:.0f}초).")
-            _, pending = await asyncio.wait(set(self._tasks), timeout=wait_seconds)
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-        if self.analyzer is not None:
+        try:
+            if self._tasks:
+                self._say(
+                    f"[FEEDBACK] 실패 분석을 마무리하는 중입니다 (최대 {wait_seconds:.0f}초)."
+                )
+                _, pending = await asyncio.wait(set(self._tasks), timeout=wait_seconds)
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+        finally:
             try:
-                await self.analyzer.close()
-            except Exception:
-                pass
-        self.db.close()
+                if self.analyzer is not None:
+                    with contextlib.suppress(Exception):
+                        await self.analyzer.close()
+            finally:
+                self.db.close()
 
 
 def build_feedback(config, emit: Callable[[str], None]) -> FeedbackLoop | None:
     """Return a loop for this config, or None when disabled or the store is unusable."""
     if not config.feedback_enabled:
         return None
-    analyzer = None
-    if config.feedback_api_key:
-        analyzer = OpenRouterAnalyzer(
-            config.feedback_api_key, config.feedback_model, config.llm_timeout_seconds
-        )
     try:
-        return FeedbackLoop(
+        loop = FeedbackLoop(
             Path.cwd() / DEFAULT_DB_PATH,
-            analyzer=analyzer,
             emit=emit,
             secrets=tuple(k for k in (config.api_key, config.feedback_api_key) if k),
             daily_limit=config.feedback_daily_limit,
         )
     except Exception:
-        emit("[FEEDBACK] 피드백 저장소를 열 수 없어 이번 실행에서는 끕니다.")
+        with contextlib.suppress(Exception):
+            emit("[FEEDBACK] 피드백 저장소를 열 수 없어 이번 실행에서는 끕니다.")
         return None
+    if config.feedback_api_key:
+        try:
+            loop.analyzer = OpenRouterAnalyzer(
+                config.feedback_api_key, config.feedback_model, config.llm_timeout_seconds
+            )
+        except Exception:
+            loop._say("[FEEDBACK] 분석기를 만들 수 없어 기록·감지만 합니다.")
+    return loop
