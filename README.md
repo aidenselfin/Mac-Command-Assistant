@@ -10,7 +10,7 @@ LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케
 
 ## 현재 구현 상태
 
-2026-10-04 기준 검증 결과 (`env -u FORCE_COLOR uv run --locked pytest -q`, UI 테스트 포함):
+2026-10-04 기준 검증 결과 (`uv run --locked pytest -q`, UI 테스트 포함):
 
 ```text
 pytest: 372 passed

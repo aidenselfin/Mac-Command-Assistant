@@ -213,7 +213,7 @@ AGENTS.md 규칙을 따르고 이 폴더에서 직접 작업·커밋한다.
    --live 실행은 사용자 확인 후에만 한다 (API 과금).
 2. 5.1의 feedback.py / main.py / tests 변경을 한다. evals/run_eval.py의 채점 로직과
    risk_guard.py는 수정하지 않는다.
-3. 검증: env -u FORCE_COLOR uv run --locked pytest -q, uv run --locked ruff check .,
+3. 검증: uv run --locked pytest -q, uv run --locked ruff check .,
    uv run python evals/run_eval.py
 4. 바뀐 파일, 검증 결과, 남은 문제를 보고하고 docs/status.md를 갱신한다.
 ```

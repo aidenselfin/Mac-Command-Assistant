@@ -12,6 +12,12 @@ def config(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_forced_color(monkeypatch):
+    """rich honors FORCE_COLOR even when piped; output assertions expect plain text."""
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def isolated_feedback_db(tmp_path, monkeypatch):
     """Keep test runs out of the real feedback history in the working directory."""
     monkeypatch.setattr("voice_action.feedback.DEFAULT_DB_PATH", tmp_path / "feedback.sqlite3")
