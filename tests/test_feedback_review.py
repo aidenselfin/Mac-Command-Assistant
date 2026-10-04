@@ -309,3 +309,29 @@ async def test_recurrence_counts_only_distinct_runs_that_received_the_lesson(tmp
         active = [i for i, _ in loop.active_lessons()]
         assert (lesson_id in active) == (index < 2)
     assert "재발을 막지 못해" in loop.report_path.read_text()
+
+
+# ---- F10 daily budget --------------------------------------------------------------------
+
+
+async def test_cancelled_analysis_still_counts_against_the_daily_limit(tmp_path):
+    class SlowAnalyzer(RecordingAnalyzer):
+        async def analyze(self, rule, bundle):
+            self.bundles.append(bundle)
+            await asyncio.Event().wait()
+
+    analyzer = SlowAnalyzer()
+    loop = FeedbackLoop(tmp_path / "fb.sqlite3", analyzer=analyzer, daily_limit=1)
+    loop.user_input("first", new_run=True)
+    loop._queue("R1", "error:first")
+    await asyncio.sleep(0)  # the request has started
+    await loop.close(wait_seconds=0)  # ...and is cancelled on exit
+
+    loop = FeedbackLoop(tmp_path / "fb.sqlite3", analyzer=analyzer, daily_limit=1)
+    loop.user_input("second", new_run=True)
+    loop._queue("R1", "error:second")
+    await asyncio.sleep(0)
+    assert len(analyzer.bundles) == 1
+    statuses = [s for (s,) in loop.db.execute("SELECT status FROM incidents ORDER BY id")]
+    assert statuses == ["cancelled", "limited"]
+    await loop.close(wait_seconds=0)

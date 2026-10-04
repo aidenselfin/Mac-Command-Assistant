@@ -559,9 +559,11 @@ class FeedbackLoop:
                     "6시간 안에 이미 분석한 문제라 이번에는 생략"
                 )
                 return
+            # Rolling 24 hours. Every queued analysis keeps its slot, even if later cancelled or
+            # left queued by a crash: cancelling locally does not cancel the provider's work.
             (today,) = self.db.execute(
-                "SELECT COUNT(*) FROM incidents WHERE status IN ('queued', 'analyzed', 'failed') "
-                "AND ts >= ?",
+                "SELECT COUNT(*) FROM incidents "
+                "WHERE status NOT IN ('no_analyzer', 'limited') AND ts >= ?",
                 (now - 86400,),
             ).fetchone()
             status = (
