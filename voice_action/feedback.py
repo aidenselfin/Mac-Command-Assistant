@@ -480,19 +480,25 @@ class FeedbackLoop:
             return False
         tags = tuple(dict.fromkeys(tag for tag in tags if tag in RATING_TAGS))
         hypotheses = self._hypotheses()
-        cause, tag = hypotheses[0] if hypotheses else "unknown", tags[0] if tags else "none"
+        # Sorted, so the same causes picked in another order are the same signature.
+        cause, tag = hypotheses[0] if hypotheses else "unknown", min(tags, default="none")
         signature = f"rating:{cause}:{tag}"
         self.record("rating", signature=signature, score=score, tags=list(tags),
                     hypotheses=hypotheses)
         if score <= LOW_RATING:
-            latest: dict[str, int] = {}
-            for run, payload in self._rows(
-                "SELECT run_id, payload FROM events WHERE kind = 'rating' AND signature = ? "
+            # The latest rating of each run decides, whatever signature an earlier one had:
+            # a run re-rated 5 stars, or with other causes, no longer counts under the old one.
+            latest: dict[str, tuple[str, int]] = {}
+            for run, sig, payload in self._rows(
+                "SELECT run_id, signature, payload FROM events WHERE kind = 'rating' "
                 "AND ts >= ? AND run_id IS NOT NULL ORDER BY id",
-                signature, self.clock() - RATING_WINDOW,
+                self.clock() - RATING_WINDOW,
             ):
-                latest[run] = (_load(payload) or {}).get("score", 5)
-            runs = tuple(run for run, value in latest.items() if value <= LOW_RATING)
+                latest[run] = (sig, (_load(payload) or {}).get("score", 5))
+            runs = tuple(
+                run for run, (sig, value) in latest.items()
+                if sig == signature and value <= LOW_RATING
+            )
             if len(runs) >= RATING_REPEAT:
                 self._queue("R7", signature, runs)
         return True

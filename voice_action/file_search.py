@@ -14,7 +14,7 @@ import stat
 import time
 import unicodedata
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -111,45 +111,97 @@ def _validate(arguments: dict) -> None:
 
 
 def _day(value: str | None, *, end: bool) -> float | None:
+    """Local midnight starting that day; for `end`, midnight starting the next day (exclusive)."""
     if not value:
         return None
     try:
         day = date.fromisoformat(value)
     except ValueError as exc:
         raise ToolRejectedError(f"잘못된 날짜입니다: {value}") from exc
-    return datetime(day.year, day.month, day.day, 23, 59, 59 if end else 0).timestamp()
+    if end:
+        day += timedelta(days=1)
+    return datetime(day.year, day.month, day.day).timestamp()
+
+
+NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def _open_below(root: Path, parts: tuple[str, ...], flags: int) -> int:
+    """Open root/parts one element at a time, never through a link.
+
+    Each element is opened relative to the directory already held, so a folder swapped for a
+    link after it was listed is refused instead of followed. Raises OSError otherwise.
+    """
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | NOFOLLOW)
+    try:
+        for index, part in enumerate(parts):
+            last = index == len(parts) - 1
+            opened = os.open(
+                part, (flags if last else os.O_RDONLY | os.O_DIRECTORY) | NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            os.close(descriptor)
+            descriptor = opened
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+Row = tuple[str, bool, bool, tuple]
+
+
+def _list_dir(root: Path, folder: tuple[str, ...]) -> tuple[list[Row], bool]:
+    """(name, is_dir, is_file, (mtime, size)) of the children, read through a held descriptor.
+
+    A DirEntry from an fd-based scan can only be stat-ed while the descriptor is open, so
+    everything is read before it is closed.
+    """
+    descriptor = _open_below(root, folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        rows = []
+        with os.scandir(descriptor) as scanner:
+            for child in sorted(scanner, key=lambda item: item.name):
+                if child.name.startswith(".") or child.is_symlink():
+                    rows.append((child.name, False, False, ()))
+                    continue
+                try:
+                    is_dir = child.is_dir(follow_symlinks=False)
+                    is_file = not is_dir and child.is_file(follow_symlinks=False)
+                    info = child.stat(follow_symlinks=False) if is_file else None
+                except OSError:
+                    rows.append((child.name, False, False, ()))
+                    continue
+                rows.append(
+                    (child.name, is_dir, is_file, (info.st_mtime, info.st_size) if info else ())
+                )
+        return rows, False
+    finally:
+        os.close(descriptor)
 
 
 def _walk(roots: tuple[Path, ...]) -> tuple[list[Entry], bool]:
     entries, visited, truncated = [], 0, False
-    stack = [(root, root, ()) for root in reversed(roots)]
+    stack = [(root, ()) for root in reversed(roots)]
     while stack:
-        root, directory, folder = stack.pop()
+        root, folder = stack.pop()
         try:
-            children = sorted(os.scandir(directory), key=lambda item: item.name)
+            rows, _ = _list_dir(root, folder)
         except OSError:
             continue
-        for child in children:
+        for name, is_dir, is_file, info in rows:
             visited += 1
             if visited > MAX_VISITED:
                 return entries, True
-            if child.name.startswith(".") or child.is_symlink():
-                continue
-            try:
-                if child.is_dir(follow_symlinks=False):
-                    if child.name in EXCLUDED_DIRS:
-                        continue
-                    if len(folder) >= MAX_DEPTH:
-                        truncated = True
-                        continue
-                    stack.append((root, Path(child.path), (*folder, child.name)))
-                elif child.is_file(follow_symlinks=False):
-                    info = child.stat(follow_symlinks=False)
-                    entries.append(
-                        Entry(Path(child.path), root, folder, info.st_mtime, info.st_size)
-                    )
-            except OSError:
-                continue
+            if is_dir:
+                if name in EXCLUDED_DIRS:
+                    continue
+                if len(folder) >= MAX_DEPTH:
+                    truncated = True
+                    continue
+                stack.append((root, (*folder, name)))
+            elif is_file:
+                entries.append(Entry(root.joinpath(*folder, name), root, folder, *info))
     return entries, truncated
 
 
@@ -171,19 +223,21 @@ def _filter(entries: list[Entry], arguments: dict, roots: tuple[Path, ...]) -> l
     extensions = {item.lower().lstrip(".") for item in arguments.get("extensions") or [] if item}
     after = _day(arguments.get("modified_after"), end=False)
     before = _day(arguments.get("modified_before"), end=True)
+    if after is not None and before is not None and after >= before:
+        raise ToolRejectedError("modified_after가 modified_before보다 늦습니다.")
     hint = _folder_hint(arguments, roots)
     return [
         entry
         for entry in entries
         if (not extensions or entry.extension in extensions)
         and (after is None or entry.mtime >= after)
-        and (before is None or entry.mtime <= before)
+        and (before is None or entry.mtime < before)
         and (hint is None or hint in _fold("/".join(entry.folder)))
     ]
 
 
-def _read_head(path: Path) -> str:
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+def _read_head(entry: Entry) -> str:
+    descriptor = _open_below(entry.root, (*entry.folder, entry.name), os.O_RDONLY)
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             return ""
@@ -221,7 +275,7 @@ def _search(
             break
         scanned += 1
         try:
-            text = _fold(_read_head(entry.path))
+            text = _fold(_read_head(entry))
         except OSError:
             continue
         score = sum(len(pattern.findall(text)) for pattern in patterns)
@@ -295,14 +349,10 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     if not keywords:
         raise ToolRejectedError("검색어가 비어 있습니다.")
     patterns = [_keyword_pattern(item) for item in keywords]
-    roots = tuple(root.resolve() for root in roots)
+    # Roots come canonical from the config; resolving here would follow a link swapped in later.
     entries, walk_cut = _walk(roots)
     stage, matches, content_cut = _search(_filter(entries, arguments, roots), patterns)
-    relaxed = False
-    if stage == "none" and any(arguments.get(key) for key in FILTER_KEYS):
-        # The model guesses filters; a wrong one must not hide a file the words do match.
-        stage, matches, content_cut = _search(entries, patterns)
-        relaxed = stage != "none"
+    filtered = any(arguments.get(key) for key in FILTER_KEYS)
     # Best match first; newer files break ties.
     ranked = [entry for entry, _ in sorted(matches, key=lambda m: (-m[1], -m[0].mtime, m[0].name))]
     count = len(ranked)
@@ -316,8 +366,12 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     }
     if response["truncated"]:
         response["note"] = "폴더가 크거나 깊어 일부만 검사했습니다. 결과가 전부가 아닐 수 있습니다."
-    if relaxed:
-        response["filters_relaxed"] = True
+    if filtered and decision == "none":
+        # Never widen on our own: a condition the user named must not be dropped silently.
+        response["note"] = response.get("note", "") + (
+            " 형식·폴더·날짜 조건을 적용했을 때 결과가 없습니다. 사용자가 말한 조건이면 풀지 말고 "
+            "그대로 알리세요. 사용자가 말하지 않은 추측 조건이면 빼고 다시 호출하세요."
+        ).strip()
     if decision in {"single", "choose"}:
         response["candidates"] = [
             {"path": str(entry.path), "label": _describe(entry)} for entry in ranked

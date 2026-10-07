@@ -166,12 +166,21 @@ def test_absolute_root_path_as_folder_hint_means_no_folder_filter(tmp_path):
     assert find(root, "임시", folder_hint=str(root / "자료"))["total"] == 1
 
 
-def test_wrong_filters_are_relaxed_instead_of_hiding_the_file(tmp_path):
-    (tmp_path / "임시-1.txt").write_text("x")
-    response = find(tmp_path, "임시", extensions=["tmp"], folder_hint="없는폴더")
-    assert response["total"] == 1 and response["filters_relaxed"] is True
-    assert "filters_relaxed" not in find(tmp_path, "임시", extensions=["txt"])
-    assert find(tmp_path, "존재안함", extensions=["tmp"])["decision"] == "none"
+def test_conditions_the_user_named_are_never_dropped_automatically(tmp_path):
+    (tmp_path / "자료").mkdir()
+    (tmp_path / "budget.md").write_text("x")
+    (tmp_path / "자료" / "budget-old.md").write_text("x")
+    cases = (
+        {"extensions": ["pdf"]},  # only a .md exists
+        {"folder_hint": "없는폴더"},
+        {"modified_before": "2000-01-01"},
+    )
+    for extra in cases:
+        response = find(tmp_path, "budget", **extra)
+        assert response["decision"] == "none" and response["total"] == 0, extra
+        assert "조건" in response["note"] and "filters_relaxed" not in response
+    assert "note" not in find(tmp_path, "존재안함")  # no condition given: nothing to explain
+
 
 
 def test_empty_optional_fields_and_stray_keys_are_ignored(tmp_path):
@@ -190,3 +199,78 @@ def test_exact_file_name_with_extension_and_null_optionals(tmp_path):
         modified_after=None, modified_before=None,
     )
     assert names(response) == ["old.log"]
+
+
+def test_modified_after_includes_the_whole_day_and_before_excludes_the_next(tmp_path):
+    from datetime import datetime
+
+    def make(name, moment):
+        path = tmp_path / name
+        path.write_text("x")
+        stamp = moment.timestamp()
+        os.utime(path, (stamp, stamp))
+
+    make("eve.md", datetime(2026, 10, 6, 23, 59, 59))
+    make("morning.md", datetime(2026, 10, 7, 0, 0, 0))
+    make("afternoon.md", datetime(2026, 10, 7, 14, 0, 0))
+    make("late.md", datetime(2026, 10, 7, 23, 59, 59, 500_000))
+    make("next.md", datetime(2026, 10, 8, 0, 0, 0))
+    both = {"modified_after": "2026-10-07", "modified_before": "2026-10-07"}
+    assert sorted(names(find(tmp_path, "md", **both))) == [
+        "afternoon.md", "late.md", "morning.md",
+    ]
+    assert "eve.md" not in names(find(tmp_path, "md", modified_after="2026-10-07"))
+
+
+def test_reversed_date_range_is_rejected(tmp_path):
+    with pytest.raises(ToolRejectedError):
+        find_files(
+            {"keywords": ["a"], "modified_after": "2026-10-08", "modified_before": "2026-10-07"},
+            (tmp_path,),
+        )
+
+
+def test_content_read_refuses_a_folder_swapped_for_a_link_after_listing(tmp_path):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "note.txt").write_text("안쪽 글")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "note.txt").write_text("외부비밀단어")
+    entries, _ = file_search._walk((root.resolve(),))
+    (entry,) = entries
+    assert "안쪽" in file_search._read_head(entry)
+    (root / "sub" / "note.txt").unlink()
+    (root / "sub").rmdir()
+    os.symlink(outside, root / "sub")
+    with pytest.raises(OSError):
+        file_search._read_head(entry)
+
+
+def test_search_never_reports_a_word_found_through_a_swapped_folder(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "note.txt").write_text("평범")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "note.txt").write_text("외부비밀단어")
+    real_walk = file_search._walk
+
+    def walk_then_swap(roots):
+        result = real_walk(roots)
+        (root / "sub" / "note.txt").unlink()
+        (root / "sub").rmdir()
+        os.symlink(outside, root / "sub")
+        return result
+
+    monkeypatch.setattr(file_search, "_walk", walk_then_swap)
+    assert find(root, "외부비밀단어")["decision"] == "none"
+
+
+def test_a_root_replaced_by_a_link_is_not_searched(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "a.md").write_text("x")
+    link = tmp_path / "link"
+    os.symlink(real, link)
+    assert find(link, "a")["decision"] == "none"

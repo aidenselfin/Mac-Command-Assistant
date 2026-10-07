@@ -325,3 +325,37 @@ async def test_runtime_rates_only_the_latest_completed_answer(tmp_path):
     await controller.submit("다음 질문")  # an error is not a rateable answer
     assert not controller.ratable and not await controller.rate(5)
     assert [data["score"] for _, data in stored_ratings(loop)] == [4]
+
+
+async def rerate(loop, text, first, then):
+    """One answered run, rated `first`, then re-rated `then` (score, tags)."""
+    await rated_run(loop, first[0], first[1], text=text)
+    loop.clock.now += 1
+    loop.rating(*then)
+    loop.clock.now += 5
+
+
+async def test_a_run_rerated_up_no_longer_counts_toward_r7(tmp_path):
+    analyzer = FakeAnalyzer(LESSON)
+    loop, _ = make_loop(tmp_path, analyzer)
+    await rerate(loop, "하나", (2, ("wrong_file",)), (5, ()))  # first rating replaced
+    await rated_run(loop, 2, ("wrong_file",), text="둘")
+    await loop.close()
+    assert analyzer.calls == []
+
+
+async def test_cause_chip_order_and_toggling_keep_one_signature(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    await rated_run(loop, 2, ("too_slow", "wrong_file"))
+    assert stored_ratings(loop)[0][0] == "rating:search_failed:too_slow"
+    loop.rating(2, ("wrong_file", "too_slow"))
+    assert {sig for sig, _ in stored_ratings(loop)} == {"rating:search_failed:too_slow"}
+
+
+async def test_two_runs_whose_final_low_ratings_match_queue_r7(tmp_path):
+    analyzer = FakeAnalyzer(LESSON)
+    loop, _ = make_loop(tmp_path, analyzer)
+    await rerate(loop, "하나", (5, ()), (1, ("wrong_file",)))
+    await rated_run(loop, 3, ("wrong_file",), text="둘")
+    await loop.close()
+    assert [rule for rule, _ in analyzer.calls] == ["R7"]
