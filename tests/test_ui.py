@@ -1078,3 +1078,70 @@ def test_tk_drop_parses_finder_paths_and_the_chip_shows_the_name():
     finally:
         root.update()
         root.destroy()
+
+
+def test_tk_view_docks_finder_beside_the_window_after_a_reveal_and_gives_focus_back(monkeypatch):
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        revealed, attempts, fronted = [], [], []
+        monkeypatch.setattr(
+            ui_module, "reveal", lambda paths, folders: revealed.append(paths) or True
+        )
+        results = iter(["waiting", "waiting", "moved"])
+
+        def fake_arrange(folder, app, screen):
+            attempts.append((folder, app, screen))
+            return next(results)
+
+        monkeypatch.setattr(ui_module, "arrange", fake_arrange)
+        monkeypatch.setattr(ui_module, "DOCK_RETRY_MS", 1)
+        view = ui_module.TkView(root, (Path("/tmp/work"),), reveal=True, dock=True)
+        monkeypatch.setattr(view, "_to_front", lambda: fronted.append(True))
+
+        view.reveal_files(("/tmp/work/하위/한글 파일.md",))
+        for _ in range(50):
+            root.update()
+            if fronted:
+                break
+        assert revealed == [("/tmp/work/하위/한글 파일.md",)]
+        assert [folder for folder, _, _ in attempts] == ["하위"] * 3  # retried until Finder had it
+        app, screen = attempts[0][1], attempts[0][2]
+        assert app.w == root.winfo_width() and screen == (
+            root.winfo_screenwidth(), root.winfo_screenheight()
+        )
+        assert fronted == [True]
+    finally:
+        root.update()
+        root.destroy()
+
+
+def test_tk_view_explains_a_missing_permission_once_and_never_docks_when_off(monkeypatch):
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        calls = []
+        monkeypatch.setattr(ui_module, "reveal", lambda paths, folders: True)
+        monkeypatch.setattr(ui_module, "arrange", lambda *a: calls.append(a) or "untrusted")
+        view = ui_module.TkView(root, (Path("/tmp/work"),), reveal=True, dock=True)
+        for _ in range(2):
+            view.reveal_files(("/tmp/work/a.md",))
+        assert view.output.get("1.0", "end").count("손쉬운 사용") == 1  # one notice, not two
+        assert len(calls) == 2
+
+        off = ui_module.TkView(tk.Toplevel(root), (Path("/tmp/work"),), reveal=True, dock=False)
+        off.reveal_files(("/tmp/work/a.md",))
+        assert len(calls) == 2  # docking is off: the reveal alone happened
+    finally:
+        root.update()
+        root.destroy()

@@ -43,6 +43,7 @@ class Config:
     feedback_model: str = "anthropic/claude-sonnet-5.5"
     feedback_daily_limit: int = 20
     finder_reveal: bool = True
+    finder_dock: bool = True  # put the revealed Finder window beside the app window
 
 
 def load_config(
@@ -152,6 +153,9 @@ def load_config(
     finder = str(env.get("VOICE_ACTION_FINDER_REVEAL") or "on").strip().casefold()
     if finder not in ("on", "off"):
         raise ConfigError("VOICE_ACTION_FINDER_REVEAL는 on 또는 off여야 합니다.")
+    dock = str(env.get("VOICE_ACTION_FINDER_DOCK") or "on").strip().casefold()
+    if dock not in ("on", "off"):
+        raise ConfigError("VOICE_ACTION_FINDER_DOCK는 on 또는 off여야 합니다.")
     feedback_model = (
         env.get("VOICE_ACTION_FEEDBACK_MODEL") or ""
     ).strip() or "anthropic/claude-sonnet-5.5"
@@ -173,4 +177,5 @@ def load_config(
         feedback_model=feedback_model,
         feedback_daily_limit=daily_limit,
         finder_reveal=finder == "on",
+        finder_dock=dock == "on",
     )

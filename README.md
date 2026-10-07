@@ -270,6 +270,7 @@ VOICE_ACTION_LLM_TIMEOUT_SECONDS
 VOICE_ACTION_MCP_TIMEOUT_SECONDS
 VOICE_ACTION_MAX_TOOL_RESULT_CHARS
 VOICE_ACTION_FINDER_REVEAL         # on(기본) | off, 환경변수로만 설정
+VOICE_ACTION_FINDER_DOCK           # on(기본) | off, Finder 창을 앱 옆에 놓기
 ```
 
 provider별 기본 모델:
@@ -435,7 +436,10 @@ local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
 
 **Finder에서 결과 보기.** 파일을 만들거나 바꾸는 작업(텍스트 쓰기, 변환)이 **성공**하면 그 파일을 Finder에서 선택한 채로 보여 줍니다. 경로는 모델의 답변이 아니라 앱이 실제로 쓴 경로(`Completed.changed_paths`)이고, 표시 직전에 허용 폴더 안인지·링크가 아닌지·존재하는지 다시 확인합니다. 승인 대기·거절·실패·삭제·Undo에서는 열지 않습니다. Finder를 열지 못해도 작업 결과는 그대로입니다. `VOICE_ACTION_FINDER_REVEAL=off`로 끕니다(기본 on).
 
-Finder 창을 앱 옆에 배치하는 기능은 손쉬운 사용·자동화 권한이 필요해 아직 넣지 않았습니다.
+**Finder 창을 앱 옆에 놓기.** Finder의 "보기"는 이미 열려 있는 같은 폴더 창을 그대로 쓰기 때문에 창이 앱 뒤나 엉뚱한 곳에 있을 수 있습니다. 그래서 표시한 뒤 `--ui`가 그 폴더 창(제목이 변경 파일의 폴더 이름과 같은 창)만 앱 창의 **오른쪽**에, 오른쪽에 폭 420pt 이상이 안 남으면 **왼쪽**에 맞춰 놓고 앱으로 포커스를 되돌립니다. 양쪽 다 자리가 없으면 옮기지 않고, 제목이 맞는 창이 없으면 다른 Finder 창은 건드리지 않습니다. Finder가 창을 띄울 때까지 Tk 루프에서 최대 2초(0.2초 간격) 다시 시도합니다.
+
+- 창 이동은 **손쉬운 사용(Accessibility)** 권한을 씁니다(앱이 이미 활성 앱 조회에 요구하는 것과 같음). 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 실행한 터미널(또는 Python)을 허용하세요. 권한이 없으면 안내를 한 번만 보여 주고 파일은 Finder에서 선택된 채로 둡니다. Finder를 AppleScript로 제어하지 않으므로 자동화 권한 창은 뜨지 않습니다.
+- `VOICE_ACTION_FINDER_DOCK=off`로 배치만 끕니다(기본 on). `VOICE_ACTION_FINDER_REVEAL=off`면 Finder 표시 전체가 꺼집니다.
 
 ## 처리 흐름
 

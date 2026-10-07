@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 
 from voice_action.attachment import AttachmentError
 from voice_action.feedback import LOW_RATING, build_feedback
-from voice_action.finder import reveal
+from voice_action.finder import Frame, arrange, reveal
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
@@ -856,6 +856,12 @@ STATUS_STYLE = {
     "TRANSCRIBING": ("음성 변환 중", BLUE, BLUE_SOFT, BLUE),
 }
 DEFAULT_HINT = "명령을 입력하세요 · Enter로 실행"
+DOCK_ATTEMPTS = 10
+DOCK_RETRY_MS = 200
+DOCK_PERMISSION_NOTICE = (
+    "Finder 창을 앱 옆에 놓으려면 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 "
+    "이 앱을 실행한 터미널(또는 Python)을 허용해 주세요. 파일은 Finder에서 선택해 두었어요."
+)
 ATTACH_HINT = "📎  Finder에서 파일 하나를 여기로 끌어다 놓으면 다음 명령의 대상이 돼요"
 STATUS_HINT = {
     "WAITING_USER_INPUT": "버튼·숫자 키로 고르거나 직접 입력하세요 · 취소 입력 시 요청 취소",
@@ -901,7 +907,13 @@ class TkView:
     """
 
     def __init__(
-        self, root, folders: tuple[Path, ...] = (), *, reveal: bool = False, drop: bool = False
+        self,
+        root,
+        folders: tuple[Path, ...] = (),
+        *,
+        reveal: bool = False,
+        drop: bool = False,
+        dock: bool = False,
     ):
         import tkinter as tk
         from tkinter import font, ttk
@@ -909,7 +921,8 @@ class TkView:
         self.root = root
         self._tk = tk
         self._ttk = ttk
-        self._folders, self._reveal = folders, reveal
+        self._folders, self._reveal, self._dock = folders, reveal, dock
+        self._dock_warned = False
         self.presenter: UIPresenter | None = None
         self.closed = False
         self._approval_ready = False
@@ -1349,8 +1362,39 @@ class TkView:
 
     def reveal_files(self, paths: tuple[str, ...]) -> None:
         """Show what a command changed in Finder. Runs on the Tk thread, where AppKit belongs."""
-        if self._reveal:
-            reveal(paths, self._folders)
+        if self._reveal and reveal(paths, self._folders) and self._dock and paths:
+            self._dock_finder(unicodedata.normalize("NFC", Path(paths[0]).parent.name), 0)
+
+    def _dock_finder(self, folder: str, attempt: int) -> None:
+        """Put Finder's window for the folder beside this one. Finder takes a moment to show
+        it, so a few short retries run on the Tk loop instead of blocking it."""
+        if self.closed:
+            return
+        self.root.update_idletasks()
+        app = Frame(
+            self.root.winfo_rootx(), self.root.winfo_rooty(),
+            self.root.winfo_width(), self.root.winfo_height(),
+        )
+        screen = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        result = arrange(folder, app, screen)
+        if result == "moved":
+            self._to_front()
+        elif result == "waiting" and attempt < DOCK_ATTEMPTS:
+            self.root.after(DOCK_RETRY_MS, lambda: self._dock_finder(folder, attempt + 1))
+        elif result == "untrusted" and not self._dock_warned:
+            self._dock_warned = True
+            self.show_output(DOCK_PERMISSION_NOTICE)
+
+    def _to_front(self) -> None:
+        """Finder was activated to show the file; give the focus back to this window."""
+        self.root.lift()
+        self.root.focus_force()
+        try:
+            from AppKit import NSApplication
+
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        except Exception:  # noqa: BLE001, S110 - the lift above is enough without AppKit
+            pass
 
     def set_choices(self, labels: tuple[str, ...]) -> None:
         if labels == self._choices_shown:
@@ -1600,7 +1644,13 @@ def run_ui(config) -> None:
         root, drop = tk.Tk(), False
     messages: queue.Queue[UIMessage] = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
-    view = TkView(root, config.allowed_directories, reveal=config.finder_reveal, drop=drop)
+    view = TkView(
+        root,
+        config.allowed_directories,
+        reveal=config.finder_reveal,
+        drop=drop,
+        dock=config.finder_dock,
+    )
     presenter = UIPresenter(worker, view)
     view.bind_presenter(presenter)
 

@@ -115,3 +115,19 @@ def test_legacy_global_secrets_are_ignored(tmp_path):
     assert legacy.read_text() == original
     with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
         load_config(cwd=tmp_path, home=home, environ={})
+
+
+def test_finder_switches_default_on_and_accept_off(tmp_path):
+    base = {"OPENAI_API_KEY": "k"}
+    (tmp_path / "voice-action-test").mkdir()
+    config = load_config(cwd=tmp_path, home=tmp_path, environ=base)
+    assert config.finder_reveal and config.finder_dock
+    off = load_config(
+        cwd=tmp_path, home=tmp_path,
+        environ={**base, "VOICE_ACTION_FINDER_REVEAL": "off", "VOICE_ACTION_FINDER_DOCK": "off"},
+    )
+    assert not off.finder_reveal and not off.finder_dock
+    with pytest.raises(ConfigError):
+        load_config(
+            cwd=tmp_path, home=tmp_path, environ={**base, "VOICE_ACTION_FINDER_DOCK": "maybe"}
+        )

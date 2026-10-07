@@ -185,3 +185,92 @@ def test_a_finder_failure_is_swallowed(tmp_path):
 
 def test_nothing_to_show_is_not_an_error(tmp_path):
     assert finder.reveal((), (tmp_path,), workspace=lambda: FakeWorkspace()) is False
+
+
+# ---- placing the window beside the app ---------------------------------------------------
+
+from voice_action.finder import Frame, arrange, side_by_side  # noqa: E402
+
+SCREEN = (1470, 956)
+
+
+def test_the_finder_window_goes_right_of_the_app_at_the_same_height():
+    app = Frame(100, 80, 700, 800)
+    assert side_by_side(app, SCREEN) == Frame(808, 80, 640, 800)
+
+
+def test_it_shrinks_to_the_room_that_is_left_and_uses_the_left_side_when_the_right_is_full():
+    assert side_by_side(Frame(100, 80, 700, 800), (1400, 956)) == Frame(808, 80, 592, 800)
+    app = Frame(780, 80, 700, 800)  # pushed against the right edge of the screen
+    assert side_by_side(app, SCREEN) == Frame(132, 80, 640, 800)
+
+
+def test_with_no_room_on_either_side_nothing_is_moved():
+    assert side_by_side(Frame(300, 80, 860, 800), SCREEN) is None  # 410 free on each side
+
+
+def test_the_window_stays_below_the_menu_bar_and_on_the_screen():
+    frame = side_by_side(Frame(100, 0, 700, 2000), SCREEN)
+    assert frame.y == 25 and frame.y + frame.h <= SCREEN[1]
+
+
+class FakeWindows:
+    def __init__(self, titles, trusted=True, move_ok=True):
+        self.titles, self.trusted, self.move_ok, self.moved = titles, trusted, move_ok, []
+
+    def is_trusted(self):
+        return self.trusted
+
+    def windows(self):
+        return [(title, index) for index, title in enumerate(self.titles)]
+
+    def move(self, handle, frame):
+        self.moved.append((handle, frame))
+        return self.move_ok
+
+
+@pytestmark_mac
+def test_only_the_window_titled_like_the_folder_is_moved():
+    windows = FakeWindows(["Downloads", "voice-action-test", "voice-action-test 2"])
+    app = Frame(100, 80, 700, 800)
+    assert arrange("voice-action-test", app, SCREEN, windows=windows) == "moved"
+    assert windows.moved == [(1, Frame(808, 80, 640, 800))]
+
+
+@pytestmark_mac
+def test_folder_names_match_across_unicode_forms():
+    windows = FakeWindows([unicodedata.normalize("NFD", "자료 폴더")])
+    app = Frame(100, 80, 700, 800)
+    folder = unicodedata.normalize("NFC", "자료 폴더")
+    assert arrange(folder, app, SCREEN, windows=windows) == "moved"
+
+
+@pytestmark_mac
+def test_no_matching_window_yet_means_try_again_and_nothing_else_is_touched():
+    windows = FakeWindows(["Downloads", "Desktop"])
+    app = Frame(100, 80, 700, 800)
+    assert arrange("voice-action-test", app, SCREEN, windows=windows) == "waiting"
+    assert windows.moved == []
+
+
+@pytestmark_mac
+def test_without_the_accessibility_permission_it_says_so_and_moves_nothing():
+    windows = FakeWindows(["voice-action-test"], trusted=False)
+    app = Frame(100, 80, 700, 800)
+    assert arrange("voice-action-test", app, SCREEN, windows=windows) == "untrusted"
+    assert windows.moved == []
+
+
+@pytestmark_mac
+def test_no_room_and_a_failing_accessibility_call_never_raise():
+    crowded = FakeWindows(["voice-action-test"])
+    full = Frame(300, 80, 860, 800)
+    assert arrange("voice-action-test", full, SCREEN, windows=crowded) == "no_space"
+    assert crowded.moved == []
+
+    class Broken(FakeWindows):
+        def windows(self):
+            raise RuntimeError("AX error")
+
+    app = Frame(100, 80, 700, 800)
+    assert arrange("voice-action-test", app, SCREEN, windows=Broken([])) == "waiting"
