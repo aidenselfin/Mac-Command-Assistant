@@ -3,8 +3,10 @@
 import asyncio
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
+import stat
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -16,7 +18,7 @@ from voice_action import conversion, file_search
 from voice_action.conversion import CONVERT_TOOL, READ_DOCUMENT_TOOL
 from voice_action.deletion import DELETE_TOOL
 from voice_action.file_search import FIND_FILES_TOOL
-from voice_action.mcp_client import ToolRejectedError, ToolResult
+from voice_action.mcp_client import TRUNCATION_MARKER, ToolRejectedError, ToolResult
 from voice_action.undo import (
     UndoJournal,
     UndoJournalError,
@@ -39,6 +41,9 @@ READ_ONLY_TOOLS = frozenset(
 )
 WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL, CONVERT_TOOL})
 PREVIEW_LIMIT = 200
+# A character is up to a few UTF-8 bytes; files past this many bytes per allowed character are
+# read from their start only.
+READ_BYTES_FACTOR = 4
 
 
 class ToolRisk(Enum):
@@ -151,7 +156,34 @@ class RiskGuard:
             )
         if name == FIND_FILES_TOOL:
             return await asyncio.to_thread(file_search.find_files, arguments, self._roots)
+        if name == "filesystem__read_text_file" and not (
+            arguments.get("head") or arguments.get("tail")
+        ):
+            # The filesystem server reads a whole file before the result is cut, so a huge
+            # file is read here, up to a byte bound, instead of being sent through it.
+            bounded = await asyncio.to_thread(self._read_bounded, arguments)
+            if bounded is not None:
+                return bounded
         return await self._gateway.call_tool(name, arguments)
+
+    def _read_bounded(self, arguments: dict) -> ToolResult | None:
+        """The start of a file much bigger than the result limit; None for any other file."""
+        try:
+            path = conversion._inside(arguments.get("path"), self._roots, exists=True)
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except (ToolRejectedError, OSError):
+            return None  # the filesystem server reports the problem in its own words
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= READ_BYTES_FACTOR * (
+                self._read_limit
+            ):
+                return None
+            data = os.read(descriptor, READ_BYTES_FACTOR * self._read_limit)
+        finally:
+            os.close(descriptor)
+        text = data.decode("utf-8", errors="replace")[: self._read_limit]
+        return ToolResult(True, text + TRUNCATION_MARKER, truncated=True)
 
     async def prepare_write(self, name: str, arguments: dict) -> PreparedWrite:
         risk = classify_tool(name)

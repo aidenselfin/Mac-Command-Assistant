@@ -157,7 +157,8 @@ async def test_big_file_answer_says_it_was_only_partly_read(config):
 
     outcome = await planner.run("큰파일.txt 요약해줘")
 
-    assert outcome.text.startswith("요약") and "앞부분 약 1,234자만" in outcome.text
+    assert outcome.text.startswith("요약")
+    assert "파일 전체가 아니라 앞부분 약 1,234자만" in outcome.text
     gateway.call_tool.return_value = ToolResult(True, "짧음")
     model = scripted(read_turn(big), ModelTurn("요약", []))
     planner, _ = make_planner(config, model)
@@ -172,3 +173,28 @@ async def test_raw_search_is_never_offered_to_the_model(config):
         await planner.run(text)
         offered = {tool.name for tool in model.generate.await_args.args[1]}
         assert "filesystem__search_files" not in offered and "local__find_files" in offered
+
+
+def read_turn_with(path, **extra):
+    arguments = json.dumps({"path": str(path), **extra})
+    return ModelTurn(None, [ToolCall("read", "filesystem__read_text_file", arguments)])
+
+
+async def test_head_and_tail_reads_say_which_part_was_read(config):
+    from voice_action.mcp_client import ToolResult
+
+    big = config.allowed_directories[0] / "로그.txt"
+    big.write_text("x")
+    for extra, text, expected in (
+        ({"head": 3}, "1\n2\n3", "파일 전체가 아니라 앞 3줄만"),
+        ({"tail": 3}, "7\n8\n9", "파일 전체가 아니라 뒤 3줄만"),
+        ({"head": 3}, "1\n2", None),  # the file ended before the limit: it was all read
+    ):
+        model = scripted(read_turn_with(big, **extra), ModelTurn("요약", []))
+        planner, gateway = make_planner(config, model)
+        gateway.call_tool.return_value = ToolResult(True, text)
+        outcome = await planner.run("로그.txt 요약해줘")
+        if expected is None:
+            assert outcome == Completed("요약")
+        else:
+            assert expected in outcome.text, (extra, outcome.text)

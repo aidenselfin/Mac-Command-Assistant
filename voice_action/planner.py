@@ -189,7 +189,7 @@ class ApprovalContext:
     active_app_only: bool
     write_completed: bool
     exposed_tool_names: frozenset[str] | None = None
-    partial_read_chars: int | None = None
+    partial_read: str | None = None
     conditions: tuple[str, ...] = ()
     last_search: str = ""
 
@@ -408,7 +408,7 @@ LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")
 FIND_ARGUMENT_KEYS = ("keywords", "extensions", "folder_hint", "modified_after", "modified_before")
 # Added by code, not the model, so a big file is never summarized as if it were fully read.
-PARTIAL_READ_NOTICE = "\n\n※ 파일이 커서 앞부분 약 {:,}자만 읽고 작성한 답변입니다."
+PARTIAL_READ_NOTICE = "\n\n※ 파일 전체가 아니라 {}만 읽고 작성한 답변입니다."
 
 
 def _destructive_request(text: str) -> bool:
@@ -482,6 +482,19 @@ def _ambiguous_mutation(text: str) -> bool:
         for token in ("요약", "맞춤법", "오탈자", "제목만", "문장만")
     )
     return vague and mutation and not explicit_result
+
+
+def _partial_read(call: ToolCall, result: ToolResult) -> str | None:
+    """Which part of a file was read, when it was not the whole file; else None."""
+    arguments = json.loads(call.arguments)
+    for key, where in (("head", "앞"), ("tail", "뒤")):
+        wanted = arguments.get(key)
+        # Fewer lines than asked for means the file ended first: that was all of it.
+        if isinstance(wanted, int) and len(result.text.splitlines()) >= wanted:
+            return f"{where} {wanted}줄"
+    if result.truncated is True:
+        return f"앞부분 약 {len(result.text):,}자"
+    return None
 
 
 def _wants_content(text: str) -> bool:
@@ -777,7 +790,7 @@ class _LoopState:
     write_completed: bool
     # Names offered on the model turn whose calls are being processed. Only these run.
     exposed_tool_names: frozenset[str] | None = None
-    partial_read_chars: int | None = None  # a file was too big to read fully
+    partial_read: str | None = None  # a file was too big to read fully
     conditions: tuple[str, ...] = ()
     last_search: str = ""
 
@@ -1217,8 +1230,8 @@ class Planner:
                     return Error("검증된 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
                 if not turn.text or not turn.text.strip():
                     raise PlannerError("LLM 최종 응답이 비어 있습니다.")
-                if state.partial_read_chars is not None:
-                    notice = PARTIAL_READ_NOTICE.format(state.partial_read_chars)
+                if state.partial_read is not None:
+                    notice = PARTIAL_READ_NOTICE.format(state.partial_read)
                     return Completed(turn.text + notice)
                 return Completed(turn.text)
             state.messages.append(
@@ -1521,8 +1534,8 @@ class Planner:
             self.emit(
                 f"[TOOL-OK] iteration={state.iteration} name={call.name}\n{result.text}"
             )
-        if call.name in CONTENT_READ_TOOLS and result.truncated is True:
-            state.partial_read_chars = len(result.text)
+        if call.name in CONTENT_READ_TOOLS:
+            state.partial_read = state.partial_read or _partial_read(call, result)
         if call.name == FIND_FILES_TOOL and result.structured is not None:
             outcome = await self._accept_find_result(state, call, result.structured)
             if outcome is not None:
@@ -1615,7 +1628,7 @@ class Planner:
             active_app_only=state.active_app_only,
             write_completed=state.write_completed,
             exposed_tool_names=state.exposed_tool_names,
-            partial_read_chars=state.partial_read_chars,
+            partial_read=state.partial_read,
             conditions=state.conditions,
             last_search=state.last_search,
         )
@@ -1659,7 +1672,7 @@ class Planner:
             active_app_only=context.active_app_only,
             write_completed=context.write_completed,
             exposed_tool_names=context.exposed_tool_names,
-            partial_read_chars=context.partial_read_chars,
+            partial_read=context.partial_read,
             conditions=context.conditions,
             last_search=context.last_search,
         )

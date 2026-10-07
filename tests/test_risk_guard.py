@@ -1,4 +1,5 @@
 from copy import deepcopy
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -140,3 +141,46 @@ async def test_unchanged_overwrite_still_executes(tmp_path):
     arguments = {"path": str(target), "content": "after"}
     await guard.execute_approved(await guard.prepare_write("filesystem__write_file", arguments))
     assert gateway.calls == [("filesystem__write_file", arguments)]
+
+
+
+async def test_huge_file_is_read_from_its_start_without_the_filesystem_server(tmp_path):
+    from voice_action.mcp_client import TRUNCATION_MARKER
+
+    root = tmp_path.resolve()
+    huge = root / "huge.txt"
+    huge.write_text("가" * 1000 + "끝")
+    gateway = AsyncMock()
+    guard = RiskGuard(gateway, None, (root,), read_limit=100)
+
+    result = await guard.execute_read_only("filesystem__read_text_file", {"path": str(huge)})
+
+    assert result.truncated is True and result.text.endswith(TRUNCATION_MARKER)
+    assert result.text.startswith("가" * 100) and "끝" not in result.text
+    gateway.call_tool.assert_not_awaited()
+
+
+async def test_small_head_tail_and_odd_paths_still_go_through_the_server(tmp_path):
+    root = tmp_path.resolve()
+    small = root / "small.txt"
+    small.write_text("작은 글")
+    huge = root / "huge.txt"
+    huge.write_text("x" * 5000)
+    link = root / "link.txt"
+    link.symlink_to(huge)
+    gateway = AsyncMock()
+    gateway.call_tool.return_value = ToolResult(True, "server")
+    guard = RiskGuard(gateway, None, (root,), read_limit=100)
+
+    for arguments in (
+        {"path": str(small)},
+        {"path": str(huge), "head": 5},
+        {"path": str(huge), "tail": 5},
+        {"path": str(link)},  # a link is not read here; the server decides
+        {"path": str(root / "missing.txt")},
+        {"path": str(tmp_path.parent / "elsewhere.txt")},
+    ):
+        gateway.call_tool.reset_mock()
+        result = await guard.execute_read_only("filesystem__read_text_file", arguments)
+        assert result.text == "server", arguments
+        gateway.call_tool.assert_awaited_once()
