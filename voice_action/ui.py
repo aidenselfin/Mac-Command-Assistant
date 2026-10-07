@@ -441,7 +441,14 @@ class AsyncRuntimeWorker:
 
     def rate(self, score: int, tags: tuple[str, ...]) -> bool:
         controller = self._controller
-        return controller is not None and self._schedule(controller.rate(score, tags))
+        return controller is not None and self._schedule(self._rate(controller, score, tags))
+
+    async def _rate(self, controller, score: int, tags: tuple[str, ...]) -> None:
+        # Scheduling worked; whether the rating was stored is only known here.
+        if not await controller.rate(score, tags):
+            self.messages.put(
+                UIMessage(UIMessageType.NOTICE, "평가를 저장하지 못했어요. 다시 눌러 보세요.")
+            )
 
     def cancel_active(self) -> bool:
         if self._active_task is None:

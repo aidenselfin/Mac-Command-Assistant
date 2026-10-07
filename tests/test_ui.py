@@ -924,3 +924,23 @@ def test_worker_records_a_rating_for_the_answered_run(config, tmp_path):
         "FROM events WHERE kind = 'rating'"
     ).fetchall()
     assert rows == [(2, '["wrong_file"]')]
+
+
+def test_worker_says_so_when_a_rating_could_not_be_stored(config):
+    messages = queue.Queue()
+    manager, client = FakeManager(), FakeClient()
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: manager,
+        client_factory=lambda _config: client,
+        model_factory=lambda _client, _model_name: object(),
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+
+    assert worker.rate(3, ())  # scheduled, but nothing was answered yet
+    notice, _ = wait_for_message(messages, UIMessageType.NOTICE)
+    worker.shutdown()
+
+    assert "평가를 저장하지 못했어요" in notice.value

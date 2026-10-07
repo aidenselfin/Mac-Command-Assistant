@@ -210,7 +210,8 @@ def _tool_meta(content: str) -> dict:
         meta["truncated"] = True
     data = _load(content) if content.startswith("{") else None
     if isinstance(data, dict) and {"stage", "decision", "total"} <= data.keys():
-        meta.update({key: data[key] for key in ("stage", "decision", "total")})
+        meta.update({key: data[key] for key in ("stage", "decision", "total", "complete")
+                     if key in data})
     return meta
 
 
@@ -372,7 +373,7 @@ class FeedbackLoop:
 
     def record(
         self, kind: str, signature: str | None = None, run_id: str | None = None, **payload
-    ) -> None:
+    ) -> bool:
         try:
             # Strings are redacted one by one before serialization, so JSON stays valid.
             body = json.dumps(scrub(payload, self.secrets), ensure_ascii=False, default=str)
@@ -383,8 +384,10 @@ class FeedbackLoop:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (self.clock(), self.session_id, run_id or self.run_id, kind, signature, body),
                 )
+            return True
         except Exception:
             self._warn()
+            return False
 
     def _sig(self, text: str, limit: int = 120) -> str:
         """Signature from user or error text: redacted first, since normalize() lowercases."""
@@ -479,12 +482,16 @@ class FeedbackLoop:
         if self.run_id is None or isinstance(score, bool) or score not in range(1, 6):
             return False
         tags = tuple(dict.fromkeys(tag for tag in tags if tag in RATING_TAGS))
-        hypotheses = self._hypotheses()
+        hypotheses, measured = self._hypotheses()
         # Sorted, so the same causes picked in another order are the same signature.
         cause, tag = hypotheses[0] if hypotheses else "unknown", min(tags, default="none")
         signature = f"rating:{cause}:{tag}"
-        self.record("rating", signature=signature, score=score, tags=list(tags),
-                    hypotheses=hypotheses)
+        saved = self.record(
+            "rating", signature=signature, score=score, tags=list(tags),
+            hypotheses=hypotheses, measured=measured,
+        )
+        if not saved:
+            return False
         if score <= LOW_RATING:
             # The latest rating of each run decides, whatever signature an earlier one had:
             # a run re-rated 5 stars, or with other causes, no longer counts under the old one.
@@ -503,8 +510,9 @@ class FeedbackLoop:
                 self._queue("R7", signature, runs)
         return True
 
-    def _hypotheses(self) -> list[str]:
-        """Likely causes of a poor answer, from what this run recorded. No model call."""
+    def _hypotheses(self) -> tuple[list[str], dict]:
+        """Likely causes of a poor answer and the numbers they rest on, from what this run
+        recorded. No model call. Only the model's own time is measured, not tools'."""
         steps, elapsed, clarified, metas = 0, 0.0, False, []
         for kind, payload in self._rows(
             "SELECT kind, payload FROM events WHERE run_id = ? "
@@ -521,14 +529,17 @@ class FeedbackLoop:
         found = [meta for meta in metas if "decision" in meta]
         checks = (
             ("search_failed", any(meta["decision"] == "none" for meta in found)),
-            ("search_content_stage", any(meta["stage"] == "content" for meta in found)),
+            ("search_incomplete", any(meta.get("complete") is False for meta in found)),
             ("partial_read", any(meta.get("truncated") for meta in metas)),
             ("tool_errors", any(meta.get("error") for meta in metas)),
             ("many_calls", steps >= WASTE_CALLS),
             ("slow", elapsed >= SLOW_MS),
             ("clarified", clarified),
+            # Reaching the content step is how the search went, not proof that it failed.
+            ("search_content_stage", any(meta["stage"] == "content" for meta in found)),
         )
-        return [name for name, hit in checks if hit]
+        measured = {"model_calls": steps, "llm_ms": round(elapsed)}
+        return [name for name, hit in checks if hit], measured
 
     # ---- detection -------------------------------------------------------------------
 

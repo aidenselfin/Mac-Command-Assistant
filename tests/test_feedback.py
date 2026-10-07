@@ -359,3 +359,24 @@ async def test_two_runs_whose_final_low_ratings_match_queue_r7(tmp_path):
     await rated_run(loop, 3, ("wrong_file",), text="둘")
     await loop.close()
     assert [rule for rule, _ in analyzer.calls] == ["R7"]
+
+
+async def test_rating_not_stored_is_reported_as_failed(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    model = loop.wrap(FakeModel([ModelTurn("답", [])]))
+    loop.user_input("질문", new_run=True)
+    await model.generate([], [], allow_tools=True)
+    loop.db.close()  # every write now fails
+    assert not loop.rating(4)
+
+
+async def test_incomplete_search_is_a_cause_and_content_stage_is_only_the_last_resort(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    partial = json.dumps(
+        {"stage": "content", "decision": "choose", "total": 1, "complete": False}
+    )
+    await rated_run(loop, 2, tool_content=partial)
+    (sig, data), = stored_ratings(loop)
+    assert data["hypotheses"] == ["search_incomplete", "search_content_stage"]
+    assert sig == "rating:search_incomplete:none"
+    assert data["measured"]["model_calls"] == 1
