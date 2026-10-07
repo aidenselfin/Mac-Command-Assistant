@@ -11,7 +11,10 @@
   실제 모델(Groq gpt-oss-120b) 기준선 A(`021977f`, 넛지 **전**): 31과제×3 **80/93, INVALID 1**, 호출 270.
   실패: delete_pattern 0/3, convert_three_files 1/3, free_text_create_file 1/3(이후 live:false), attach_delete 1/3, convert_approve·convert_reject·
   delete_approve·overwrite_undo 각 2/3. 대부분 "해도 될까요?" 텍스트로 끝난 유형이고 overwrite_undo는 목록 조회 반복으로 호출 한도(10회) 소진.
-  결과 `evals/results/20261007-203743.json`(git 제외). **넛지(`2959471`) 이후 같은 조건 측정은 컴퓨터 종료 전에 끝났는지 확인하지 못했다** → 아래 다음 작업 1.
+  결과 `evals/results/20261007-203743.json`(git 제외).
+  **넛지 후(`2959471`, code_hash cda6b2de78cd) 같은 조건 재측정: 30과제×3 89/90, INVALID 0, 호출 275** (`evals/results/20261007-204705.json`, git 제외).
+  전부 3/3이고 find_numbered_series만 2/3(모델이 find_files 대신 list_directory로 읽어 `must_run` 불충족, 답은 정상).
+  개선: delete_pattern 0→3, convert_three_files 1→3, attach_delete 1→3, convert_approve·convert_reject·delete_approve·overwrite_undo 2→3.
   기억 기능 대조: follow_up 과제를 기억 없이 0/4, 있을 때 6/6. 사람이 `--ui`에서 눈으로 확인한 것은 없다.
 - 2026-10-07 협업 도구: `pytest -q tests/test_vibe.py` 1 passed(동시 소유권·잘못된 token·
   시작 전 상태·새 파일·삭제 복구·무관한 자료 제외·HEAD/index 불변·경로 검사 포함).
@@ -19,11 +22,10 @@
   테스트 전용 LaunchAgent 영구 설치, 첫 실행 exit 0·별도 ref 생성 확인. 재로그인은 직접 확인하지 않았다.
 
 # 다음 작업
-1. **넛지 효과 측정(이어서 할 첫 일)**: `uv run --locked python evals/run_eval.py --live --repeat 3 2>/dev/null`.
-   기준선 A(80/93)와 과제별로 비교한다. 삭제·변환 과제가 올라가고 3/3이던 과제가 떨어지지 않으면 이 결과를 새 기준선으로 삼고
-   status를 갱신한다. 이미 끝난 결과가 `evals/results/`에 있으면(20261007-204x~) 그것부터 본다.
+1. (완료) 넛지 효과 측정 → 위 89/90. **이 결과(`20261007-204705.json`)를 새 기준선으로 쓴다.** 코드가 바뀌면 다시 잰다.
 2. **lesson A/B(지침서 5.2)**: 후보 #4(폴더 목록 한 번만·변환 호출을 한 응답에 모으기)를 `--lesson`으로 새 기준선과 비교한다.
-   목표 과제는 overwrite_undo(호출 한도 소진)·convert_three_files. 후보 #2(검색 0건 반복 금지)는 find_files 도입으로 낡았고 #3은 #4와 겹쳐 거절 검토.
+   넛지 후 대상 과제(overwrite_undo·convert_three_files)가 이미 3/3이라 목표 개선(+2)을 낼 여지가 거의 없다 → 먼저 실패를
+   재현하는 과제가 있는지 보고, 없으면 #2~#4를 모두 거절(`--lesson-off ID`)하는 쪽이 자연스럽다. 후보 #2(검색 0건 반복 금지)는 find_files 도입으로 낡았고 #3은 #4와 겹쳐 거절 검토.
    채택 조건: 양쪽 INVALID ≤1, 3/3이던 과제가 안 떨어지고 목표 과제 +2 이상. 자동 채택 금지.
 3. **사람이 `--ui`로 확인**: 자유 입력 질문(버튼 없이 입력창), 후보 선택 버튼, 1~5 평가·원인 칩, Finder 파일 드래그 첨부,
    Finder 창이 앱 옆에 뜨는지(손쉬운 사용 권한), 직전 대화 기억(`요약해줘` → `그 요약을 파일로 저장해줘`).
@@ -31,6 +33,7 @@
    의미 검색·한/영 대체어·pdf/docx 본문 검색, HTML 반복 읽기, 변환 쓰기의 fd 기준 경합 방어.
 
 # 인수인계
+- 후보 lesson #2~#4가 겨냥한 반복 호출은 넛지·find_files 도입 뒤 평가에서 재현되지 않는다(overwrite_undo 3/3).
 - 이번 작업의 핵심 원인: 반복된 HTTP 400은 공급자가 도구 호출을 스키마로 먼저 검사해 거부한 것이었다. 새 400은 이제 메시지에
   `HTTP 400: tool_use_failed — <도구>: <위반>`으로 보이므로, 보이면 해당 도구 스키마에서 상한·`oneOf`를 빼고 코드에서 적용한다.
 - 모델이 질문을 남발하면 평가가 INVALID가 된다. free_text는 확인 질문·검색 전 질문을 앱이 돌려보내는 규칙(`_free_text_refusal`)이 있어야 한다.
