@@ -284,11 +284,13 @@ class RuntimeController:
                 Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."), rateable=False
             )
 
+        typed = pending.context.kind == "free_text"
         narrowing = pending.context.kind == "narrow_search"
-        # Narrowing takes free text, so there an option is picked only as "N번".
+        # Narrowing takes free text, so there an option is picked only as "N번"; a typed
+        # question has no options at all and every non-empty answer is the answer.
         match = re.fullmatch(r"(\d+)\s*번" if narrowing else r"(\d+)\s*번?", normalized)
-        index = int(match.group(1)) - 1 if match else -1
-        if narrowing and not 0 <= index < len(pending.options) and normalized:
+        index = int(match.group(1)) - 1 if match and not typed else -1
+        if (narrowing or typed) and not 0 <= index < len(pending.options) and normalized:
             self._transition(RuntimeState.RESUMING_PLAN, "clarification_narrowed")
             return self._finish(await self.planner.resume(pending.context, normalized))
         if not 0 <= index < len(pending.options):
