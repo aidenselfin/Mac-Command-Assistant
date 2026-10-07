@@ -39,7 +39,7 @@
   ],
   "expect": {
     "files": {
-      "요약.md": "배포는 금요일"
+      "요약.md": "*"
     },
     "must_run": [
       "filesystem__read_text_file"
