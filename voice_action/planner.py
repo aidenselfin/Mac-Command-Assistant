@@ -302,7 +302,6 @@ CLARIFICATION_TOOL = {
                 "options": {
                     "type": "array",
                     "items": {"type": "string", "minLength": 1},
-                    "maxItems": 6,
                     "description": "Choices to pick from. Use [] for kind free_text.",
                 },
                 "kind": {
@@ -448,10 +447,12 @@ class OpenAICompatibleModel:
         # A question with nothing to pick from is a typed answer, whatever kind it claimed.
         if not options or kind == "free_text":
             return ClarificationRequest(question.strip(), (), "free_text", call_id)
-        return ClarificationRequest(question.strip(), tuple(options), kind, call_id)
+        # More buttons than fit are cut here, not refused by the provider's schema check.
+        return ClarificationRequest(question.strip(), tuple(options[:MAX_OPTIONS]), kind, call_id)
 
 
 MAX_CLARIFICATIONS = 2
+MAX_OPTIONS = 6
 # A request only to locate a file needs no read; anything about its content does.
 LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")

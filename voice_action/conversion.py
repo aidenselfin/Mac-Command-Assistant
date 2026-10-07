@@ -65,7 +65,9 @@ CONVERT_DEFINITION = ToolDefinition(
         "type": "object",
         "properties": {
             "source": {"type": "string", "minLength": 1},
-            "target_format": {"type": "string", "enum": TARGET_FORMATS},
+            # The aliases ("jpg", "tif"...) are listed too: a provider rejects any value outside the
+            # enum before this code could map it, and "jpg" is what people say.
+            "target_format": {"type": "string", "enum": sorted({*TARGET_FORMATS, *ALIASES})},
             "output": {"type": "string", "minLength": 1},
         },
         "required": ["source", "target_format"],

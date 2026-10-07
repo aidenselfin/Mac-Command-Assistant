@@ -190,3 +190,20 @@ async def test_runtime_sends_any_typed_answer_to_the_task_and_cancel_still_cance
     assert isinstance(await controller.submit("또 만들어줘"), Clarification)
     cancelled = await controller.submit("취소")
     assert cancelled == Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다.")
+
+
+def test_more_options_than_fit_are_cut_not_rejected_by_the_provider_schema():
+    schema = CLARIFICATION_TOOL["function"]["parameters"]["properties"]["options"]
+    assert "maxItems" not in schema
+    many = json.dumps(
+        {"question": "?", "options": [str(i) for i in range(10)], "kind": "file_candidate"}
+    )
+    assert len(OpenAICompatibleModel._parse_clarification("c", many).options) == 6
+
+
+def test_jpg_is_an_accepted_target_format_for_conversion():
+    from voice_action.conversion import CONVERT_DEFINITION, _validate
+
+    enum = CONVERT_DEFINITION.schema["properties"]["target_format"]["enum"]
+    assert {"jpg", "jpeg", "tif", "htm", "markdown"} <= set(enum)
+    _validate(CONVERT_DEFINITION, {"source": "/r/사진.heic", "target_format": "jpg"})
