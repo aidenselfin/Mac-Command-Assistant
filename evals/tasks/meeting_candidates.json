@@ -8,18 +8,18 @@
   "request": "회의록 요약해줘",
   "user": {
     "clarify": [
-      "1"
+      "1번"
     ]
   },
   "script": [
     {
       "calls": [
         {
-          "name": "filesystem__search_files",
+          "name": "local__find_files",
           "args": {
-            "path": "{root}",
-            "pattern": "**/*회의록*",
-            "excludePatterns": []
+            "keywords": [
+              "회의록"
+            ]
           }
         }
       ]

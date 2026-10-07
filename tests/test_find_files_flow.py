@@ -53,7 +53,7 @@ async def test_find_files_is_offered_and_single_match_continues(config):
     model = scripted(find_turn("예산안"), ModelTurn("찾았습니다", []))
     planner, _ = make_planner(config, model)
 
-    outcome = await planner.run("예산안 알려줘")
+    outcome = await planner.run("예산안 어디 있어?")
 
     assert outcome == Completed("찾았습니다")
     offered = {tool.name for tool in model.generate.await_args_list[0].args[1]}
@@ -106,7 +106,7 @@ async def test_narrow_free_text_reruns_the_search_and_option_path_selects_it(con
     planner, _ = make_planner(config, model)
     assert await planner.resume(context, "임시-12번") == Completed("끝")
     system = model.generate.await_args_list[0].args[0][0]["content"]
-    assert "사용자가 좁힌 조건: 임시-12번" in system
+    assert "사용자가 좁힌 조건(누적): 임시-12번" in system
 
     (root / "a.txt").write_text("x")
     model = scripted(read_turn(root / "a.txt"), ModelTurn("읽음", []))
@@ -142,7 +142,7 @@ async def test_find_files_is_refused_after_the_user_picked_a_file(config):
     context = ClarificationContext("a 읽어줘", "file_candidate", (str(root / "a.md"),), 1)
     assert await planner.resume(context, str(root / "a.md")) == Completed("읽음")
     refusal = model.generate.await_args_list[1].args[0][-1]["content"]
-    assert "이미 파일을 선택" in refusal
+    assert "이미 대상 파일이 정해졌습니다" in refusal
 
 
 async def test_big_file_answer_says_it_was_only_partly_read(config):
@@ -165,10 +165,10 @@ async def test_big_file_answer_says_it_was_only_partly_read(config):
     assert await planner.run("큰파일.txt 요약해줘") == Completed("요약")
 
 
-async def test_raw_search_is_hidden_except_for_the_meeting_note_flow(config):
-    for text, expected in (("예산안 알려줘", False), ("회의록 요약해줘", True)):
+async def test_raw_search_is_never_offered_to_the_model(config):
+    for text in ("예산안 알려줘", "회의록 요약해줘"):
         model = scripted(ModelTurn("끝", []))
         planner, _ = make_planner(config, model)
         await planner.run(text)
         offered = {tool.name for tool in model.generate.await_args.args[1]}
-        assert ("filesystem__search_files" in offered) is expected
+        assert "filesystem__search_files" not in offered and "local__find_files" in offered

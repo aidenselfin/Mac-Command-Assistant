@@ -12,6 +12,7 @@ from voice_action.mcp_client import ToolDefinition, ToolRejectedError, ToolResul
 from voice_action.planner import (
     ApprovalRequired,
     Clarification,
+    ClarificationContext,
     ClarificationRequest,
     Completed,
     Error,
@@ -1468,23 +1469,29 @@ async def test_auth_error_redacted(config):
     assert "secret-payload" not in str(error.value)
 
 
-def search_call(config, pattern="**/*회의록*"):
+def find_call(*keywords, call_id="find-1", **extra):
     return ModelTurn(
         None,
         [
             ToolCall(
-                "search-1",
-                "filesystem__search_files",
-                json.dumps(
-                    {
-                        "path": str(config.allowed_directories[0]),
-                        "pattern": pattern,
-                    },
-                    ensure_ascii=False,
-                ),
+                call_id,
+                "local__find_files",
+                json.dumps({"keywords": list(keywords), **extra}, ensure_ascii=False),
             )
         ],
     )
+
+
+def read_call(path, call_id="read-1"):
+    return ModelTurn(
+        None,
+        [ToolCall(call_id, "filesystem__read_text_file", json.dumps({"path": str(path)}))],
+    )
+
+
+def tool_messages(model, turn_index):
+    return [m["content"] for m in model.generate.await_args_list[turn_index].args[0]
+            if m["role"] == "tool"]
 
 
 async def test_single_search_candidate_auto_reads_without_clarification(config):
@@ -1492,23 +1499,11 @@ async def test_single_search_candidate_auto_reads_without_clarification(config):
     candidate = root / "회의록-한개.md"
     candidate.write_text("회의 내용", encoding="utf-8")
     mcp = fake_mcp()
-    mcp.call_tool.side_effect = [
-        ToolResult(True, str(candidate)),
-        ToolResult(True, "결정: 다음 주 배포"),
-    ]
+    mcp.call_tool.return_value = ToolResult(True, "결정: 다음 주 배포")
     model = AsyncMock()
     model.generate.side_effect = [
-        search_call(config),
-        ModelTurn(
-            None,
-            [
-                ToolCall(
-                    "read-1",
-                    "filesystem__read_text_file",
-                    json.dumps({"path": str(candidate)}, ensure_ascii=False),
-                )
-            ],
-        ),
+        find_call("회의록"),
+        read_call(candidate),
         ModelTurn("회의록을 요약했습니다.", []),
     ]
 
@@ -1516,10 +1511,8 @@ async def test_single_search_candidate_auto_reads_without_clarification(config):
 
     assert outcome == Completed("회의록을 요약했습니다.")
     assert [call.args[0] for call in mcp.call_tool.await_args_list] == [
-        "filesystem__search_files",
-        "filesystem__read_text_file",
+        "filesystem__read_text_file"
     ]
-    assert not isinstance(outcome, Clarification)
 
 
 async def test_explicit_meeting_filename_reads_without_search(config):
@@ -1544,262 +1537,183 @@ async def test_explicit_meeting_filename_reads_without_search(config):
     )
 
 
+
 async def test_multiple_search_candidates_clarify_before_any_read(config):
     root = config.allowed_directories[0]
     candidates = (root / "회의록-1.md", root / "회의록-2.md")
     for candidate in candidates:
         candidate.write_text("회의 내용", encoding="utf-8")
     mcp = fake_mcp()
-    mcp.call_tool.return_value = ToolResult(True, "\n".join(map(str, candidates)))
     model = AsyncMock()
-    model.generate.return_value = search_call(config)
+    model.generate.return_value = find_call("회의록")
 
     outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
 
     assert isinstance(outcome, Clarification)
-    assert outcome.question == "요약할 회의록을 선택해 주세요."
-    assert outcome.options == tuple(map(str, candidates))
+    assert outcome.context.kind == "file_candidate"
+    assert sorted(outcome.options) == sorted(map(str, candidates))
+    assert len(outcome.labels) == 2
     assert outcome.context.original_request == "회의록 요약해줘"
     assert outcome.context.clarification_count == 1
-    mcp.call_tool.assert_awaited_once()
-    assert mcp.call_tool.await_args.args[0] == "filesystem__search_files"
+    mcp.call_tool.assert_not_awaited()
 
 
 async def test_no_search_candidate_finishes_without_read_or_write(config):
     mcp = fake_mcp()
-    mcp.call_tool.return_value = ToolResult(True, "No matches found")
     model = AsyncMock()
-    model.generate.return_value = search_call(config)
+    model.generate.return_value = find_call("회의록")
 
     outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
 
     assert isinstance(outcome, Completed)
     assert "찾지 못했습니다" in outcome.text
-    mcp.call_tool.assert_awaited_once()
+    mcp.call_tool.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
-    "invalid_arguments",
+    "first_turn",
     [
-        {"pattern": "*.txt"},
-        {"pattern": "회의록-1.md"},
-        {"pattern": "**/*회의록*", "excludePatterns": ["**/*회의록*"]},
-        {"pattern": "**/*회의록*", "unexpected": True},
+        ModelTurn(None, [ToolCall("list", "filesystem__list_directory", '{"path": "/x"}')]),
+        find_call("보고서"),  # a search, but not for the requested meeting notes
     ],
 )
-async def test_meeting_note_candidate_search_rejects_incomplete_model_scope(
-    config, invalid_arguments
-):
+async def test_meeting_note_request_must_search_for_meeting_notes_first(config, first_turn):
     root = config.allowed_directories[0]
-    (root / "result.txt").write_text("검색 대상 아님", encoding="utf-8")
-    candidates = (root / "회의록-1.md", root / "회의록-2.md")
-    for candidate in candidates:
-        candidate.write_text("회의 내용", encoding="utf-8")
+    (root / "회의록-1.md").write_text("a", encoding="utf-8")
+    (root / "회의록-2.md").write_text("b", encoding="utf-8")
     mcp = fake_mcp()
-    mcp.call_tool.return_value = ToolResult(True, "\n".join(map(str, candidates)))
     model = AsyncMock()
-    model.generate.side_effect = [
-        ModelTurn(
-            None,
-            [
-                ToolCall(
-                    "incomplete",
-                    "filesystem__search_files",
-                    json.dumps({"path": str(root), **invalid_arguments}),
-                )
-            ],
-        ),
-        search_call(config),
-    ]
+    model.generate.side_effect = [first_turn, find_call("회의록", call_id="find-2")]
 
     outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
 
     assert isinstance(outcome, Clarification)
-    assert outcome.options == tuple(map(str, candidates))
-    mcp.call_tool.assert_awaited_once_with(
-        "filesystem__search_files",
-        {"path": str(root), "pattern": "**/*회의록*"},
-    )
-    assert "tool_error" in model.generate.await_args_list[1].args[0][-1]["content"]
-    assert "**/*회의록*" in model.generate.await_args_list[1].args[0][-1]["content"]
+    assert "tool_error" in tool_messages(model, 1)[-1]
+    mcp.call_tool.assert_not_awaited()
 
 
-async def test_meeting_note_search_accepts_explicit_empty_exclusions(config):
-    root = config.allowed_directories[0]
-    mcp = fake_mcp()
-    mcp.call_tool.return_value = ToolResult(True, "No matches found")
-    model = AsyncMock()
-    model.generate.return_value = ModelTurn(
-        None,
-        [
-            ToolCall(
-                "search",
-                "filesystem__search_files",
-                json.dumps(
-                    {"path": str(root), "pattern": "**/*회의록*", "excludePatterns": []}
-                ),
-            )
-        ],
-    )
-
-    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
-
-    assert isinstance(outcome, Completed)
-    assert "찾지 못했습니다" in outcome.text
-    mcp.call_tool.assert_awaited_once_with(
-        "filesystem__search_files",
-        {"path": str(root), "pattern": "**/*회의록*", "excludePatterns": []},
-    )
-
-
-async def test_meeting_note_candidate_search_requires_every_allowed_root(config, tmp_path):
+async def test_meeting_note_search_covers_every_allowed_root_in_one_call(config, tmp_path):
     first_root = config.allowed_directories[0]
     second_root = tmp_path / "second-root"
     second_root.mkdir()
     config = replace(config, allowed_directories=(first_root, second_root))
     first, second = first_root / "회의록-1.md", second_root / "회의록-2.md"
-    mcp = fake_mcp()
-    mcp.call_tool.side_effect = [ToolResult(True, str(first)), ToolResult(True, str(second))]
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
     model = AsyncMock()
-    model.generate.side_effect = [
-        ModelTurn(
-            None,
-            [
-                ToolCall(
-                    "incomplete-root",
-                    "filesystem__search_files",
-                    json.dumps(
-                        {"path": str(second_root), "pattern": "**/*회의록*"}
-                    ),
-                )
-            ],
-        ),
-        search_call(config),
-        ModelTurn(
-            None,
-            [
-                ToolCall(
-                    "second-root",
-                    "filesystem__search_files",
-                    json.dumps(
-                        {"path": str(second_root), "pattern": "**/*회의록*"}
-                    ),
-                )
-            ],
-        ),
-    ]
+    model.generate.return_value = find_call("회의록")
 
-    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+    outcome = await Planner(config, fake_mcp(), model).run("회의록 요약해줘")
 
     assert isinstance(outcome, Clarification)
-    assert outcome.options == (str(first), str(second))
-    assert [call.args for call in mcp.call_tool.await_args_list] == [
-        ("filesystem__search_files", {"path": str(first_root), "pattern": "**/*회의록*"}),
-        ("filesystem__search_files", {"path": str(second_root), "pattern": "**/*회의록*"}),
-    ]
-    assert "tool_error" in model.generate.await_args_list[1].args[0][-1]["content"]
+    assert sorted(outcome.options) == sorted([str(first), str(second)])
 
 
-@pytest.mark.parametrize("has_candidate", [False, True])
-async def test_meeting_note_zero_or_single_candidate_waits_for_remaining_root(
-    config, tmp_path, has_candidate
-):
-    first_root = config.allowed_directories[0]
-    second_root = tmp_path / "second-root"
-    second_root.mkdir()
-    config = replace(config, allowed_directories=(first_root, second_root))
-    candidate = first_root / "회의록-1.md"
-    if has_candidate:
-        candidate.write_text("회의 내용", encoding="utf-8")
-    mcp = fake_mcp()
-    mcp.call_tool.return_value = ToolResult(
-        True, str(candidate) if has_candidate else "No matches found"
-    )
-    model = AsyncMock()
-    model.generate.side_effect = [
-        search_call(config),
-        ModelTurn("하나만 찾았습니다.", []),
-    ]
-
-    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
-
-    assert isinstance(outcome, Error)
-    mcp.call_tool.assert_awaited_once_with(
-        "filesystem__search_files",
-        {"path": str(first_root), "pattern": "**/*회의록*"},
-    )
-
-
-async def test_meeting_note_candidate_search_deduplicates_paths_before_clarification(config):
-    root = config.allowed_directories[0]
-    first, second = root / "회의록-1.md", root / "회의록-2.md"
-    mcp = fake_mcp()
-    mcp.call_tool.return_value = ToolResult(True, f"{first}\n{first}\n{second}\n{second}")
-    model = AsyncMock()
-    model.generate.return_value = search_call(config)
-
-    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
-
-    assert isinstance(outcome, Clarification)
-    assert outcome.options == (str(first), str(second))
-
-
-async def test_meeting_note_candidate_search_truncation_stops_before_read_or_write(config):
-    mcp = fake_mcp()
-    mcp.call_tool.return_value = ToolResult(True, "partial", truncated=True)
-    model = AsyncMock()
-    model.generate.return_value = search_call(config)
-
-    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
-
-    assert isinstance(outcome, Error)
-    assert "너무 커서" in outcome.message
-    assert [call.args[0] for call in mcp.call_tool.await_args_list] == [
-        "filesystem__search_files"
-    ]
-
-
-@pytest.mark.parametrize("via_symlink", [False, True])
-async def test_meeting_note_candidate_search_rejects_outside_and_symlink_results(
-    config, tmp_path, via_symlink
-):
+async def test_meeting_note_search_ignores_links_and_hidden_files(config, tmp_path):
     root = config.allowed_directories[0]
     outside = tmp_path / "outside"
     outside.mkdir()
-    outside_candidate = outside / "회의록-외부.md"
-    outside_candidate.write_text("fixture", encoding="utf-8")
-    escape = root / "escape"
-    escape.symlink_to(outside, target_is_directory=True)
-    mcp = fake_mcp()
-    mcp.validate_result_path.side_effect = lambda value: Path(value).resolve(strict=True)
-    raw_candidate = escape / outside_candidate.name if via_symlink else outside_candidate
-    mcp.call_tool.return_value = ToolResult(True, str(raw_candidate))
+    (outside / "회의록-외부.md").write_text("x", encoding="utf-8")
+    (root / "escape").symlink_to(outside, target_is_directory=True)
+    target = root / "숨김.md"
+    target.write_text("x", encoding="utf-8")
+    (root / "회의록-링크.md").symlink_to(target)
     model = AsyncMock()
-    model.generate.return_value = search_call(config)
+    model.generate.return_value = find_call("회의록")
 
-    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+    outcome = await Planner(config, fake_mcp(), model).run("회의록 요약해줘")
 
-    assert isinstance(outcome, Error)
-    assert "허용 경로 밖" in outcome.message
-    mcp.call_tool.assert_awaited_once()
+    assert isinstance(outcome, Completed) and "찾지 못했습니다" in outcome.text
 
 
-async def test_meeting_note_candidate_search_rejects_symlink_inside_root(config):
+async def test_meeting_notes_without_the_korean_word_are_found_by_variants_and_body(config):
     root = config.allowed_directories[0]
-    target = root / "회의록-원본.md"
-    target.write_text("fixture", encoding="utf-8")
-    alias = root / "회의록-링크.md"
-    alias.symlink_to(target)
-    mcp = fake_mcp()
-    mcp.validate_result_path.side_effect = lambda value: Path(value).resolve(strict=True)
-    mcp.call_tool.return_value = ToolResult(True, str(alias))
+    (root / "meeting-minutes.txt").write_text("english only", encoding="utf-8")
     model = AsyncMock()
-    model.generate.return_value = search_call(config)
+    model.generate.side_effect = [
+        find_call("회의록", "meeting minutes"),
+        read_call(root / "meeting-minutes.txt"),
+        ModelTurn("요약", []),
+    ]
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(True, "english only")
+    assert await Planner(config, mcp, model).run("회의록 요약해줘") == Completed("요약")
 
-    outcome = await Planner(config, mcp, model).run("회의록 요약해줘")
+    (root / "meeting-minutes.txt").unlink()
+    (root / "memo.txt").write_text("오늘 회의록 초안: 배포는 금요일", encoding="utf-8")
+    model = AsyncMock()
+    model.generate.side_effect = [
+        find_call("회의록"),
+        read_call(root / "memo.txt"),
+        ModelTurn("요약", []),
+    ]
+    assert await Planner(config, mcp, model).run("회의록 요약해줘") == Completed("요약")
 
-    assert isinstance(outcome, Error)
-    mcp.call_tool.assert_awaited_once()
+
+async def test_thirty_numbered_meeting_notes_are_summarized_not_listed(config):
+    root = config.allowed_directories[0]
+    for index in range(1, 31):
+        (root / f"회의록-{index}.md").write_text("x", encoding="utf-8")
+    model = AsyncMock()
+    model.generate.return_value = find_call("회의록")
+
+    outcome = await Planner(config, fake_mcp(), model).run("회의록 요약해줘")
+
+    assert isinstance(outcome, Clarification) and outcome.context.kind == "narrow_search"
+    assert "30개" in outcome.question and len(outcome.options) <= 1 + 3
+
+
+async def test_single_match_pins_the_file_for_content_requests(config):
+    root = config.allowed_directories[0]
+    chosen, other = root / "예산안.md", root / "long.txt"
+    chosen.write_text("예산", encoding="utf-8")
+    other.write_text("긴 글", encoding="utf-8")
+    mcp = fake_mcp()
+    mcp.call_tool.return_value = ToolResult(True, "내용")
+    model = AsyncMock()
+    model.generate.side_effect = [
+        find_call("예산안"),
+        read_call(other),  # not the file the search found
+        read_call(chosen, "read-2"),
+        ModelTurn("요약", []),
+    ]
+
+    outcome = await Planner(config, mcp, model).run("예산안 내용 요약해줘")
+
+    assert outcome == Completed("요약")
+    assert "검증된 단일 후보 파일만" in tool_messages(model, 2)[-1]
+    mcp.call_tool.assert_awaited_once_with("filesystem__read_text_file", {"path": str(chosen)})
+
+
+async def test_content_request_cannot_finish_without_reading_the_found_file(config):
+    (config.allowed_directories[0] / "예산안.md").write_text("예산", encoding="utf-8")
+    model = AsyncMock()
+    model.generate.side_effect = [find_call("예산안"), ModelTurn("대충 이런 내용입니다", [])]
+
+    outcome = await Planner(config, fake_mcp(), model).run("예산안 내용 요약해줘")
+
+    assert isinstance(outcome, Error) and "읽지 않아" in outcome.message
+
+
+@pytest.mark.parametrize("request_text", ["예산안 파일 어디 있어?", "예산안 찾아줘"])
+async def test_locating_a_file_needs_no_read(config, request_text):
+    (config.allowed_directories[0] / "예산안.md").write_text("예산", encoding="utf-8")
+    mcp = fake_mcp()
+    model = AsyncMock()
+    model.generate.side_effect = [find_call("예산안"), ModelTurn("예산안.md에 있습니다.", [])]
+
+    assert await Planner(config, mcp, model).run(request_text) == Completed("예산안.md에 있습니다.")
+    mcp.call_tool.assert_not_awaited()
+
+
+async def test_converting_a_found_file_does_not_require_reading_it_first(config):
+    (config.allowed_directories[0] / "보고서.docx").write_text("x", encoding="utf-8")
+    model = AsyncMock()
+    model.generate.side_effect = [find_call("보고서"), ModelTurn("변환 준비", [])]
+
+    outcome = await Planner(config, fake_mcp(), model).run("보고서 pdf로 변환해줘")
+
+    assert outcome == Completed("변환 준비")
 
 
 async def test_interactive_number_resumes_pending_task(config):
@@ -1808,33 +1722,66 @@ async def test_interactive_number_resumes_pending_task(config):
     first.write_text("첫 번째", encoding="utf-8")
     second.write_text("두 번째", encoding="utf-8")
     mcp = fake_mcp()
-    mcp.call_tool.side_effect = [
-        ToolResult(True, f"{first}\n{second}"),
-        ToolResult(True, "두 번째 회의록 본문"),
-    ]
+    mcp.call_tool.return_value = ToolResult(True, "두 번째 회의록 본문")
     model = AsyncMock()
     model.generate.side_effect = [
-        search_call(config),
-        ModelTurn(
-            None,
-            [ToolCall("read-2", "filesystem__read_text_file", json.dumps({"path": str(second)}))],
-        ),
+        find_call("회의록"),
+        read_call(second),
         ModelTurn("두 번째 회의록을 요약했습니다.", []),
     ]
     session = RuntimeController(Planner(config, mcp, model))
 
     first_outcome = await session.submit("회의록 요약해줘")
-    resumed = await session.submit("2번")
+    index = first_outcome.options.index(str(second)) + 1
+    resumed = await session.submit(f"{index}번")
 
     assert isinstance(first_outcome, Clarification)
     assert resumed == Completed("두 번째 회의록을 요약했습니다.")
-    assert [call.args[0] for call in mcp.call_tool.await_args_list] == [
-        "filesystem__search_files",
-        "filesystem__read_text_file",
+
+
+async def test_narrowing_rounds_add_up_instead_of_replacing_each_other(config):
+    root = config.allowed_directories[0]
+    for folder in ("가", "나"):
+        (root / folder).mkdir()
+        for kind in ("md", "txt"):
+            for index in range(1, 4):
+                (root / folder / f"보고서{index}.{kind}").write_text("x", encoding="utf-8")
+    mcp = fake_mcp()
+    model = AsyncMock()
+    model.generate.side_effect = [
+        find_call("보고서"),
+        find_call("보고서", folder_hint="가"),
+        find_call("보고서", folder_hint="가", extensions=["md"]),
     ]
-    resumed_messages = model.generate.await_args_list[1].args[0]
-    assert resumed_messages[1]["content"] == "회의록 요약해줘"
-    assert f"사용자가 선택한 파일: {second}" in resumed_messages[0]["content"]
+    planner = Planner(config, mcp, model)
+
+    first = await planner.run("보고서 읽어줘")
+    second = await planner.resume(first.context, "폴더: 가")
+    third = await planner.resume(second.context, "md만")
+
+    assert (first.context.kind, second.context.kind) == ("narrow_search", "narrow_search")
+    assert second.context.conditions == ("폴더: 가",)
+    assert second.context.search_arguments == '{"keywords": ["보고서"], "folder_hint": "가"}'
+    # Three .md files are left, but a third question is over the budget: stop with the clues.
+    assert isinstance(third, Error) and "폴더: 가; md만" in third.message
+    system = model.generate.await_args_list[2].args[0][0]["content"]
+    assert "폴더: 가; md만" in system and "folder_hint" in system
+    assert "보고서" in system
+
+
+async def test_too_many_narrowing_rounds_stop_with_a_hint_and_the_clues(config):
+    root = config.allowed_directories[0]
+    for index in range(1, 9):
+        (root / f"보고서{index}.md").write_text("x", encoding="utf-8")
+    model = AsyncMock()
+    model.generate.return_value = find_call("보고서")
+    planner = Planner(config, fake_mcp(), model)
+    context = ClarificationContext("보고서 읽어줘", "narrow_search", (), 2, ("폴더: 가",))
+
+    outcome = await planner.resume(context, "아무거나")
+
+    assert isinstance(outcome, Error) and "clarification 최대" in outcome.message
+    assert "폴더: 가" in outcome.message and "구체적인 조건" in outcome.message
 
 
 async def test_ambiguous_write_clarifies_before_model_or_mcp(config):

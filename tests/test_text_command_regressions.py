@@ -60,14 +60,14 @@ def planner(config, gateway, model, **kwargs):
     )
 
 
-def search_call(root, pattern):
+def find_call(*keywords):
     return ModelTurn(
         None,
         [
             ToolCall(
-                "search",
-                "filesystem__search_files",
-                json.dumps({"path": str(root), "pattern": pattern}, ensure_ascii=False),
+                "find",
+                "local__find_files",
+                json.dumps({"keywords": list(keywords)}, ensure_ascii=False),
             )
         ],
     )
@@ -81,24 +81,17 @@ async def test_regression_meeting_note_summary_rejects_unrelated_safe_txt_search
         (root / filename).write_text("fixture", encoding="utf-8")
     candidates = (root / "회의록-1.md", root / "회의록-2.md")
     gateway = fake_gateway()
-    gateway.call_tool.return_value = ToolResult(True, "\n".join(map(str, candidates)))
     model = AsyncMock()
     model.generate.side_effect = [
-        search_call(root, "*.txt"),
-        search_call(root, "**/*회의록*"),
+        find_call("result"),  # a search for something other than the requested notes
+        find_call("회의록"),
     ]
 
     outcome = await planner(config, gateway, model).run("회의록 요약해줘")
 
-    assert outcome.options == tuple(map(str, candidates))
-    gateway.call_tool.assert_awaited_once_with(
-        "filesystem__search_files",
-        {"path": str(root), "pattern": "**/*회의록*"},
-    )
-    assert all(
-        call.args[0] not in {"filesystem__read_text_file", "filesystem__write_file"}
-        for call in gateway.call_tool.await_args_list
-    )
+    assert sorted(outcome.options) == sorted(map(str, candidates))
+    assert "tool_error" in model.generate.await_args_list[1].args[0][-1]["content"]
+    gateway.call_tool.assert_not_awaited()  # nothing was read or written
 
 
 async def test_regression_web_save_accepts_url_before_korean_object_particle(config):
