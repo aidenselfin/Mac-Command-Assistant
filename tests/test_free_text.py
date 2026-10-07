@@ -341,3 +341,71 @@ async def test_other_replies_are_left_alone(config, request_text, reply):
     planner, model = make(config, [ModelTurn(reply, [])])
     assert await planner.run(request_text) == Completed(reply)
     assert model.generate.await_count == 1
+
+
+# ---- the schema the provider checks a call against -------------------------------------------
+
+from voice_action.planner import provider_description, provider_schema  # noqa: E402
+
+
+def test_the_provider_schema_keeps_types_and_choices_but_no_hard_limits():
+    schema = {
+        "type": "object",
+        "$schema": "x",
+        "properties": {
+            "format": {"type": "string", "enum": ["a", "b"], "minLength": 1},
+            "items": {"type": "array", "items": {"type": "string", "maxLength": 3},
+                      "minItems": 1, "maxItems": 2, "uniqueItems": True},
+            "head": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        },
+        "required": ["format"],
+        "additionalProperties": False,
+        "oneOf": [{"required": ["format"]}],
+    }
+    assert provider_schema(schema) == {
+        "type": "object",
+        "properties": {
+            "format": {"type": "string", "enum": ["a", "b"]},
+            "items": {"type": "array", "items": {"type": "string"}},
+            "head": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        },
+    }
+    assert "required" in schema and "oneOf" in schema  # the original is not touched
+    assert provider_description("변환한다.", schema) == "변환한다. 필수 인자: format."
+    assert provider_description("목록.", {"type": "object"}) == "목록."
+
+
+async def test_what_is_sent_to_the_provider_has_no_required_fields_but_names_them():
+    client = AsyncMock(spec=AsyncOpenAI)
+    client.chat = AsyncMock()
+    client.chat.completions.create.return_value = AsyncMock(
+        choices=[AsyncMock(message=AsyncMock(content="끝", tool_calls=None))]
+    )
+    tool = ToolDefinition(
+        "local__convert_file", "변환한다.",
+        {"type": "object", "properties": {"source": {"type": "string", "minLength": 1}},
+         "required": ["source"], "additionalProperties": False},
+    )
+    await OpenAICompatibleModel(client, "m").generate(
+        [{"role": "user", "content": "x"}], [tool], allow_tools=True
+    )
+    sent = client.chat.completions.create.await_args.kwargs["tools"]
+    assert len(sent) == 2  # the tool and the question tool
+    for item in sent:
+        assert "required" not in item["function"]["parameters"]
+        assert "additionalProperties" not in item["function"]["parameters"]
+    assert "필수 인자: source." in sent[0]["function"]["description"]
+    question = sent[1]["function"]
+    assert "필수 인자: question, options, kind." in question["description"]
+    assert "minItems" not in json.dumps(question["parameters"])
+
+
+async def test_an_empty_final_reply_is_sent_back_once_before_the_command_fails(config):
+    planner, model = make(config, [ModelTurn("", []), ModelTurn("최종 답입니다.", [])])
+    assert await planner.run("안녕") == Completed("최종 답입니다.")
+    assert "최종 응답을 작성하세요" in model.generate.await_args_list[1].args[0][-1]["content"]
+
+    planner, model = make(config, [ModelTurn("", []), ModelTurn(None, [])])
+    with pytest.raises(PlannerError, match="비어 있습니다"):
+        await planner.run("안녕")
+    assert model.generate.await_count == 2  # one retry, not a loop

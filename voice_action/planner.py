@@ -320,6 +320,36 @@ CLARIFICATION_TOOL = {
 }
 
 
+# Constraints a provider enforces on a generated call before the app sees it. Breaking one makes
+# the whole answer HTTP 400 (a missing field, a 9th list item), where the app itself would only
+# have sent the model a tool_error and let it try again. The app validates every call anyway.
+SCHEMA_KEYS_DROPPED = frozenset(
+    {
+        "required", "additionalProperties", "minItems", "maxItems", "minLength", "maxLength",
+        "pattern", "uniqueItems", "oneOf", "allOf", "not", "if", "then", "else", "$schema",
+    }
+)
+
+
+def provider_schema(schema):
+    """The schema as the provider should check it: types and choices, no hard limits."""
+    if isinstance(schema, dict):
+        return {
+            key: provider_schema(value)
+            for key, value in schema.items()
+            if key not in SCHEMA_KEYS_DROPPED
+        }
+    if isinstance(schema, list):
+        return [provider_schema(item) for item in schema]
+    return schema
+
+
+def provider_description(description: str, schema: dict) -> str:
+    """Required arguments stay known to the model, in words, once the schema stops saying so."""
+    required = [name for name in schema.get("required", []) if isinstance(name, str)]
+    return f"{description} 필수 인자: {', '.join(required)}." if required else description
+
+
 PROVIDER_CODE = re.compile(r"[a-z][a-z0-9_]{1,40}")
 # "parameters for tool X did not match schema: errors: [`/options`: minItems: got 0, want 1]"
 PROVIDER_SCHEMA_ERROR = re.compile(
@@ -365,8 +395,8 @@ class OpenAICompatibleModel:
                 "type": "function",
                 "function": {
                     "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.schema,
+                    "description": provider_description(tool.description, tool.schema),
+                    "parameters": provider_schema(tool.schema),
                 },
             }
             for tool in tools
@@ -382,7 +412,19 @@ class OpenAICompatibleModel:
                         properties[name] = {"anyOf": [properties[name], {"type": "null"}]}
                 function["description"] += " 전체 파일을 읽을 때 head와 tail은 생략하세요."
         if allow_tools and allow_clarification:
-            provider_tools.append(CLARIFICATION_TOOL)
+            function = CLARIFICATION_TOOL["function"]
+            provider_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": function["name"],
+                        "description": provider_description(
+                            function["description"], function["parameters"]
+                        ),
+                        "parameters": provider_schema(function["parameters"]),
+                    },
+                }
+            )
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -473,6 +515,7 @@ CONFIRM_NUDGE = (
     "지금 해당 도구(local__delete_files, local__convert_file, filesystem__write_file)를 "
     "바로 호출하세요."
 )
+EMPTY_NUDGE = "도구 결과를 바탕으로 사용자에게 한국어로 짧게 최종 응답을 작성하세요."
 CREATE_PATTERN = re.compile(r"만들|생성|새로|작성|저장")
 LOOKUP_PATTERN = re.compile(r"읽|요약|찾|내용|보여|열어|번역|분석|설명|삭제|변환")
 
@@ -932,6 +975,7 @@ class _LoopState:
     changed_paths: tuple[str, ...] = ()
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
+    empty_retries: int = 0  # times an empty final reply was sent back for a real answer
     confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
     find_tried: bool = False  # local__find_files has run in this command
     find_override: str | None = None  # what the model is told about the last search instead
@@ -1468,6 +1512,14 @@ class Planner:
                     self.emit("[PLAN] confirmation reply turned back into a tool call")
                     continue
                 if not turn.text or not turn.text.strip():
+                    if state.empty_retries == 0 and state.model_calls < self.config.max_tool_rounds:
+                        # After tool results a model sometimes answers with nothing. Once, it
+                        # is told to write the answer instead of failing the command.
+                        state.empty_retries += 1
+                        state.messages.append({"role": "system", "content": EMPTY_NUDGE})
+                        state.iteration += 1
+                        self.emit("[PLAN] empty final reply: asked for the answer once")
+                        continue
                     raise PlannerError("LLM 최종 응답이 비어 있습니다.")
                 if state.partial_read is not None:
                     notice = PARTIAL_READ_NOTICE.format(state.partial_read)
