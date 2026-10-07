@@ -16,7 +16,7 @@ from typing import Protocol
 
 from openai import AsyncOpenAI
 
-from voice_action.feedback import build_feedback
+from voice_action.feedback import LOW_RATING, build_feedback
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
@@ -86,6 +86,12 @@ class UIView(Protocol):
 
     def set_approval_enabled(self, enabled: bool) -> None: ...
 
+    def set_choices(self, labels: tuple[str, ...]) -> None: ...
+
+    def set_rating(
+        self, visible: bool, score: int | None = None, tags: tuple[str, ...] = ()
+    ) -> None: ...
+
     def close(self) -> None: ...
 
 
@@ -97,6 +103,8 @@ class UIAdapter(Protocol):
     def reject_pending(self) -> bool: ...
 
     def undo_last_write(self) -> bool: ...
+
+    def rate(self, score: int, tags: tuple[str, ...]) -> bool: ...
 
     def cancel_active(self) -> bool: ...
 
@@ -149,6 +157,10 @@ class UIPresenter:
         self.view = view
         self.state: RuntimeState | None = None
         self._dispatch_pending = False
+        self._choices: tuple[str, ...] = ()  # button labels while a question is open
+        self._rating_open = False  # the last answer can still be rated
+        self._score: int | None = None
+        self._tags: tuple[str, ...] = ()
         self.view.set_status("STARTING")
         self.view.set_tool("없음")
         self.view.set_controls(
@@ -175,6 +187,12 @@ class UIPresenter:
             outcome = message.value
             if isinstance(outcome, (Completed, Error, Clarification, ApprovalRequired, Busy)):
                 self._dispatch_pending = False
+                if not isinstance(outcome, Busy):
+                    self._choices = (
+                        outcome.shown_options if isinstance(outcome, Clarification) else ()
+                    )
+                    self._rating_open = isinstance(outcome, Completed)
+                    self._score, self._tags = None, ()
                 self.view.show_outcome(outcome)
                 self._refresh_controls()
             return
@@ -195,7 +213,7 @@ class UIPresenter:
         if message.type is UIMessageType.STOPPED and bool(message.value):
             self.view.close()
 
-    def execute(self, text: str) -> bool:
+    def execute(self, text: str, shown: str | None = None) -> bool:
         normalized = text.strip()
         if (
             not normalized
@@ -211,11 +229,49 @@ class UIPresenter:
             undo_enabled=False,
         )
         if self.adapter.submit(normalized):
-            self.view.show_request(normalized)
+            self._choices, self._rating_open = (), False
+            self.view.set_choices(())
+            self.view.set_rating(False)
+            self.view.show_request(shown or normalized)
             return True
         self._dispatch_pending = False
         self._refresh_controls()
         return False
+
+    def choose(self, number: int) -> bool:
+        """Answer the open question with its numbered button (1-based). `N번` is the form
+        both question kinds accept, so a number is never mistaken for free text."""
+        asking = self.state is RuntimeState.WAITING_USER_INPUT
+        if not asking or not 1 <= number <= len(self._choices):
+            return False
+        return self.execute(f"{number}번", shown=f"{number}. {self._choices[number - 1]}")
+
+    def rate(self, score: int) -> bool:
+        if not self._can_rate() or score not in range(1, 6):
+            return False
+        # Low scores keep the chosen causes; a better score drops them.
+        tags = self._tags if score <= LOW_RATING else ()
+        if not self.adapter.rate(score, tags):
+            return False
+        self._score, self._tags = score, tags
+        self._refresh_controls()
+        return True
+
+    def toggle_tag(self, tag: str) -> bool:
+        """Pick or drop a cause for a low rating; the rating is sent again with it."""
+        if not self._can_rate() or self._score is None or self._score > LOW_RATING:
+            return False
+        tags = tuple(t for t in self._tags if t != tag)
+        if len(tags) == len(self._tags):
+            tags = (*self._tags, tag)
+        if not self.adapter.rate(self._score, tags):
+            return False
+        self._tags = tags
+        self._refresh_controls()
+        return True
+
+    def _can_rate(self) -> bool:
+        return self._rating_open and self.state is RuntimeState.IDLE and not self._dispatch_pending
 
     def approve(self) -> bool:
         if self.state is not RuntimeState.WAITING_APPROVAL or self._dispatch_pending:
@@ -295,6 +351,9 @@ class UIPresenter:
         )
 
         self.view.set_approval_enabled(approval_visible and not self._dispatch_pending)
+        asking = self.state is RuntimeState.WAITING_USER_INPUT and not self._dispatch_pending
+        self.view.set_choices(self._choices if asking else ())
+        self.view.set_rating(self._can_rate(), self._score, self._tags)
 
 
 def _manager_factory(config) -> MCPManager:
@@ -379,6 +438,10 @@ class AsyncRuntimeWorker:
     def undo_last_write(self) -> bool:
         controller = self._controller
         return controller is not None and self._schedule(self._dispatch(controller.undo_last_write))
+
+    def rate(self, score: int, tags: tuple[str, ...]) -> bool:
+        controller = self._controller
+        return controller is not None and self._schedule(controller.rate(score, tags))
 
     def cancel_active(self) -> bool:
         if self._active_task is None:
@@ -725,7 +788,7 @@ STATUS_STYLE = {
 }
 DEFAULT_HINT = "명령을 입력하세요 · Enter로 실행"
 STATUS_HINT = {
-    "WAITING_USER_INPUT": "후보 번호를 입력하세요 · 취소를 입력하면 요청을 취소합니다",
+    "WAITING_USER_INPUT": "버튼·숫자 키로 고르거나 직접 입력하세요 · 취소 입력 시 요청 취소",
     "WAITING_APPROVAL": "대상과 미리보기를 확인한 뒤 승인 또는 거절을 선택하세요",
     "PLANNING": "취소하면 연결을 정리하고 창을 닫습니다",
     "EXECUTING_TOOL": "취소하면 연결을 정리하고 창을 닫습니다",
@@ -747,6 +810,16 @@ APPROVAL_STYLE = {
     "convert": ("⇄  승인 필요 · 파일 변환", "승인하고 변환", "Primary.TButton", False),
 }
 APPROVAL_PREVIEW_CHARS = 200
+# Shown on the 1-5 rating buttons; the tags are what the feedback loop stores.
+RATING_CAPTIONS = {1: "별로", 5: "최고"}
+RATING_TAG_LABELS = (
+    ("wrong_file", "엉뚱한 파일"),
+    ("missing_content", "내용 부족"),
+    ("wrong_content", "틀린 내용"),
+    ("too_long", "너무 김"),
+    ("too_slow", "너무 느림"),
+    ("other", "기타"),
+)
 CARD_SIDE_GAP = 96  # the empty side of a card, like a chat bubble
 
 
@@ -763,6 +836,7 @@ class TkView:
 
         self.root = root
         self._tk = tk
+        self._ttk = ttk
         self.presenter: UIPresenter | None = None
         self.closed = False
         self._approval_ready = False
@@ -817,6 +891,12 @@ class TkView:
             background=[("active", GRAY_SOFT)],
             bordercolor=[("active", GRAY_SOFT)],
             foreground=[("disabled", "#B5BAC3"), ("active", INK)],
+        )
+        style.configure(
+            "Choice.TButton", anchor="w", padding=(12, 8), font=(family, 12),
+        )
+        style.configure(
+            "Chip.TButton", padding=(8, 3), font=(family, 11),
         )
         style.configure(
             "Mic.TButton", foreground="#A0A6B1", background=CANVAS, bordercolor=BORDER,
@@ -997,6 +1077,42 @@ class TkView:
         )
         self.reject_button.pack(side="right", padx=8)
 
+        # ---- question buttons and answer rating (never visible together with approval) ----
+        self.choice_frame = tk.Frame(root, bg=CANVAS)
+        self._choices_shown: tuple[str, ...] = ()
+        self.rating_frame = tk.Frame(root, bg=CANVAS)
+        rating_row = tk.Frame(self.rating_frame, bg=CANVAS)
+        rating_row.pack(fill="x")
+        tk.Label(
+            rating_row, text="이 답변은 어땠나요?", bg=CANVAS, fg=MUTED, font=(family, 11)
+        ).pack(side="left", padx=(0, 10))
+        self.rating_buttons = {}
+        for score in range(1, 6):
+            caption = RATING_CAPTIONS.get(score)
+            button = ttk.Button(
+                rating_row, text=f"{score}" + (f" {caption}" if caption else ""),
+                style="Chip.TButton", takefocus=False, width=6 if caption else 3,
+                command=lambda score=score: self._rate(score),
+            )
+            button.pack(side="left", padx=2)
+            self.rating_buttons[score] = button
+        tk.Label(
+            rating_row, text="숫자 키 1~5", bg=CANVAS, fg=MUTED, font=(family, 11)
+        ).pack(side="left", padx=(10, 0))
+        self.tag_row = tk.Frame(self.rating_frame, bg=CANVAS)
+        tk.Label(
+            self.tag_row, text="아쉬운 점", bg=CANVAS, fg=MUTED, font=(family, 11)
+        ).pack(side="left", padx=(0, 10))
+        self.tag_buttons = {}
+        for tag, label in RATING_TAG_LABELS:
+            button = ttk.Button(
+                self.tag_row, text=label, style="Chip.TButton", takefocus=False,
+                command=lambda tag=tag: self._toggle_tag(tag),
+            )
+            button.pack(side="left", padx=2)
+            self.tag_buttons[tag] = button
+        self._rating_visible = False
+
         # ---- input bar --------------------------------------------------------------------
         rule(7)
         command_row = tk.Frame(root, bg=CANVAS, padx=20, pady=10)
@@ -1042,6 +1158,10 @@ class TkView:
             self.entry.bind("<Button-2>", self._show_entry_menu)
             self.entry.bind("<Control-Button-1>", self._show_entry_menu)
             fix_hangul_first_keystroke(self.entry)
+        # Digits answer a question or rate an answer, but only while the box is empty, so
+        # typing a number into a command is never taken.
+        self.entry.bind("<KeyPress>", self._on_digit, add="+")
+        root.bind("<KeyPress>", self._on_digit, add="+")
         root.protocol("WM_DELETE_WINDOW", self._shutdown)
         self.entry.focus_set()
 
@@ -1102,6 +1222,39 @@ class TkView:
         state = "normal" if enabled and self._approval_ready else "disabled"
         self.approve_button.configure(state=state)
         self.reject_button.configure(state=state)
+
+    def set_choices(self, labels: tuple[str, ...]) -> None:
+        if labels == self._choices_shown:
+            return
+        self._choices_shown = labels
+        for child in self.choice_frame.winfo_children():
+            child.destroy()
+        if not labels:
+            self.choice_frame.grid_remove()
+            return
+        for number, label in enumerate(labels, 1):
+            self._ttk.Button(
+                self.choice_frame, text=f"{number}   {label}", style="Choice.TButton",
+                takefocus=False, command=lambda number=number: self._choose(number),
+            ).pack(fill="x", pady=2)
+        self.choice_frame.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 10))
+
+    def set_rating(
+        self, visible: bool, score: int | None = None, tags: tuple[str, ...] = ()
+    ) -> None:
+        self._rating_visible = visible
+        if not visible:
+            self.rating_frame.grid_remove()
+            return
+        self.rating_frame.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 10))
+        for number, button in self.rating_buttons.items():
+            button.configure(style="Primary.TButton" if number == score else "Chip.TButton")
+        if score is not None and score <= LOW_RATING:
+            self.tag_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.tag_row.pack_forget()
+        for tag, button in self.tag_buttons.items():
+            button.configure(style="Primary.TButton" if tag in tags else "Chip.TButton")
 
     def _show_empty(self) -> None:
         self.output.configure(state="normal")
@@ -1258,6 +1411,32 @@ class TkView:
         finally:
             self.entry_menu.grab_release()
         return "break"
+
+    def _on_digit(self, event) -> str | None:
+        if self.presenter is None or event.char not in {"1", "2", "3", "4", "5"}:
+            return None
+        if self.entry.get():
+            return None
+        number = int(event.char)
+        if self._choices_shown:
+            acted = self.presenter.choose(number)
+        elif self._rating_visible:
+            acted = self.presenter.rate(number)
+        else:
+            return None
+        return "break" if acted else None
+
+    def _choose(self, number: int) -> None:
+        if self.presenter is not None:
+            self.presenter.choose(number)
+
+    def _rate(self, score: int) -> None:
+        if self.presenter is not None:
+            self.presenter.rate(score)
+
+    def _toggle_tag(self, tag: str) -> None:
+        if self.presenter is not None:
+            self.presenter.toggle_tag(tag)
 
     def _approve(self) -> None:
         if self.presenter is not None:

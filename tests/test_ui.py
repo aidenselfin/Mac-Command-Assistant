@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import queue
 import threading
 from contextlib import asynccontextmanager
@@ -26,6 +27,14 @@ from voice_action.ui import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _collect_tk_on_main_thread():
+    """A destroyed Tk root can sit in a reference cycle. If the cycle is collected on a worker
+    thread, Tcl aborts the whole process; collect it here, on the thread that made it."""
+    yield
+    gc.collect()
+
+
 class FakeView:
     def __init__(self):
         self.statuses = []
@@ -35,6 +44,14 @@ class FakeView:
         self.close_count = 0
         self.requests = []
         self.approval_enabled = []
+        self.choices = ()
+        self.rating = (False, None, ())
+
+    def set_choices(self, labels):
+        self.choices = labels
+
+    def set_rating(self, visible, score=None, tags=()):
+        self.rating = (visible, score, tags)
 
     def set_status(self, value):
         self.statuses.append(value)
@@ -69,6 +86,11 @@ class FakeAdapter:
         self.undos = 0
         self.cancellations = 0
         self.shutdowns = 0
+        self.ratings = []
+
+    def rate(self, score, tags):
+        self.ratings.append((score, tags))
+        return True
 
     def submit(self, text):
         self.submissions.append(text)
@@ -735,3 +757,170 @@ def test_convert_approval_panel_shows_source_output_and_preview():
     finally:
         root.update()  # flush pending Tk events before destroy (macOS Tk)
         root.destroy()
+
+
+def pick_question(presenter, kind="file_candidate"):
+    options = ("/r/a.md", "/r/b.md")
+    context = ClarificationContext("요약", kind, options, 1)
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_USER_INPUT))
+    presenter.handle(
+        UIMessage(
+            UIMessageType.OUTCOME,
+            Clarification("고르세요", options, context, ("a.md · 자료", "b.md · 자료")),
+        )
+    )
+
+
+def test_question_shows_labelled_buttons_and_a_click_answers_with_n_beon():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    pick_question(presenter)
+    assert view.choices == ("a.md · 자료", "b.md · 자료")
+    assert not presenter.choose(3) and not presenter.choose(0)
+    assert presenter.choose(2)
+    assert adapter.submissions == ["2번"]
+    assert view.requests == ["2. b.md · 자료"]
+    assert view.choices == ()  # gone as soon as the answer is on its way
+
+
+def test_choices_hide_when_the_question_is_no_longer_open():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    pick_question(presenter, "narrow_search")
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+    assert view.choices == ()
+    assert not presenter.choose(1) and adapter.submissions == []
+
+
+def test_free_text_still_answers_a_question_with_buttons():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    pick_question(presenter, "narrow_search")
+    assert presenter.execute("임시-12번")
+    assert adapter.submissions == ["임시-12번"] and view.choices == ()
+
+
+def test_completed_answer_opens_rating_and_next_command_closes_it():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    assert view.rating[0] is False
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    assert view.rating == (True, None, ())
+    assert presenter.rate(5) and adapter.ratings == [(5, ())]
+    assert view.rating == (True, 5, ())
+    assert not presenter.rate(0) and not presenter.rate(6)
+    assert presenter.execute("다음")
+    assert view.rating[0] is False and not presenter.rate(4)
+
+
+def test_errors_and_questions_cannot_be_rated():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Error("실패")))
+    assert not presenter.rate(5) and adapter.ratings == [] and view.rating[0] is False
+
+
+def test_low_score_collects_causes_and_a_better_score_drops_them():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    assert not presenter.toggle_tag("wrong_file")  # nothing rated yet
+    presenter.rate(2)
+    assert presenter.toggle_tag("wrong_file") and presenter.toggle_tag("too_slow")
+    assert presenter.toggle_tag("wrong_file")  # toggled off
+    assert adapter.ratings[-1] == (2, ("too_slow",))
+    assert view.rating == (True, 2, ("too_slow",))
+    presenter.rate(4)
+    assert adapter.ratings[-1] == (4, ()) and not presenter.toggle_tag("other")
+    presenter.rate(1)  # a new low score starts without the old causes
+    assert adapter.ratings[-1] == (1, ())
+
+
+def test_rating_hides_outside_idle():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+    assert view.rating[0] is False and not presenter.rate(5)
+
+
+def test_tk_choice_and_rating_buttons_and_digit_shortcuts():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        adapter = FakeAdapter()
+        view = ui_module.TkView(root, (Path("/tmp/work"),))
+        presenter = UIPresenter(adapter, view)
+        view.bind_presenter(presenter)
+
+        class Key:
+            def __init__(self, char):
+                self.char = char
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        assert view._on_digit(Key("3")) is None  # nothing to pick or rate yet
+
+        pick_question(presenter)
+        root.update()
+        buttons = view.choice_frame.winfo_children()
+        assert [b.cget("text") for b in buttons] == ["1   a.md · 자료", "2   b.md · 자료"]
+        view.entry.insert(0, "12")
+        assert view._on_digit(Key("1")) is None  # typing a number into a command
+        view.entry.delete(0, "end")
+        assert view._on_digit(Key("9")) is None and view._on_digit(Key("a")) is None
+        assert view._on_digit(Key("2")) == "break" and adapter.submissions == ["2번"]
+        root.update()
+        assert not view.choice_frame.winfo_ismapped()
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+        root.update()
+        assert view.rating_frame.winfo_ismapped() and not view.tag_row.winfo_ismapped()
+        assert view._on_digit(Key("2")) == "break" and adapter.ratings[-1] == (2, ())
+        root.update()
+        assert view.tag_row.winfo_ismapped()
+        view.tag_buttons["wrong_file"].invoke()
+        assert adapter.ratings[-1] == (2, ("wrong_file",))
+        view.rating_buttons[5].invoke()
+        root.update()
+        assert adapter.ratings[-1] == (5, ()) and not view.tag_row.winfo_ismapped()
+    finally:
+        root.update()
+        root.destroy()
+
+
+class AnsweringModel:
+    async def generate(self, *_args, **_kwargs):
+        from voice_action.planner import ModelTurn
+
+        return ModelTurn("답", [])
+
+
+def test_worker_records_a_rating_for_the_answered_run(config, tmp_path):
+    import sqlite3
+
+    from voice_action.feedback import FeedbackLoop
+
+    messages = queue.Queue()
+    manager, client = FakeManager(), FakeClient()
+    store = tmp_path / "ui-rating.sqlite3"
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: manager,
+        client_factory=lambda _config: client,
+        model_factory=lambda _client, _model_name: AnsweringModel(),
+        feedback_factory=lambda _config, _emit: FeedbackLoop(store),  # built on the worker thread
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+    assert worker.submit("질문")
+    done, _ = wait_for_message(messages, UIMessageType.OUTCOME)
+    assert done.value == Completed("답")
+
+    assert worker.rate(2, ("wrong_file",))
+    worker.shutdown()
+
+    rows = sqlite3.connect(store).execute(
+        "SELECT json_extract(payload, '$.score'), json_extract(payload, '$.tags') "
+        "FROM events WHERE kind = 'rating'"
+    ).fetchall()
+    assert rows == [(2, '["wrong_file"]')]
