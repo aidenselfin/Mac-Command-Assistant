@@ -3,18 +3,18 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.aidenselfin.mac-command-assistant.autosave</string>
+    <string>com.aidenselfin.voice-action-ai-test.autosave</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/juhyeon/voice-action-AI/scripts/local-git-autosave.sh</string>
+        <string>/Users/juhyeon/voice-action-AI-test/scripts/local-git-autosave.sh</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>StartInterval</key>
-    <integer>600</integer>
+    <integer>60</integer>
     <key>StandardOutPath</key>
-    <string>/private/tmp/mac-command-assistant-autosave.log</string>
+    <string>/private/tmp/voice-action-ai-test-autosave.log</string>
     <key>StandardErrorPath</key>
-    <string>/private/tmp/mac-command-assistant-autosave-error.log</string>
+    <string>/private/tmp/voice-action-ai-test-autosave-error.log</string>
 </dict>
 </plist>
