@@ -233,3 +233,42 @@ async def test_partial_read_counts_only_what_was_read_not_the_cut_off_marker(con
     )
     outcome = await planner.run("큰.txt 요약해줘")
     assert "앞부분 약 50,000자만" in outcome.text and "50,012" not in outcome.text
+
+
+async def test_files_the_user_named_in_full_are_all_targets_not_a_choice(config):
+    root = config.allowed_directories[0]
+    for name in ("a.csv", "b.csv", "c.csv", "d.csv"):
+        (root / name).write_text("x,y\n1,2\n")
+    model = scripted(find_turn("a.csv", "b.csv", "c.csv"), ModelTurn("세 파일을 처리합니다", []))
+    planner, _ = make_planner(config, model)
+
+    outcome = await planner.run("a.csv, b.csv, c.csv를 모두 json으로 바꿔줘")
+
+    assert outcome == Completed("세 파일을 처리합니다")  # no question asked
+    told = json.loads(tool_text(model, 1))
+    assert told["decision"] == "named" and len(told["paths"]) == 3
+
+
+async def test_two_files_of_one_name_in_two_folders_are_still_a_choice(config):
+    root = config.allowed_directories[0]
+    for folder in ("가", "나"):
+        (root / folder).mkdir()
+        (root / folder / "a.csv").write_text("x")
+    model = scripted(find_turn("a.csv"))
+    planner, _ = make_planner(config, model)
+    outcome = await planner.run("a.csv를 json으로 바꿔줘")
+    assert isinstance(outcome, Clarification) and len(outcome.options) == 2
+
+
+async def test_candidates_the_user_did_not_name_are_still_asked_about(config):
+    root = config.allowed_directories[0]
+    for name in ("계획-초안.md", "계획-최종.md"):
+        (root / name).write_text("x")
+    model = scripted(find_turn("계획"))
+    planner, _ = make_planner(config, model)
+    assert isinstance(await planner.run("계획 문서 읽어줘"), Clarification)
+
+
+def tool_text(model, index):
+    return [m["content"] for m in model.generate.await_args_list[index].args[0]
+            if m["role"] == "tool"][-1]

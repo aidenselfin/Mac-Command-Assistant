@@ -914,6 +914,7 @@ class _LoopState:
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
     find_tried: bool = False  # local__find_files has run in this command
+    find_override: str | None = None  # what the model is told about the last search instead
     known_target: bool = False  # an attached file or the previous command's files
 
 
@@ -1122,7 +1123,9 @@ class Planner:
                     "파일 이름이나 저장할 내용처럼 사용자만 아는 정보가 없어 진행할 수 없을 때는 "
                     "request_clarification의 kind를 free_text, options를 []로 해서 한 번 "
                     "짧게 물으세요. "
-                    "사용자 원문에 확장자까지 정확한 파일명이 있으면 검색 없이 바로 읽으세요. "
+                    "사용자 원문에 확장자까지 정확한 파일명이 있으면 검색 없이 바로 읽거나 "
+                    "삭제·변환 도구를 쓰고, 폴더와 *.txt 같은 패턴을 말했으면 검색하지 말고 "
+                    "local__delete_files의 directory·pattern을 쓰세요. "
                     "정확한 파일명이 없는 파일 요청은 사용자에게 되묻기 전에 "
                     "반드시 local__find_files를 먼저 호출하세요. 안 쓰는 선택 인자는 "
                     "생략하세요(빈 문자열 금지). keywords에는 파일명·주제어와 "
@@ -1748,6 +1751,8 @@ class Planner:
             outcome = await self._accept_find_result(state, call, result.structured)
             if outcome is not None:
                 return outcome
+            if state.find_override is not None:
+                result_text, state.find_override = state.find_override, None
         elif (
             call.name in CONTENT_READ_TOOLS
             and state.single_search_candidate is not None
@@ -1773,6 +1778,10 @@ class Planner:
         arguments = json.loads(call.arguments)
         kept = {key: arguments[key] for key in FIND_ARGUMENT_KEYS if arguments.get(key)}
         state.last_search = json.dumps(kept, ensure_ascii=False)[:500]
+        named = self._named_candidates(state, response)
+        if named is not None:
+            state.find_override = named
+            return None
         spec = clarification_spec(response)
         if spec is not None:
             count = state.prior_clarifications + 1
@@ -1812,6 +1821,25 @@ class Planner:
                 state.single_search_candidate = found
                 state.candidate_read = _acts_without_reading(state.user_text)
         return None
+
+    @staticmethod
+    def _named_candidates(state: _LoopState, response: dict) -> str | None:
+        """Several files, each named in full by the user, are the targets: there is nothing to
+        choose. (Two files of one name in different folders still make the user choose.)"""
+        if response.get("decision") != "choose" or response.get("complete") is False:
+            return None
+        paths = [item["path"] for item in response["candidates"]]
+        names = [Path(path).name for path in paths]
+        if len(set(names)) != len(names) or not all(name in state.user_text for name in names):
+            return None
+        return json.dumps(
+            {
+                "decision": "named",
+                "note": "사용자가 원문에서 이 파일들을 직접 지정했습니다. 묻지 말고 모두 처리하세요.",
+                "paths": paths,
+            },
+            ensure_ascii=False,
+        )
 
     def _approval_required(
         self, state: _LoopState, prepared: PreparedWrite
