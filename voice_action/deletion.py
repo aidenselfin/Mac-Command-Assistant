@@ -17,7 +17,7 @@ from voice_action.undo import UndoJournalError, _fsync_directory
 DELETE_TOOL = "local__delete_files"
 MAX_DELETE_FILES = 100
 MAX_DELETE_BYTES = 50 * 1024 * 1024
-DELETE_DEFINITION = ToolDefinition(
+_STRICT_DELETE = ToolDefinition(
     DELETE_TOOL,
     "사용자가 명시적으로 요청한 파일 삭제. paths로 단일/여러 절대경로를 지정하거나 "
     "directory와 pattern(예: *.txt, *)으로 해당 폴더 바로 아래 파일들을 선택한다. "
@@ -44,6 +44,22 @@ DELETE_DEFINITION = ToolDefinition(
             },
             {"required": ["directory", "pattern"], "not": {"required": ["paths"]}},
         ],
+    },
+)
+# A provider checks a generated call against the schema it was given before this code sees it,
+# and rejects the whole answer with HTTP 400 for "missing paths" when the model chose
+# directory+pattern. So the model gets a plain schema; `prepare` validates against the strict one.
+DELETE_SCHEMA = _STRICT_DELETE.schema
+DELETE_DEFINITION = ToolDefinition(
+    DELETE_TOOL,
+    _STRICT_DELETE.description,
+    {
+        "type": "object",
+        "properties": {
+            "paths": {"type": "array", "items": {"type": "string"}},
+            "directory": {"type": "string"},
+            "pattern": {"type": "string"},
+        },
     },
 )
 
@@ -128,7 +144,7 @@ class DeletionJournal:
 
     def prepare(self, arguments):
         try:
-            Draft202012Validator(DELETE_DEFINITION.schema).validate(arguments)
+            Draft202012Validator(DELETE_SCHEMA).validate(arguments)
         except ValidationError as exc:
             raise ToolRejectedError("잘못된 삭제 도구 인자입니다.") from exc
         if "paths" in arguments:

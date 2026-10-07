@@ -453,6 +453,40 @@ class OpenAICompatibleModel:
 
 MAX_CLARIFICATIONS = 2
 MAX_OPTIONS = 6
+# A yes/no question to the user. Writes, deletes and conversions are approved on the app's own
+# screen, so asking again in words only stalls the command.
+CONFIRM_QUESTION = re.compile(
+    r"하시겠(?:습니까|어요)|도 될까|괜찮(?:을까요|나요|으신가요)|맞(?:나요|을까요|습니까)"
+    r"|(?:예|아니오)\b|\by/n\b",
+    re.IGNORECASE,
+)
+# "저장할까요?" alone is a yes/no; "어떤 이름으로 저장할까요?" asks for something.
+SOFT_CONFIRM = re.compile(r"할까요|될까요")
+OPEN_QUESTION = re.compile(r"어떤|어느|무슨|무엇|뭘|어디|몇|언제|어떻게|이름|내용|경로")
+CREATE_PATTERN = re.compile(r"만들|생성|새로|작성|저장")
+LOOKUP_PATTERN = re.compile(r"읽|요약|찾|내용|보여|열어|번역|분석|설명|삭제|변환")
+
+
+def _free_text_refusal(state: "_LoopState", question: str) -> str | None:
+    """Why the app will not pass this typed question on, or None when it may be asked."""
+    if CONFIRM_QUESTION.search(question) or (
+        SOFT_CONFIRM.search(question) and not OPEN_QUESTION.search(question)
+    ):
+        return (
+            "clarification_error: 확인 질문은 필요 없습니다. 쓰기·삭제·변환은 앱이 승인 화면에서 "
+            "따로 받으니, 묻지 말고 해당 도구를 바로 호출하세요."
+        )
+    if (
+        not state.find_tried
+        and not state.known_target
+        and LOOKUP_PATTERN.search(state.user_text)
+        and not CREATE_PATTERN.search(state.user_text)
+    ):
+        return (
+            "clarification_error: 대상 파일을 모르면 사용자에게 묻기 전에 local__find_files로 "
+            "먼저 찾으세요."
+        )
+    return None
 # A request only to locate a file needs no read; anything about its content does.
 LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")
@@ -879,6 +913,8 @@ class _LoopState:
     changed_paths: tuple[str, ...] = ()
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
+    find_tried: bool = False  # local__find_files has run in this command
+    known_target: bool = False  # an attached file or the previous command's files
 
 
 class Planner:
@@ -1155,6 +1191,7 @@ class Planner:
             conditions=conditions,
             last_search=last_search,
             attachment=attachment,
+            known_target=bool(attachment or (previous is not None and previous.files)),
         )
         return await self._continue(state)
 
@@ -1287,10 +1324,18 @@ class Planner:
                 self.timing.llm_round_ms.append(
                     (time.perf_counter_ns() - llm_started) / 1_000_000
                 )
+            typed_refusal = (
+                _free_text_refusal(state, turn.clarification.question)
+                if turn.clarification is not None and turn.clarification.kind == "free_text"
+                else None
+            )
             if turn.clarification is not None:
-                if turn.clarification.kind != "free_text" and (
-                    turn.clarification.kind != "edit_criteria"
-                    or not _ambiguous_mutation(state.user_text)
+                if typed_refusal is not None or (
+                    turn.clarification.kind != "free_text"
+                    and (
+                        turn.clarification.kind != "edit_criteria"
+                        or not _ambiguous_mutation(state.user_text)
+                    )
                 ):
                     request = turn.clarification
                     state.messages.append(
@@ -1320,7 +1365,8 @@ class Planner:
                         {
                             "role": "tool",
                             "tool_call_id": request.call_id,
-                            "content": (
+                            "content": typed_refusal
+                            or (
                                 "clarification_error: 현재 요청에는 결과를 바꾸는 "
                                 "미해결 ambiguity가 없습니다. 원래 요청을 계속하세요."
                             ),
@@ -1723,6 +1769,7 @@ class Planner:
     ) -> PlannerOutcome | None:
         """One decision for every file lookup: ask the user, stop, or pin the single match."""
         state.search_completed = True
+        state.find_tried = True
         arguments = json.loads(call.arguments)
         kept = {key: arguments[key] for key in FIND_ARGUMENT_KEYS if arguments.get(key)}
         state.last_search = json.dumps(kept, ensure_ascii=False)[:500]

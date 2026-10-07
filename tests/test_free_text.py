@@ -207,3 +207,86 @@ def test_jpg_is_an_accepted_target_format_for_conversion():
     enum = CONVERT_DEFINITION.schema["properties"]["target_format"]["enum"]
     assert {"jpg", "jpeg", "tif", "htm", "markdown"} <= set(enum)
     _validate(CONVERT_DEFINITION, {"source": "/r/사진.heic", "target_format": "jpg"})
+
+
+# ---- when a typed question is not passed on -------------------------------------------------
+
+
+async def test_a_yes_no_question_is_turned_back_so_the_approval_screen_does_the_asking(config):
+    root = config.allowed_directories[0]
+    (root / "old.log").write_text("x")
+    planner, model = make(
+        config,
+        [ask("old.log 파일을 삭제하시겠습니까?"),
+         ModelTurn(None, [ToolCall("d", "local__delete_files",
+                                   json.dumps({"paths": [str(root / "old.log")]}))])],
+    )
+    outcome = await planner.run("old.log 삭제해줘")
+    assert getattr(outcome, "operation", None) == "delete"  # went to the approval, not a question
+    refusal = model.generate.await_args_list[1].args[0][-1]["content"]
+    assert "확인 질문은 필요 없습니다" in refusal
+
+
+async def test_asking_where_a_file_is_comes_after_searching_for_it(config):
+    root = config.allowed_directories[0]
+    (root / "예산안.md").write_text("x")
+    arguments = json.dumps({"keywords": ["예산안"]})
+    find = ModelTurn(None, [ToolCall("f", "local__find_files", arguments)])
+    planner, model = make(
+        config, [ask("읽을 파일의 이름을 알려 주세요."), find, ModelTurn("찾았습니다", [])]
+    )
+    outcome = await planner.run("예산안 내용 읽어줘")
+    assert "먼저 찾으세요" in model.generate.await_args_list[1].args[0][-1]["content"]
+    # Once it did search, a question is allowed if the search settled nothing.
+    assert isinstance(outcome, Error | Completed)  # the single match was never read: no claim
+
+
+@pytest.mark.parametrize("text", ["빈 md 파일 하나 만들어줘", "내말은 파일로 저장해 달라는거였어"])
+async def test_creating_or_saving_may_ask_for_a_name_straight_away(config, text):
+    planner, _ = make(config, [ask("새 파일의 이름을 알려 주세요.")])
+    outcome = await planner.run(text)
+    assert isinstance(outcome, Clarification) and outcome.context.kind == "free_text"
+
+
+async def test_a_known_target_from_the_last_command_lets_a_follow_up_ask_freely(config):
+    from voice_action.planner import Exchange
+
+    planner, _ = make(config, [ask("어떤 이름으로 저장할까요?")])  # open: asks for a name
+    previous = Exchange("a.md 읽어줘", "내용", ("/r/a.md",))
+    outcome = await planner.run("요약해줘", previous=previous)
+    assert isinstance(outcome, Clarification)
+
+
+def test_the_delete_tool_given_to_the_provider_is_plain_but_the_code_still_checks_strictly():
+    from jsonschema import Draft202012Validator, ValidationError
+
+    from voice_action.deletion import DELETE_DEFINITION, DELETE_SCHEMA
+
+    schema = DELETE_DEFINITION.schema
+    # What the provider checks has no oneOf, required or size limits to trip a generated call.
+    assert set(schema) == {"type", "properties"}
+    assert all(set(value) <= {"type", "items"} for value in schema["properties"].values())
+    for arguments in ({"directory": "/r", "pattern": "*.txt"}, {"paths": ["/r/a"]}):
+        Draft202012Validator(DELETE_SCHEMA).validate(arguments)
+    for bad in ({}, {"paths": []}, {"paths": ["/r/a"], "pattern": "*"}, {"directory": "/r"}):
+        with pytest.raises(ValidationError):
+            Draft202012Validator(DELETE_SCHEMA).validate(bad)
+
+
+@pytest.mark.parametrize(
+    "question, refused",
+    [
+        ("old.log 파일을 삭제하시겠습니까?", True),
+        ("저장할까요?", True),
+        ("변환해도 될까요?", True),
+        ("어떤 이름으로 저장할까요?", False),
+        ("저장할 내용을 알려 주세요.", False),
+    ],
+)
+def test_which_typed_questions_are_really_confirmations(question, refused):
+    from voice_action.planner import _free_text_refusal
+
+    class State:
+        find_tried, known_target, user_text = True, True, "파일 만들어줘"
+
+    assert (_free_text_refusal(State(), question) is not None) is refused
