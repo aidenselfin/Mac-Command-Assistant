@@ -548,7 +548,7 @@ async def test_read_summarize_write_bounded_loop(config):
     assert mcp.call_tool.await_count == 1
     assert model.generate.await_count == 2
     assert await planner.approve(pending.context) == Completed(
-        "summary.txt에 저장했습니다."
+        "summary.txt에 저장했습니다.", (root + "/summary.txt",)
     )
     assert [
         call.name

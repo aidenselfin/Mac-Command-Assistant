@@ -135,6 +135,10 @@ class PlannerTiming:
 @dataclass(frozen=True)
 class Completed:
     text: str
+    # Files this command created or changed, exactly as the app wrote them. Never taken from
+    # the model's wording, so a UI can show them without guessing. Not part of equality: it
+    # describes side effects, not the answer.
+    changed_paths: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -192,6 +196,7 @@ class ApprovalContext:
     partial_read: str | None = None
     conditions: tuple[str, ...] = ()
     last_search: str = ""
+    changed_paths: tuple[str, ...] = ()
 
     @property
     def digest(self) -> str:
@@ -793,6 +798,7 @@ class _LoopState:
     partial_read: str | None = None  # a file was too big to read fully
     conditions: tuple[str, ...] = ()
     last_search: str = ""
+    changed_paths: tuple[str, ...] = ()
 
 
 class Planner:
@@ -1044,6 +1050,9 @@ class Planner:
             state.next_call_index += 1
             return await self._continue(state)
         outcome = await self._accept_tool_result(state, context.pending_call, result)
+        if result.ok and context.pending_call.name in {FILESYSTEM_WRITE_TOOL, CONVERT_TOOL}:
+            written = context.prepared_write.target_path
+            state.changed_paths = tuple(dict.fromkeys((*state.changed_paths, written)))
         if context.pending_call.name == DELETE_TOOL:
             return Completed(result.text) if result.ok else Error(result.error or result.text)
         if outcome is not None:
@@ -1232,8 +1241,8 @@ class Planner:
                     raise PlannerError("LLM 최종 응답이 비어 있습니다.")
                 if state.partial_read is not None:
                     notice = PARTIAL_READ_NOTICE.format(state.partial_read)
-                    return Completed(turn.text + notice)
-                return Completed(turn.text)
+                    return Completed(turn.text + notice, state.changed_paths)
+                return Completed(turn.text, state.changed_paths)
             state.messages.append(
                 {
                     "role": "assistant",
@@ -1631,6 +1640,7 @@ class Planner:
             partial_read=state.partial_read,
             conditions=state.conditions,
             last_search=state.last_search,
+            changed_paths=state.changed_paths,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -1675,6 +1685,7 @@ class Planner:
             partial_read=context.partial_read,
             conditions=context.conditions,
             last_search=context.last_search,
+            changed_paths=context.changed_paths,
         )
 
     def _append_tool_error(
