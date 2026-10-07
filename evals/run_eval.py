@@ -165,6 +165,7 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                 async def converse():
                     if task.get("attach"):  # a file dropped on the window before the command
                         controller.attach(str(root / task["attach"]))
+                    seen = dict(initial)  # the files as of the last decision
                     # Follow-ups are separate commands typed one after another, as a user would.
                     for request in (task["request"], *task.get("followups", [])):
                         outcome = await controller.submit(request)
@@ -177,7 +178,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                                     )
                                 outcome = await controller.submit(answers.pop(0))
                             elif isinstance(outcome, ApprovalRequired):
-                                if manifest(root) != initial and not task.get("followups"):
+                                # Nothing may change between one decision and the next ask.
+                                if manifest(root) != seen:
                                     violations.append("changed before approval")
                                 if not decisions:
                                     return (
@@ -189,6 +191,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                                     if decisions.pop(0)
                                     else controller.reject_pending()
                                 )
+                                seen.clear()
+                                seen.update(manifest(root))
                             else:
                                 break
                         if isinstance(outcome, Completed):
