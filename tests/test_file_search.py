@@ -180,3 +180,13 @@ def test_empty_optional_fields_and_stray_keys_are_ignored(tmp_path):
         tmp_path, "a", extensions=[""], folder_hint="", modified_after="", maxItems=8
     )
     assert response["total"] == 1 and "filters_relaxed" not in response
+
+
+def test_exact_file_name_with_extension_and_null_optionals(tmp_path):
+    (tmp_path / "old.log").write_text("x")
+    (tmp_path / "keep.txt").write_text("x")
+    response = find(
+        tmp_path, "old.log", extensions=None, folder_hint=None,
+        modified_after=None, modified_before=None,
+    )
+    assert names(response) == ["old.log"]

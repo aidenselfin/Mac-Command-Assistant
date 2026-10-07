@@ -59,13 +59,13 @@ FIND_FILES_DEFINITION = ToolDefinition(
                 "maxItems": MAX_KEYWORDS,
             },
             "extensions": {
-                "type": "array",
+                "type": ["array", "null"],
                 "items": {"type": "string", "maxLength": 10},
                 "maxItems": 8,
             },
-            "folder_hint": {"type": "string", "maxLength": 400},
-            "modified_after": {"type": "string", "pattern": DATE_PATTERN},
-            "modified_before": {"type": "string", "pattern": DATE_PATTERN},
+            "folder_hint": {"type": ["string", "null"], "maxLength": 400},
+            "modified_after": {"type": ["string", "null"], "pattern": DATE_PATTERN},
+            "modified_before": {"type": ["string", "null"], "pattern": DATE_PATTERN},
         },
         "required": ["keywords"],
         # Stray fields a model invents are ignored, not refused by the provider.
@@ -168,7 +168,7 @@ def _folder_hint(arguments: dict, roots: tuple[Path, ...]) -> str | None:
 
 
 def _filter(entries: list[Entry], arguments: dict, roots: tuple[Path, ...]) -> list[Entry]:
-    extensions = {item.lower().lstrip(".") for item in arguments.get("extensions", []) if item}
+    extensions = {item.lower().lstrip(".") for item in arguments.get("extensions") or [] if item}
     after = _day(arguments.get("modified_after"), end=False)
     before = _day(arguments.get("modified_before"), end=True)
     hint = _folder_hint(arguments, roots)
@@ -198,7 +198,7 @@ def _search(
     """(stage, ranked matches, content scan cut short)."""
     by_name = []
     for entry in entries:
-        name = _fold(entry.path.stem)
+        name = _fold(entry.name)  # with the extension: 'old.log' must find old.log
         score = sum(bool(pattern.search(name)) for pattern in patterns)
         if score:
             by_name.append((entry, score))
