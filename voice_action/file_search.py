@@ -37,13 +37,17 @@ TEXT_EXTENSIONS = frozenset({"txt", "md", "csv", "tsv", "json", "rst", "log", "y
 SEPARATORS = re.compile(r"[-_.\s]+")
 DIGITS = re.compile(r"\d+")
 DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
+FILTER_KEYS = frozenset({"extensions", "folder_hint", "modified_after", "modified_before"})
 
 FIND_FILES_DEFINITION = ToolDefinition(
     FIND_FILES_TOOL,
     "파일명이 불분명할 때 허용된 폴더 안에서 파일을 찾는다. 파일명 → 폴더 경로 → 텍스트 내용 "
     "순서로 앱이 알아서 넓혀 가며 찾으므로 keywords에 파일명·주제어와 한/영 변형(예: 회의록, "
     "meeting, minutes)을 넣는다. 각 keyword는 대체어이며 하나만 맞아도 된다. "
-    "결과의 decision이 single이면 그 파일을 쓰고, choose·narrow는 앱이 사용자에게 직접 묻는다.",
+    "extensions·folder_hint·modified_*는 사용자가 형식·폴더·날짜를 말했을 때만 쓴다. "
+    "folder_hint는 폴더 이름이지 절대경로가 아니다. 조건 때문에 못 찾으면 앱이 조건을 풀어 "
+    "다시 찾는다. 결과의 decision이 single이면 그 파일을 쓰고, choose·narrow는 앱이 "
+    "사용자에게 직접 묻는다.",
     {
         "type": "object",
         "properties": {
@@ -58,7 +62,7 @@ FIND_FILES_DEFINITION = ToolDefinition(
                 "items": {"type": "string", "minLength": 1, "maxLength": 10},
                 "maxItems": 8,
             },
-            "folder_hint": {"type": "string", "minLength": 1, "maxLength": 100},
+            "folder_hint": {"type": "string", "minLength": 1, "maxLength": 400},
             "modified_after": {"type": "string", "pattern": DATE_PATTERN},
             "modified_before": {"type": "string", "pattern": DATE_PATTERN},
         },
@@ -148,11 +152,25 @@ def _walk(roots: tuple[Path, ...]) -> tuple[list[Entry], bool]:
     return entries, truncated
 
 
-def _filter(entries: list[Entry], arguments: dict) -> list[Entry]:
+def _folder_hint(arguments: dict, roots: tuple[Path, ...]) -> str | None:
+    """The hint as folder words. A path under an allowed root counts as its folders below."""
+    raw = arguments.get("folder_hint")
+    if raw is None:
+        return None
+    path = Path(raw)
+    if path.is_absolute():
+        for root in roots:
+            if path.is_relative_to(root):
+                raw = "/".join(path.relative_to(root).parts)
+                break
+    return _fold(raw) or None
+
+
+def _filter(entries: list[Entry], arguments: dict, roots: tuple[Path, ...]) -> list[Entry]:
     extensions = {item.lower().lstrip(".") for item in arguments.get("extensions", [])}
     after = _day(arguments.get("modified_after"), end=False)
     before = _day(arguments.get("modified_before"), end=True)
-    hint = _fold(arguments["folder_hint"]) if "folder_hint" in arguments else None
+    hint = _folder_hint(arguments, roots)
     return [
         entry
         for entry in entries
@@ -276,8 +294,14 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     if not keywords:
         raise ToolRejectedError("검색어가 비어 있습니다.")
     patterns = [_keyword_pattern(item) for item in keywords]
-    entries, walk_cut = _walk(tuple(root.resolve() for root in roots))
-    stage, matches, content_cut = _search(_filter(entries, arguments), patterns)
+    roots = tuple(root.resolve() for root in roots)
+    entries, walk_cut = _walk(roots)
+    stage, matches, content_cut = _search(_filter(entries, arguments, roots), patterns)
+    relaxed = False
+    if stage == "none" and FILTER_KEYS & arguments.keys():
+        # The model guesses filters; a wrong one must not hide a file the words do match.
+        stage, matches, content_cut = _search(entries, patterns)
+        relaxed = stage != "none"
     # Best match first; newer files break ties.
     ranked = [entry for entry, _ in sorted(matches, key=lambda m: (-m[1], -m[0].mtime, m[0].name))]
     count = len(ranked)
@@ -291,6 +315,8 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     }
     if response["truncated"]:
         response["note"] = "폴더가 크거나 깊어 일부만 검사했습니다. 결과가 전부가 아닐 수 있습니다."
+    if relaxed:
+        response["filters_relaxed"] = True
     if decision in {"single", "choose"}:
         response["candidates"] = [
             {"path": str(entry.path), "label": _describe(entry)} for entry in ranked

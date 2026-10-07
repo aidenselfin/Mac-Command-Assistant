@@ -163,3 +163,12 @@ async def test_big_file_answer_says_it_was_only_partly_read(config):
     planner, _ = make_planner(config, model)
     planner._gateway.call_tool.return_value = ToolResult(True, "짧음")
     assert await planner.run("큰파일.txt 요약해줘") == Completed("요약")
+
+
+async def test_raw_search_is_hidden_except_for_the_meeting_note_flow(config):
+    for text, expected in (("예산안 알려줘", False), ("회의록 요약해줘", True)):
+        model = scripted(ModelTurn("끝", []))
+        planner, _ = make_planner(config, model)
+        await planner.run(text)
+        offered = {tool.name for tool in model.generate.await_args.args[1]}
+        assert ("filesystem__search_files" in offered) is expected

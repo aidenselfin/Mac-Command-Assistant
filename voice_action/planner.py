@@ -885,6 +885,10 @@ class Planner:
             tools.append(READ_DOCUMENT_DEFINITION)
             if self.config.allowed_directories:
                 tools.append(FIND_FILES_DEFINITION)
+                # The raw search lists every match to the model, which then reads them all
+                # instead of asking. Only the meeting-note flow still needs it.
+                if not _requires_candidate_search(user_text):
+                    tools = [tool for tool in tools if tool.name != FILESYSTEM_SEARCH_TOOL]
             if CONVERSION_REQUEST_PATTERN.search(user_text):
                 tools.append(CONVERT_DEFINITION)
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
@@ -918,8 +922,10 @@ class Planner:
                     "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 "
                     "request_clarification contract를 사용하세요. "
                     "복잡하다는 이유로 질문하지 마세요. "
-                    "파일명이 불분명하면 local__find_files의 keywords에 파일명·주제어와 "
-                    "한/영 변형을 넣어 먼저 찾으세요. 앱이 파일명, 폴더, 내용 순으로 넓혀 "
+                    "확장자까지 정확한 파일명이 없는 파일 요청은 사용자에게 되묻기 전에 "
+                    "반드시 local__find_files를 먼저 호출하세요. keywords에는 파일명·주제어와 "
+                    "한/영 변형을 넣고 '파일' 같은 일반 단어는 빼세요. "
+                    "앱이 파일명, 폴더, 내용 순으로 넓혀 "
                     "찾고 후보가 여럿이면 사용자에게 직접 묻습니다. decision이 single이면 "
                     "그 파일로 진행하고, none이면 찾지 못했다고 알리세요. "
                     "후보가 하나면 자동 진행하고, "

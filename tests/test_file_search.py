@@ -157,3 +157,19 @@ def test_number_in_keyword_does_not_match_longer_number(tmp_path):
 def test_invalid_arguments_are_rejected(tmp_path, arguments):
     with pytest.raises(ToolRejectedError):
         find_files(arguments, (tmp_path,))
+
+
+def test_absolute_root_path_as_folder_hint_means_no_folder_filter(tmp_path):
+    (tmp_path / "자료").mkdir()
+    (tmp_path / "자료" / "임시-1.txt").write_text("x")
+    root = tmp_path.resolve()
+    assert find(root, "임시", folder_hint=str(root))["total"] == 1
+    assert find(root, "임시", folder_hint=str(root / "자료"))["total"] == 1
+
+
+def test_wrong_filters_are_relaxed_instead_of_hiding_the_file(tmp_path):
+    (tmp_path / "임시-1.txt").write_text("x")
+    response = find(tmp_path, "임시", extensions=["tmp"], folder_hint="없는폴더")
+    assert response["total"] == 1 and response["filters_relaxed"] is True
+    assert "filters_relaxed" not in find(tmp_path, "임시", extensions=["txt"])
+    assert find(tmp_path, "존재안함", extensions=["tmp"])["decision"] == "none"
