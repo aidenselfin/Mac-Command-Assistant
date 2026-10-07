@@ -681,6 +681,11 @@ def _acts_without_reading(text: str) -> bool:
     return bool(_destructive_request(text) or CONVERSION_REQUEST_PATTERN.search(text))
 
 
+def _is_pattern_delete(text: str) -> bool:
+    """A delete named by a glob, such as `삭제연습 폴더의 *.txt 파일을 모두 삭제해줘`."""
+    return bool(_destructive_request(text) and re.search(r"\*", text))
+
+
 def _requires_candidate_search(text: str) -> bool:
     lowered = text.casefold()
     has_specific_filename = re.search(
@@ -1877,6 +1882,17 @@ class Planner:
         named = self._named_candidates(state, response)
         if named is not None:
             state.find_override = named
+            return None
+        if _is_pattern_delete(state.user_text) and response.get("decision") in {"choose", "narrow"}:
+            # "*.txt 파일을 모두 삭제"는 고를 파일이 아니라 폴더와 패턴으로 정하는 요청이다.
+            state.find_override = json.dumps(
+                {
+                    "decision": "pattern",
+                    "note": "폴더와 패턴으로 정하는 삭제입니다. 파일을 고르게 하지 말고 "
+                    "local__delete_files의 directory와 pattern으로 바로 요청하세요.",
+                },
+                ensure_ascii=False,
+            )
             return None
         spec = clarification_spec(response)
         if spec is not None:

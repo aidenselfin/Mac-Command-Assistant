@@ -272,3 +272,27 @@ async def test_candidates_the_user_did_not_name_are_still_asked_about(config):
 def tool_text(model, index):
     return [m["content"] for m in model.generate.await_args_list[index].args[0]
             if m["role"] == "tool"][-1]
+
+
+async def test_a_delete_named_by_a_pattern_does_not_ask_which_file(config):
+    root = config.allowed_directories[0]
+    (root / "삭제연습").mkdir()
+    for name in ("임시-1.txt", "임시-2.txt"):
+        (root / "삭제연습" / name).write_text("x")
+    model = scripted(find_turn("삭제연습", "txt"), ModelTurn("삭제를 준비합니다", []))
+    planner, _ = make_planner(config, model)
+
+    outcome = await planner.run("삭제연습 폴더의 *.txt 파일을 모두 삭제해줘")
+
+    assert outcome == Completed("삭제를 준비합니다")  # no "which file?" question
+    told = json.loads(tool_text(model, 1))
+    assert told["decision"] == "pattern" and "directory와 pattern" in told["note"]
+
+
+async def test_a_plain_search_with_a_star_in_it_is_not_taken_for_a_pattern_delete(config):
+    root = config.allowed_directories[0]
+    for name in ("계획-초안.md", "계획-최종.md"):
+        (root / name).write_text("x")
+    model = scripted(find_turn("계획"))
+    planner, _ = make_planner(config, model)
+    assert isinstance(await planner.run("계획* 문서 읽어줘"), Clarification)  # not a delete
