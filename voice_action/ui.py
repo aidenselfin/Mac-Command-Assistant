@@ -16,6 +16,7 @@ from typing import Protocol
 
 from openai import AsyncOpenAI
 
+from voice_action.attachment import AttachmentError
 from voice_action.feedback import LOW_RATING, build_feedback
 from voice_action.finder import reveal
 from voice_action.macos_client import MacOSAXClient
@@ -56,6 +57,7 @@ class UIMessageType(Enum):
     OUTCOME = auto()
     FAILURE = auto()
     NOTICE = auto()
+    ATTACHMENT = auto()  # value: (path or None, refusal text or None)
     STOPPED = auto()
 
 
@@ -91,6 +93,8 @@ class UIView(Protocol):
 
     def reveal_files(self, paths: tuple[str, ...]) -> None: ...
 
+    def set_attachment(self, path: str | None) -> None: ...
+
     def set_rating(
         self, visible: bool, score: int | None = None, tags: tuple[str, ...] = ()
     ) -> None: ...
@@ -110,6 +114,10 @@ class UIAdapter(Protocol):
     def rate(self, score: int, tags: tuple[str, ...]) -> bool: ...
 
     def can_rate(self) -> bool: ...
+
+    def attach(self, path: str) -> bool: ...
+
+    def detach(self) -> None: ...
 
     def cancel_active(self) -> bool: ...
 
@@ -166,6 +174,7 @@ class UIPresenter:
         self._rating_open = False  # the last answer can still be rated
         self._score: int | None = None
         self._tags: tuple[str, ...] = ()
+        self._attached: str | None = None  # a dropped file waiting for the next command
         self.view.set_status("STARTING")
         self.view.set_tool("없음")
         self.view.set_controls(
@@ -217,6 +226,14 @@ class UIPresenter:
         if message.type is UIMessageType.NOTICE:
             self.view.show_output(str(message.value))
             return
+        if message.type is UIMessageType.ATTACHMENT:
+            path, refusal = message.value
+            if path is not None:
+                self._attached = path
+                self.view.set_attachment(path)
+            if refusal:
+                self.view.show_output(refusal)
+            return
         if message.type is UIMessageType.STOPPED and bool(message.value):
             self.view.close()
 
@@ -239,11 +256,29 @@ class UIPresenter:
             self._choices, self._rating_open = (), False
             self.view.set_choices(())
             self.view.set_rating(False)
+            if self.state is RuntimeState.IDLE and self._attached is not None:
+                self._attached = None  # it went with this command
+                self.view.set_attachment(None)
             self.view.show_request(shown or normalized)
             return True
         self._dispatch_pending = False
         self._refresh_controls()
         return False
+
+    def attach(self, paths: tuple[str, ...]) -> bool:
+        """A file dropped on the window. One file, only while idle; the app checks the path."""
+        if len(paths) != 1:
+            self.view.show_output("파일은 하나만 놓을 수 있어요. 요청을 거부했습니다.")
+            return False
+        if self.state is not RuntimeState.IDLE or self._dispatch_pending:
+            self.view.show_output("작업이 끝난 뒤에 파일을 놓아 주세요.")
+            return False
+        return self.adapter.attach(paths[0])
+
+    def detach(self) -> None:
+        self.adapter.detach()
+        self._attached = None
+        self.view.set_attachment(None)
 
     def choose(self, number: int) -> bool:
         """Answer the open question with its numbered button (1-based). `N번` is the form
@@ -449,6 +484,22 @@ class AsyncRuntimeWorker:
     def can_rate(self) -> bool:
         controller = self._controller
         return controller is not None and controller.ratable
+
+    def attach(self, path: str) -> bool:
+        controller = self._controller
+        return controller is not None and self._schedule(self._attach(controller, path))
+
+    def detach(self) -> None:
+        if self._controller is not None:
+            self._controller.detach()
+
+    async def _attach(self, controller, path: str) -> None:
+        try:
+            stored = controller.attach(path)
+        except AttachmentError as exc:
+            self.messages.put(UIMessage(UIMessageType.ATTACHMENT, (None, str(exc))))
+        else:
+            self.messages.put(UIMessage(UIMessageType.ATTACHMENT, (stored, None)))
 
     def rate(self, score: int, tags: tuple[str, ...]) -> bool:
         controller = self._controller
@@ -805,6 +856,7 @@ STATUS_STYLE = {
     "TRANSCRIBING": ("음성 변환 중", BLUE, BLUE_SOFT, BLUE),
 }
 DEFAULT_HINT = "명령을 입력하세요 · Enter로 실행"
+ATTACH_HINT = "📎  Finder에서 파일 하나를 여기로 끌어다 놓으면 다음 명령의 대상이 돼요"
 STATUS_HINT = {
     "WAITING_USER_INPUT": "버튼·숫자 키로 고르거나 직접 입력하세요 · 취소 입력 시 요청 취소",
     "WAITING_APPROVAL": "대상과 미리보기를 확인한 뒤 승인 또는 거절을 선택하세요",
@@ -848,7 +900,9 @@ class TkView:
     tinted conversation cards, tool line, approval panel, input bar and footer.
     """
 
-    def __init__(self, root, folders: tuple[Path, ...] = (), *, reveal: bool = False):
+    def __init__(
+        self, root, folders: tuple[Path, ...] = (), *, reveal: bool = False, drop: bool = False
+    ):
         import tkinter as tk
         from tkinter import font, ttk
 
@@ -1132,10 +1186,23 @@ class TkView:
             self.tag_buttons[tag] = button
         self._rating_visible = False
 
-        # ---- input bar --------------------------------------------------------------------
+        # ---- attached file: where a file from Finder is dropped ------------------------
         rule(7)
+        self.attach_frame = tk.Frame(root, bg=GRAY_SOFT, padx=20, pady=6)
+        self.attach_frame.grid(row=8, column=0, sticky="ew")
+        self.attach_label = tk.Label(
+            self.attach_frame, text=ATTACH_HINT, bg=GRAY_SOFT, fg=MUTED, font=(family, 11),
+            anchor="w",
+        )
+        self.attach_label.pack(side="left", fill="x", expand=True)
+        self.attach_clear = ttk.Button(
+            self.attach_frame, text="✕ 해제", style="Ghost.TButton", takefocus=False,
+            command=self._detach,
+        )
+
+        # ---- input bar --------------------------------------------------------------------
         command_row = tk.Frame(root, bg=CANVAS, padx=20, pady=10)
-        command_row.grid(row=8, column=0, sticky="ew")
+        command_row.grid(row=9, column=0, sticky="ew")
         ttk.Button(
             command_row, text="🎙", style="Mic.TButton", state="disabled", takefocus=False,
             width=3,
@@ -1153,7 +1220,7 @@ class TkView:
 
         # ---- footer: hint and undo ----------------------------------------------------------
         footer = tk.Frame(root, bg=CANVAS, padx=20)
-        footer.grid(row=9, column=0, sticky="ew", pady=(0, 10))
+        footer.grid(row=10, column=0, sticky="ew", pady=(0, 10))
         self.input_hint = tk.StringVar(value=DEFAULT_HINT)
         self.hint_label = tk.Label(
             footer, textvariable=self.input_hint, bg=CANVAS, fg=MUTED, font=(family, 11),
@@ -1183,6 +1250,9 @@ class TkView:
         root.bind("<KeyPress>", self._on_digit, add="+")
         root.protocol("WM_DELETE_WINDOW", self._shutdown)
         self.entry.focus_set()
+        self.drop_enabled = False
+        if drop:
+            self._enable_drop()
 
     def bind_presenter(self, presenter: UIPresenter) -> None:
         self.presenter = presenter
@@ -1241,6 +1311,41 @@ class TkView:
         state = "normal" if enabled and self._approval_ready else "disabled"
         self.approve_button.configure(state=state)
         self.reject_button.configure(state=state)
+
+    def _enable_drop(self) -> None:
+        """Accept files dragged from Finder on the whole window (needs a TkinterDnD root)."""
+        try:
+            from tkinterdnd2 import DND_FILES
+
+            for widget in (self.root, self.output, self.attach_frame, self.attach_label):
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind("<<Drop>>", self._dropped)
+            self.drop_enabled = True
+        except Exception:  # noqa: BLE001 - no drop support is not a reason to stop the app
+            self.drop_enabled = False
+
+    def _dropped(self, event) -> str:
+        paths = tuple(self.root.tk.splitlist(event.data))
+        if self.presenter is not None:
+            self.presenter.attach(paths)
+        return event.action
+
+    def set_attachment(self, path: str | None) -> None:
+        if path is None:
+            self.attach_label.configure(text=ATTACH_HINT, bg=GRAY_SOFT, fg=MUTED)
+            self.attach_frame.configure(bg=GRAY_SOFT)
+            self.attach_clear.pack_forget()
+            return
+        name = unicodedata.normalize("NFC", Path(path).name)
+        self.attach_label.configure(
+            text=f"📎  {name}  ·  다음 명령의 대상이에요", bg=BLUE_SOFT, fg=INK
+        )
+        self.attach_frame.configure(bg=BLUE_SOFT)
+        self.attach_clear.pack(side="right")
+
+    def _detach(self) -> None:
+        if self.presenter is not None:
+            self.presenter.detach()
 
     def reveal_files(self, paths: tuple[str, ...]) -> None:
         """Show what a command changed in Finder. Runs on the Tk thread, where AppKit belongs."""
@@ -1487,10 +1592,15 @@ def run_ui(config) -> None:
     """Run the Tk main loop and a single long-lived asyncio worker loop."""
     import tkinter as tk
 
-    root = tk.Tk()
+    try:  # drag and drop from Finder is an extra; without it the window works as before
+        from tkinterdnd2 import TkinterDnD
+
+        root, drop = TkinterDnD.Tk(), True
+    except Exception:  # noqa: BLE001
+        root, drop = tk.Tk(), False
     messages: queue.Queue[UIMessage] = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
-    view = TkView(root, config.allowed_directories, reveal=config.finder_reveal)
+    view = TkView(root, config.allowed_directories, reveal=config.finder_reveal, drop=drop)
     presenter = UIPresenter(worker, view)
     view.bind_presenter(presenter)
 

@@ -47,9 +47,13 @@ class FakeView:
         self.choices = ()
         self.rating = (False, None, ())
         self.revealed = []
+        self.attachment = None
 
     def reveal_files(self, paths):
         self.revealed.append(paths)
+
+    def set_attachment(self, path):
+        self.attachment = path
 
     def set_choices(self, labels):
         self.choices = labels
@@ -92,6 +96,14 @@ class FakeAdapter:
         self.shutdowns = 0
         self.ratings = []
         self.rateable = True
+        self.attached, self.detached = [], 0
+
+    def attach(self, path):
+        self.attached.append(path)
+        return True
+
+    def detach(self):
+        self.detached += 1
 
     def can_rate(self):
         return self.rateable
@@ -968,3 +980,101 @@ def test_only_a_completed_result_with_changed_files_reveals_them():
     assert view.revealed == []  # nothing changed, or it failed
     presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("저장", ("/r/한글 파일.txt",))))
     assert view.revealed == [("/r/한글 파일.txt",)]
+
+
+def test_presenter_takes_one_file_only_while_idle_and_shows_refusals():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    assert not presenter.attach(("/r/a.md", "/r/b.md"))
+    assert "하나만" in view.outputs[-1] and adapter.attached == []
+    assert not presenter.attach(())
+    assert presenter.attach(("/r/한글 이름.md",)) and adapter.attached == ["/r/한글 이름.md"]
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+    assert not presenter.attach(("/r/c.md",)) and "끝난 뒤" in view.outputs[-1]
+
+
+def test_attachment_chip_follows_the_worker_and_goes_away_with_the_command():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, ("/r/a.md", None)))
+    assert view.attachment == "/r/a.md"
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, (None, "허용 폴더 밖이에요.")))
+    assert view.attachment == "/r/a.md" and view.outputs[-1] == "허용 폴더 밖이에요."
+    assert presenter.execute("이 파일 요약해줘")
+    assert view.attachment is None  # consumed by that one command
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, ("/r/b.md", None)))
+    presenter.detach()
+    assert view.attachment is None and adapter.detached == 1
+
+
+def test_an_answer_to_a_question_keeps_the_attachment():
+    presenter, _, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, ("/r/a.md", None)))
+    pick_question(presenter)
+    assert presenter.execute("1번")
+    assert view.attachment == "/r/a.md"  # only a new command takes it
+
+
+def test_worker_attach_checks_the_path_on_the_worker_and_reports_back(config):
+    root = config.allowed_directories[0]
+    (root / "내 파일.md").write_text("x")
+    messages = queue.Queue()
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: FakeManager(),
+        client_factory=lambda _config: FakeClient(),
+        model_factory=lambda _client, _model_name: object(),
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+
+    assert worker.attach(str(root / "내 파일.md"))
+    accepted, _ = wait_for_message(messages, UIMessageType.ATTACHMENT)
+    assert accepted.value == (str(root / "내 파일.md"), None)
+
+    assert worker.attach(str(root.parent / "밖.txt"))
+    refused, _ = wait_for_message(messages, UIMessageType.ATTACHMENT)
+    worker.shutdown()
+    assert refused.value[0] is None and "요청을 거부" in refused.value[1]
+
+
+def test_tk_drop_parses_finder_paths_and_the_chip_shows_the_name():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        from tkinterdnd2 import TkinterDnD
+
+        root = TkinterDnD.Tk()
+    except (ImportError, tk.TclError) as exc:
+        pytest.skip(f"drag and drop unavailable: {exc}")
+    try:
+        adapter = FakeAdapter()
+        view = ui_module.TkView(root, (Path("/tmp/work"),), drop=True)
+        presenter = UIPresenter(adapter, view)
+        view.bind_presenter(presenter)
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        assert view.drop_enabled
+
+        class Drop:
+            action = "copy"
+
+            def __init__(self, data):
+                self.data = data
+
+        # Tk hands a drop over as a Tcl list: braces around a name with spaces.
+        assert view._dropped(Drop("{/tmp/work/한글 파일 (1).md}")) == "copy"
+        assert adapter.attached == ["/tmp/work/한글 파일 (1).md"]
+        view._dropped(Drop("{/tmp/work/a b.md} /tmp/work/c.md"))
+        assert len(adapter.attached) == 1  # two files: refused before the app is asked
+        assert "하나만" in view.output.get("1.0", "end")
+
+        view.set_attachment("/tmp/work/한글 파일 (1).md")
+        root.update()
+        assert "한글 파일 (1).md" in view.attach_label.cget("text")
+        assert view.attach_clear.winfo_ismapped()
+        view.set_attachment(None)
+        root.update()
+        assert not view.attach_clear.winfo_ismapped()
+    finally:
+        root.update()
+        root.destroy()
