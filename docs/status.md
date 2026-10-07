@@ -8,6 +8,11 @@
 https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
 
 # 최근 검증
+- 2026-10-07 Codex 코드 리뷰 (`9070351` 기준): 재현 결함 F1~F7 확인.
+  관련 테스트 125 passed·6 skipped, 비통합 전체 450 passed·7 skipped·35 deselected·2 failed.
+  실패한 HEIC 변환 2건은 샌드박스 밖 재실행에서 2 passed. ruff 통과.
+  [리뷰·Claude Code 전달 지시](reviews/2026-10-07-search-rating-review.md).
+  운영 코드 변경 없음, 통합 전체·live·사람 GUI QA 미실행.
 - 2026-10-07, `507f027` 기준 실제 모델 Groq `openai/gpt-oss-120b`, 호출 한도 10회, 새 기준선:
   `uv run --locked python evals/run_eval.py --live --repeat 3 2>/dev/null`.
   21과제 × 3회: **60/63 통과**, **INVALID 0**, 모델 호출 153회(평균 2.4). 결과 `evals/results/20261007-174217.json`(git 제외).
@@ -29,6 +34,8 @@ https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
   이전 `--lesson` 주입 검증 결과도 유지된다.
 
 # 다음 작업
+- 리뷰의 P1부터 수정: 검색 경계, 날짜·명시 조건, 회의록 후보 경로, single 후보 고정,
+  평가 태그 변경 시 최신 점수 집계. 상세 재현·회귀 조건은 위 리뷰 참고.
 - 새 기능(검색·평가·R7~R9)은 구현됨. `--ui`에서 후보 버튼·1~5 평가·원인 칩을 직접 눌러 확인하고 필요하면 UI를 다듬는다.
 - 모델이 `request_clarification`을 `options: []`로 부르면 공급자가 400으로 거부해 명령이 끝난다(기존 스키마 minItems 1).
   못 찾은 파일을 되묻는 경우에 나타난다. 옵션 없는 자유 질문을 허용할지 결정한다.
@@ -43,6 +50,8 @@ https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
 - 다른 남은 문제: `docs/reviews/2026-10-04-fixes.md`, `docs/reviews/2026-10-04-recent-changes-fixes.md`.
 
 # 인수인계
+- `docs/reviews/reproduce_2026_10_07_search_rating.py`는 결함 존재를 단언하는 증거다.
+  현재 F1~F7 확인 후 종료 코드 0이며 수정 후 실패하는 것이 정상이다. 올바른 기대값은 tests에 추가한다.
 - 새 검색 도구 `local__find_files`(voice_action/file_search.py). 설계·결정은 `docs/decisions.md` 2026-10-07 항목과 README.
   공급자(Groq)는 도구 스키마를 호출 전에 검증한다. 모델이 빈 문자열·null·남는 필드를 채우므로 선택 인자 스키마를 느슨하게 두었다.
 - 피드백 DB(`.voice-action/feedback.sqlite3`)에 수동 확인 중 생긴 R3·R8 분석 결과와 후보 lesson이 있을 수 있다. 채택하지 않았다.
