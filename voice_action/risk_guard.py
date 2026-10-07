@@ -12,9 +12,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
-from voice_action import conversion
+from voice_action import conversion, file_search
 from voice_action.conversion import CONVERT_TOOL, READ_DOCUMENT_TOOL
 from voice_action.deletion import DELETE_TOOL
+from voice_action.file_search import FIND_FILES_TOOL
 from voice_action.mcp_client import ToolRejectedError, ToolResult
 from voice_action.undo import (
     UndoJournal,
@@ -33,6 +34,7 @@ READ_ONLY_TOOLS = frozenset(
         "web__browser_snapshot",
         "macos__get_active_app",
         READ_DOCUMENT_TOOL,
+        FIND_FILES_TOOL,
     }
 )
 WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL, CONVERT_TOOL})
@@ -147,6 +149,8 @@ class RiskGuard:
             return await asyncio.to_thread(
                 conversion.read_document, arguments, self._roots, self._read_limit
             )
+        if name == FIND_FILES_TOOL:
+            return await asyncio.to_thread(file_search.find_files, arguments, self._roots)
         return await self._gateway.call_tool(name, arguments)
 
     async def prepare_write(self, name: str, arguments: dict) -> PreparedWrite:

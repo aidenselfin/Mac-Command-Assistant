@@ -23,6 +23,11 @@ from voice_action.conversion import (
     READ_DOCUMENT_TOOL,
 )
 from voice_action.deletion import DELETE_DEFINITION, DELETE_TOOL
+from voice_action.file_search import (
+    FIND_FILES_DEFINITION,
+    FIND_FILES_TOOL,
+    clarification_spec,
+)
 from voice_action.mcp_client import (
     MCPError,
     ToolDefinition,
@@ -212,6 +217,11 @@ class Clarification:
     question: str
     options: tuple[str, ...]
     context: ClarificationContext
+    labels: tuple[str, ...] = ()  # display text per option; the option itself stays the value
+
+    @property
+    def shown_options(self) -> tuple[str, ...]:
+        return self.labels or self.options
 
 
 PlannerOutcome = Completed | Clarification | ApprovalRequired | Error
@@ -826,14 +836,24 @@ class Planner:
 
     async def resume(self, context: ClarificationContext, selection: str) -> PlannerOutcome:
         """Resume the original task with one validated user selection."""
-        if selection not in context.options:
+        narrowing = context.kind == "narrow_search"
+        # A narrowing answer may be free text; every other kind must be one of the options.
+        if selection not in context.options and not (narrowing and selection.strip()):
             return Error("선택지가 원래 clarification context와 일치하지 않습니다.")
-        resolution = (
-            f"사용자가 선택한 파일: {selection}"
-            if context.kind == "file_candidate"
-            else f"사용자가 선택한 편집 기준: {selection}"
+        is_file = context.kind == "file_candidate" or (
+            narrowing and selection in context.options and Path(selection).is_absolute()
         )
-        if context.kind == "file_candidate":
+        if is_file:
+            resolution = f"사용자가 선택한 파일: {selection}"
+        elif narrowing:
+            resolution = (
+                f"사용자가 좁힌 조건: {selection[:200]}. 이 단서로 local__find_files를 다시 "
+                "호출하세요(폴더는 folder_hint, 형식은 extensions, 날짜는 modified_after/"
+                "modified_before, 번호나 이름은 keywords)."
+            )
+        else:
+            resolution = f"사용자가 선택한 편집 기준: {selection}"
+        if is_file:
             try:
                 await self._gateway.validate_result_path(selection)
             except (MCPError, OSError):
@@ -842,7 +862,7 @@ class Planner:
             context.original_request,
             resolution=resolution,
             prior_clarifications=context.clarification_count,
-            selected_file=selection if context.kind == "file_candidate" else None,
+            selected_file=selection if is_file else None,
         )
 
     async def _run_loop(
@@ -859,6 +879,8 @@ class Planner:
             tools.append(DELETE_DEFINITION)
         if not USER_URL_PATTERN.search(user_text):  # web requests keep their own tool set
             tools.append(READ_DOCUMENT_DEFINITION)
+            if self.config.allowed_directories:
+                tools.append(FIND_FILES_DEFINITION)
             if CONVERSION_REQUEST_PATTERN.search(user_text):
                 tools.append(CONVERT_DEFINITION)
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
@@ -892,7 +914,10 @@ class Planner:
                     "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 "
                     "request_clarification contract를 사용하세요. "
                     "복잡하다는 이유로 질문하지 마세요. "
-                    "모호한 파일은 filesystem__search_files로 먼저 탐색하세요. "
+                    "파일명이 불분명하면 local__find_files의 keywords에 파일명·주제어와 "
+                    "한/영 변형을 넣어 먼저 찾으세요. 앱이 파일명, 폴더, 내용 순으로 넓혀 "
+                    "찾고 후보가 여럿이면 사용자에게 직접 묻습니다. decision이 single이면 "
+                    "그 파일로 진행하고, none이면 찾지 못했다고 알리세요. "
                     "후보가 하나면 자동 진행하고, "
                     "여러 개면 파일을 읽거나 선택하지 마세요. "
                     "파일명이 특정되지 않은 회의록 요약은 모든 allowed root를 순서대로 "
@@ -925,7 +950,11 @@ class Planner:
             read_only_candidate_request=read_only_candidate_request,
             search_required=read_only_candidate_request and selected_file is None,
             search_completed=selected_file is not None,
-            candidate_read=False,
+            # A selected file is read first only when the task is to read it.
+            candidate_read=selected_file is not None
+            and bool(
+                _destructive_request(user_text) or CONVERSION_REQUEST_PATTERN.search(user_text)
+            ),
             candidate_search_roots=tuple(self.config.allowed_directories),
             candidate_search_index=0,
             candidate_search_candidates=[],
@@ -1338,6 +1367,8 @@ class Planner:
             return self._candidate_search_arguments_error(state, arguments)
         if state.read_only_candidate_request and call.name == FILESYSTEM_SEARCH_TOOL:
             return "회의록 후보 탐색 범위가 이미 완료되었습니다."
+        if call.name == FIND_FILES_TOOL and state.single_search_candidate is not None:
+            return "사용자가 이미 파일을 선택했습니다. 선택한 파일로 진행하세요."
         if state.read_only_candidate_request and call.name == FILESYSTEM_WRITE_TOOL:
             return "이 요청은 read-only 요약이므로 파일을 쓸 수 없습니다."
         if (
@@ -1489,6 +1520,19 @@ class Planner:
             self.emit(
                 f"[TOOL-OK] iteration={state.iteration} name={call.name}\n{result.text}"
             )
+        if call.name == FIND_FILES_TOOL and result.structured is not None:
+            spec = clarification_spec(result.structured)
+            if spec is not None:
+                count = state.prior_clarifications + 1
+                if count > MAX_CLARIFICATIONS:
+                    return Error("clarification 최대 횟수를 초과해 파일을 변경하지 않았습니다.")
+                question, kind, options, labels = spec
+                return Clarification(
+                    question,
+                    options,
+                    ClarificationContext(state.user_text, kind, options, count),
+                    labels,
+                )
         if (
             call.name == FILESYSTEM_SEARCH_TOOL
             and state.search_required

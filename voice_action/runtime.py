@@ -242,8 +242,13 @@ class RuntimeController:
         if normalized.casefold() in {"취소", "cancel", "c"}:
             return self._finish(Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."))
 
-        match = re.fullmatch(r"(\d+)\s*번?", normalized)
+        narrowing = pending.context.kind == "narrow_search"
+        # Narrowing takes free text, so there an option is picked only as "N번".
+        match = re.fullmatch(r"(\d+)\s*번" if narrowing else r"(\d+)\s*번?", normalized)
         index = int(match.group(1)) - 1 if match else -1
+        if narrowing and not 0 <= index < len(pending.options) and normalized:
+            self._transition(RuntimeState.RESUMING_PLAN, "clarification_narrowed")
+            return self._finish(await self.planner.resume(pending.context, normalized))
         if not 0 <= index < len(pending.options):
             count = pending.context.clarification_count + 1
             if count > MAX_CLARIFICATIONS:
@@ -255,6 +260,7 @@ class RuntimeController:
                 "올바른 선택지 번호를 입력하거나 취소를 입력해 주세요.",
                 pending.options,
                 context,
+                pending.labels,
             )
             self._pending = retry
             return retry

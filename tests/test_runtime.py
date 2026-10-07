@@ -460,3 +460,17 @@ def test_voice_compatibility_states_are_declared():
         "DONE",
         "ERROR",
     }
+
+
+async def test_narrow_search_takes_free_text_and_n_beon_picks_an_option():
+    options = ("/r/newest.txt", "폴더: 자료")
+    context = ClarificationContext("임시 읽어줘", "narrow_search", options, 1)
+    question = Clarification("범위를 좁혀 주세요.", context.options, context, ("최신", "자료"))
+    planner = ScriptedPlanner([question, question], [Completed("A"), Completed("B")])
+    controller = RuntimeController(planner)
+
+    await controller.submit("임시 읽어줘")
+    assert await controller.submit("2") == Completed("A")  # a bare number is free text here
+    await controller.submit("임시 읽어줘")
+    assert await controller.submit("1번") == Completed("B")
+    assert planner.resume_inputs == [(context, "2"), (context, "/r/newest.txt")]

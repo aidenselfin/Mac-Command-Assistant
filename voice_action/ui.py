@@ -111,7 +111,7 @@ def render_outcome(outcome: RuntimeResult) -> str:
         return f"[ERROR] {outcome.message}"
     if isinstance(outcome, Clarification):
         options = "\n".join(
-            f"  {index}. {option}" for index, option in enumerate(outcome.options, 1)
+            f"  {index}. {option}" for index, option in enumerate(outcome.shown_options, 1)
         )
         return f"[QUESTION] {outcome.question}\n{options}"
     if isinstance(outcome, ApprovalRequired):
@@ -1209,7 +1209,9 @@ class TkView:
                 "승인 요청 · " + operation, "".join(text for text, _ in segments), "question"
             )
         elif isinstance(outcome, Clarification):
-            options = "\n".join(f"{i}. {option}" for i, option in enumerate(outcome.options, 1))
+            options = "\n".join(
+                f"{i}. {option}" for i, option in enumerate(outcome.shown_options, 1)
+            )
             self._append(
                 "선택이 필요해요", outcome.question + "\n" + options, "question", markdown=True
             )
