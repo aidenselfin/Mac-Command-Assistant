@@ -8,6 +8,10 @@
 https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
 
 # 최근 검증
+- 2026-10-07 Finder 연동(변경 경로 전달·Finder 표시·파일 첨부): pytest 전체 558 passed(통합·Tk 위젯·실제 TkinterDnD 루트 포함),
+  ruff 통과, 평가 재생 34/34. 실제 모델로 첨부 과제 `attach_summary` 3/3, `attach_write_reports_path` 3/3,
+  `attach_delete` 1/3(모델이 도구 대신 "삭제하시겠습니까?"라고 되묻는 기존 삭제 실패 유형). `--interactive`로 첨부·밖 파일 거부·요약 확인.
+  `finder.reveal`을 실제 파일 하나로 호출해 True 확인. 사람이 Finder에서 직접 드래그해 보지는 않았다(드롭 이벤트는 코드로 시뮬레이션).
 - 2026-10-07 GUI 진행 보고서 후속 리뷰 (`0754d99` 기준): 관련 테스트 117 passed·6 skipped,
   ruff·diff check 통과. 내용 단서 추가에도 후보 불변, 불완전 none 안내 누락, 표식 포함 문자 수를 로컬 재현.
   [수정 필요성·최소 대안·후속 검증](reviews/2026-10-07-ui-progress-followup-review.md).
@@ -32,6 +36,9 @@ https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
   이전 `--lesson` 주입 검증 결과도 유지된다.
 
 # 다음 작업
+- `--ui`에서 Finder 파일을 실제로 끌어다 놓아 칩 표시·거부 안내·결과 후 Finder 선택 표시를 눈으로 확인한다.
+- Finder 창을 앱 옆에 배치(손쉬운 사용·자동화 권한 필요)는 보류했다. 필요하면 별도 단계로, 기본 off로 만든다.
+- 삭제에서 도구 대신 확인 질문으로 끝나는 실패(`delete_approve`, `attach_delete`)는 같은 유형이다. lesson 후보 비교로 다룬다.
 - GUI 후속 리뷰 R1~R4 검토: 내용 조건 분리, 부분 검사 안내 보존, 자동 필터 완화 설명 제거,
   읽기 문자 수 안내 보정. HTTP 400은 원인을 구분한 후 수정하며 자유 질문 schema만 완화하지 않는다.
 - `--ui`에서 후보 버튼·1~5 평가·원인 칩·저장 실패 안내를 직접 눌러 확인하고 필요하면 UI를 다듬는다.
