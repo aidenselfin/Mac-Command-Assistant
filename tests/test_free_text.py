@@ -290,3 +290,54 @@ def test_which_typed_questions_are_really_confirmations(question, refused):
         find_tried, known_target, user_text = True, True, "파일 만들어줘"
 
     assert (_free_text_refusal(State(), question) is not None) is refused
+
+
+# ---- a reply that only asks "shall I?" is turned into the tool call -----------------------
+
+
+def convert_call(root):
+    arguments = json.dumps({"source": str(root / "a.csv"), "target_format": "json"})
+    return ModelTurn(None, [ToolCall("c", "local__convert_file", arguments)])
+
+
+@pytest.mark.parametrize(
+    "stall",
+    [
+        "a.csv를 JSON으로 변환할까요?",
+        "변환을 진행해도 괜찮으시면 알려 주세요.",
+        "a.csv를 변환하시겠습니까? 진행 여부를 알려주세요.",
+    ],
+)
+async def test_a_stalled_confirmation_gets_one_nudge_then_the_approval_screen(config, stall):
+    root = config.allowed_directories[0]
+    (root / "a.csv").write_text("x,y\n1,2\n")
+    planner, model = make(config, [ModelTurn(stall, []), convert_call(root)])
+
+    outcome = await planner.run("a.csv를 json으로 바꿔줘")
+
+    assert getattr(outcome, "operation", None) == "convert"  # the real approval, not a question
+    told = model.generate.await_args_list[1].args[0][-1]["content"]
+    assert "승인 화면에서 사용자 승인을 따로 받습니다" in told
+
+
+async def test_the_nudge_is_given_once_so_a_stubborn_reply_still_ends_the_command(config):
+    planner, model = make(
+        config, [ModelTurn("변환할까요?", []), ModelTurn("그래도 변환할까요?", [])]
+    )
+    outcome = await planner.run("a.csv를 json으로 바꿔줘")
+    assert outcome == Completed("그래도 변환할까요?")
+    assert model.generate.await_count == 2
+
+
+@pytest.mark.parametrize(
+    "request_text, reply",
+    [
+        ("a.csv 내용 요약해줘", "요약할까요?"),  # nothing would be changed: not a mutation
+        ("a.csv를 json으로 바꿔줘", "어떤 이름으로 저장할까요? 알려 주세요."),  # asks for a name
+        ("a.csv를 json으로 바꿔줘", "csv에 열이 두 개 있습니다."),  # an ordinary answer
+    ],
+)
+async def test_other_replies_are_left_alone(config, request_text, reply):
+    planner, model = make(config, [ModelTurn(reply, [])])
+    assert await planner.run(request_text) == Completed(reply)
+    assert model.generate.await_count == 1

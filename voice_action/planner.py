@@ -463,8 +463,27 @@ CONFIRM_QUESTION = re.compile(
 # "저장할까요?" alone is a yes/no; "어떤 이름으로 저장할까요?" asks for something.
 SOFT_CONFIRM = re.compile(r"할까요|될까요")
 OPEN_QUESTION = re.compile(r"어떤|어느|무슨|무엇|뭘|어디|몇|언제|어떻게|이름|내용|경로")
+# A closing line that waits for a go-ahead ("진행해도 괜찮으시면 알려 주세요").
+CONFIRM_REQUEST = re.compile(
+    r"진행 여부|괜찮으시면|승인해 주시면|확인해 주(?:세요|시면)|알려\s*주시면\s*(?:진행|바로)"
+)
+MUTATION_PATTERN = re.compile(r"저장|만들|생성|작성|덮어|수정|바꿔|변경")
+CONFIRM_NUDGE = (
+    "쓰기·삭제·변환은 앱이 승인 화면에서 사용자 승인을 따로 받습니다. 확인 질문으로 끝내지 말고 "
+    "지금 해당 도구(local__delete_files, local__convert_file, filesystem__write_file)를 "
+    "바로 호출하세요."
+)
 CREATE_PATTERN = re.compile(r"만들|생성|새로|작성|저장")
 LOOKUP_PATTERN = re.compile(r"읽|요약|찾|내용|보여|열어|번역|분석|설명|삭제|변환")
+
+
+def _is_confirmation(text: str) -> bool:
+    """A reply that only asks for a go-ahead the app's approval screen would give anyway."""
+    return bool(
+        CONFIRM_QUESTION.search(text)
+        or CONFIRM_REQUEST.search(text)
+        or (SOFT_CONFIRM.search(text) and not OPEN_QUESTION.search(text))
+    )
 
 
 def _free_text_refusal(state: "_LoopState", question: str) -> str | None:
@@ -913,6 +932,7 @@ class _LoopState:
     changed_paths: tuple[str, ...] = ()
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
+    confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
     find_tried: bool = False  # local__find_files has run in this command
     find_override: str | None = None  # what the model is told about the last search instead
     known_target: bool = False  # an attached file or the previous command's files
@@ -1423,6 +1443,30 @@ class Planner:
                     return Error("모호한 파일 요청은 안전한 후보 탐색 없이 진행할 수 없습니다.")
                 if state.single_search_candidate is not None and not state.candidate_read:
                     return Error("검증된 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
+                if (
+                    state.confirm_nudges == 0
+                    and turn.text
+                    and not state.changed_paths
+                    and not state.write_completed
+                    and _is_confirmation(turn.text)
+                    and (
+                        _destructive_request(state.user_text)
+                        or CONVERSION_REQUEST_PATTERN.search(state.user_text)
+                        or MUTATION_PATTERN.search(state.user_text)
+                    )
+                ):
+                    # The model stopped to ask "shall I?" in words. The approval screen is
+                    # the real question, so it gets one nudge to make the tool call.
+                    state.confirm_nudges += 1
+                    state.messages.extend(
+                        [
+                            {"role": "assistant", "content": turn.text},
+                            {"role": "system", "content": CONFIRM_NUDGE},
+                        ]
+                    )
+                    state.iteration += 1
+                    self.emit("[PLAN] confirmation reply turned back into a tool call")
+                    continue
                 if not turn.text or not turn.text.strip():
                     raise PlannerError("LLM 최종 응답이 비어 있습니다.")
                 if state.partial_read is not None:

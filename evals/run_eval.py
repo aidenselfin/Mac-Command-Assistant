@@ -310,7 +310,9 @@ async def main(argv=None) -> int:
     if not args.live:
         tasks = [t for t in tasks if "script" in t]
     else:  # controls pass only when a run goes wrong; they would invert a live score
-        tasks = [t for t in tasks if not t.get("negative")]
+        # A task marked "live": false pins one scripted path (a model may legitimately choose
+        # another), so only controls and scripted replays use it.
+        tasks = [t for t in tasks if not t.get("negative") and t.get("live", True)]
     config = load_config() if args.live else None
     trials = [await run_trial(t, config, args.lesson) for _ in range(args.repeat) for t in tasks]
     for r in trials:
