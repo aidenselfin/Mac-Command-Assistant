@@ -386,6 +386,15 @@ def _provider_error_detail(exc: APIError) -> str:
     if isinstance(message, str) and (match := PROVIDER_SCHEMA_ERROR.search(message)):
         errors = re.sub(r"\s+", " ", match["errors"]).strip()[:200]
         parts.append(f"{match['tool']}: {errors}")
+    elif (
+        isinstance(message, str)
+        and parts
+        and parts[0] in {"tool_use_failed", "output_parse_failed"}
+        and not re.search(r"[{}\[\]\"]", message)
+    ):
+        # Only a plain sentence from the provider is kept: no braces or quotes, so no generated
+        # arguments can ride along.
+        parts.append(re.sub(r"\s+", " ", message).strip()[:120])
     return ": " + " — ".join(parts) if parts else ""
 
 
@@ -480,9 +489,12 @@ class OpenAICompatibleModel:
             value = json.loads(arguments)
         except (TypeError, ValueError) as exc:
             raise PlannerError("잘못된 clarification 인자입니다.") from exc
-        if not isinstance(value, dict) or set(value) != {"question", "options", "kind"}:
+        if not isinstance(value, dict):
             raise PlannerError("잘못된 clarification 인자입니다.")
-        question, options, kind = value["question"], value["options"], value["kind"]
+        # The provider no longer insists on every field, so a missing or null one is "none given".
+        question = value.get("question")
+        options = value.get("options") or []
+        kind = value.get("kind") or ("free_text" if not options else "file_candidate")
         if (
             not isinstance(question, str)
             or not question.strip()
@@ -542,6 +554,11 @@ def _free_text_refusal(state: "_LoopState", question: str) -> str | None:
         return (
             "clarification_error: 확인 질문은 필요 없습니다. 쓰기·삭제·변환은 앱이 승인 화면에서 "
             "따로 받으니, 묻지 말고 해당 도구를 바로 호출하세요."
+        )
+    if state.find_none and OUTPUT_FILENAME_PATTERN.search(state.user_text):
+        return (
+            "clarification_error: 사용자가 이미 파일 이름을 말했고 찾아봤지만 없었습니다. "
+            "다시 묻지 말고 그 파일이 없다고 사용자에게 알리세요."
         )
     if (
         not state.find_tried
@@ -988,6 +1005,7 @@ class _LoopState:
     empty_retries: int = 0  # times an empty final reply was sent back for a real answer
     confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
     find_tried: bool = False  # local__find_files has run in this command
+    find_none: bool = False  # ...and found nothing
     find_override: str | None = None  # what the model is told about the last search instead
     known_target: bool = False  # an attached file or the previous command's files
 
@@ -1884,6 +1902,7 @@ class Planner:
         """One decision for every file lookup: ask the user, stop, or pin the single match."""
         state.search_completed = True
         state.find_tried = True
+        state.find_none = response.get("decision") == "none"
         arguments = json.loads(call.arguments)
         kept = {key: arguments[key] for key in FIND_ARGUMENT_KEYS if arguments.get(key)}
         state.last_search = json.dumps(kept, ensure_ascii=False)[:500]

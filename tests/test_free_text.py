@@ -287,7 +287,7 @@ def test_which_typed_questions_are_really_confirmations(question, refused):
     from voice_action.planner import _free_text_refusal
 
     class State:
-        find_tried, known_target, user_text = True, True, "파일 만들어줘"
+        find_tried, find_none, known_target, user_text = True, False, True, "파일 만들어줘"
 
     assert (_free_text_refusal(State(), question) is not None) is refused
 
@@ -424,3 +424,45 @@ async def test_null_arguments_are_dropped_before_the_call_is_checked(config):
     await planner.run("a.txt 목록")
     sent = gateway_calls.await_args_list[0].args[1]
     assert sent == {"path": str(root / "a.txt")}
+
+
+def test_a_clarification_with_missing_or_null_fields_is_read_as_a_typed_question():
+    parse = OpenAICompatibleModel._parse_clarification
+    assert parse("c", json.dumps({"question": "이름은?"})) == ClarificationRequest(
+        "이름은?", (), "free_text", "c"
+    )
+    assert parse("c", json.dumps({"question": "이름은?", "options": None, "kind": None})).kind == (
+        "free_text"
+    )
+    assert parse("c", json.dumps({"question": "?", "options": ["a"]})).kind == "file_candidate"
+    for bad in ({"options": ["a"]}, {"question": " "}, {"question": "?", "options": [1]}):
+        with pytest.raises(PlannerError):
+            parse("c", json.dumps(bad))
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("Failed to call a function. Please adjust your prompt.",
+         "HTTP 400: tool_use_failed — Failed to call a function. Please adjust your prompt."),
+        (
+            'Failed {"name": "x", "arguments": {"secret": "SECRET-BODY"}}',
+            "HTTP 400: tool_use_failed",
+        ),
+    ],
+)
+async def test_a_plain_provider_sentence_is_kept_but_nothing_that_looks_like_arguments(
+    message, expected
+):
+    text = await failing_model(bad_request({"code": "tool_use_failed", "message": message}))
+    assert text == f"LLM API 요청 실패 ({expected})" and "SECRET" not in text
+
+
+async def test_asking_again_for_a_named_file_that_was_just_not_found_is_turned_back(config):
+    arguments = json.dumps({"keywords": ["없는파일.txt"]})
+    find = ModelTurn(None, [ToolCall("f", "local__find_files", arguments)])
+    planner, model = make(config, [find, ask("파일의 정확한 경로를 알려 주세요."),
+                                   ModelTurn("없는파일.txt는 없습니다.", [])])
+    outcome = await planner.run("없는파일.txt 읽어줘")
+    assert outcome == Completed("없는파일.txt는 없습니다.")
+    assert "그 파일이 없다고" in model.generate.await_args_list[2].args[0][-1]["content"]
