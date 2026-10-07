@@ -1,0 +1,47 @@
+{
+  "id": "follow_up_that_file",
+  "family": "file.followup",
+  "files": {
+    "예산 계획.md": "총액 3천만원",
+    "다른.md": "무관"
+  },
+  "request": "예산 계획.md 읽어줘",
+  "followups": [
+    "그 파일 한 줄로 요약해줘"
+  ],
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/예산 계획.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "총액 3천만원입니다."
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/예산 계획.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "한 줄: 총액 3천만원."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "filesystem__read_text_file"
+    ],
+    "changed_paths": []
+  }
+}

@@ -1,6 +1,7 @@
 """Single-flight runtime state machine for text and future voice commands."""
 
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum, auto
@@ -8,10 +9,12 @@ from enum import Enum, auto
 from voice_action.attachment import AttachmentError, check_attachment
 from voice_action.planner import (
     MAX_CLARIFICATIONS,
+    MEMORY_MAX_FILES,
     ApprovalRequired,
     Clarification,
     Completed,
     Error,
+    Exchange,
     Planner,
     PlannerEvent,
     PlannerEventObserver,
@@ -99,6 +102,9 @@ RuntimeLog = Callable[[str], None]
 StateObserver = Callable[[StateTransition], None]
 
 
+MEMORY_SECONDS = 600  # a follow-up counts only for this long after the answer it follows
+
+
 class RuntimeTransitionError(RuntimeError):
     pass
 
@@ -114,6 +120,7 @@ class RuntimeController:
         state_observer: StateObserver | None = None,
         planner_event_observer: PlannerEventObserver | None = None,
         feedback=None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.planner = planner
         self.emit = emit or (lambda _: None)
@@ -126,6 +133,9 @@ class RuntimeController:
         self._pending_approval: ApprovalRequired | None = None
         self._in_flight = False
         self._attachment: str | None = None  # one dropped file, for the next command only
+        self._clock = clock
+        self._previous: tuple[Exchange, float] | None = None
+        self._request: str | None = None  # the command now being worked on
         self._answered_run: str | None = None  # the run whose Completed answer can be rated
         self.planner.set_event_observer(self._on_planner_event)
 
@@ -190,11 +200,13 @@ class RuntimeController:
                 return await self._submit_clarification_answer(text)
             self._transition(RuntimeState.PLANNING, "command_started")
             attachment, self._attachment = self._attachment, None  # one command, then gone
-            outcome = await (
-                self.planner.run(text, attachment=attachment)
-                if attachment is not None
-                else self.planner.run(text)
-            )
+            self._request = text
+            options = {}
+            if attachment is not None:
+                options["attachment"] = attachment
+            if (previous := self._recent_exchange()) is not None:
+                options["previous"] = previous
+            outcome = await self.planner.run(text, **options)
             return self._finish(outcome)
         except BaseException as exc:
             if self._feedback is not None:
@@ -314,6 +326,13 @@ class RuntimeController:
         outcome = await self.planner.resume(pending.context, selection)
         return self._finish(outcome)
 
+    def _recent_exchange(self) -> Exchange | None:
+        """The previous answered command, if it was a moment ago."""
+        if self._previous is None:
+            return None
+        exchange, at = self._previous
+        return exchange if self._clock() - at <= MEMORY_SECONDS else None
+
     def _finish(self, outcome: PlannerOutcome, *, rateable: bool = True) -> PlannerOutcome:
         """Settle an outcome. Only a real answer is rateable, not a cancel, a reject or an undo."""
         if self._feedback is not None:
@@ -333,6 +352,12 @@ class RuntimeController:
         self._pending = None
         self._pending_approval = None
         if isinstance(outcome, Completed):
+            if rateable and self._request:
+                files = tuple(dict.fromkeys((*outcome.changed_paths, *outcome.read_paths)))
+                self._previous = (
+                    Exchange(self._request, outcome.text, files[:MEMORY_MAX_FILES]),
+                    self._clock(),
+                )
             if self._feedback is not None:
                 self._answered_run = self._feedback.run_id if rateable else None
             self._transition(RuntimeState.DONE, "completed")

@@ -165,35 +165,39 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                 async def converse():
                     if task.get("attach"):  # a file dropped on the window before the command
                         controller.attach(str(root / task["attach"]))
-                    outcome = await controller.submit(task["request"])
-                    while True:
-                        if isinstance(outcome, Clarification):
-                            if not answers:
-                                return (
-                                    "simulator_failure",
-                                    f"unscripted question: {outcome.question}",
+                    # Follow-ups are separate commands typed one after another, as a user would.
+                    for request in (task["request"], *task.get("followups", [])):
+                        outcome = await controller.submit(request)
+                        while True:
+                            if isinstance(outcome, Clarification):
+                                if not answers:
+                                    return (
+                                        "simulator_failure",
+                                        f"unscripted question: {outcome.question}",
+                                    )
+                                outcome = await controller.submit(answers.pop(0))
+                            elif isinstance(outcome, ApprovalRequired):
+                                if manifest(root) != initial and not task.get("followups"):
+                                    violations.append("changed before approval")
+                                if not decisions:
+                                    return (
+                                        "simulator_failure",
+                                        f"unscripted approval: {outcome.target_path}",
+                                    )
+                                outcome = await (
+                                    controller.approve_pending()
+                                    if decisions.pop(0)
+                                    else controller.reject_pending()
                                 )
-                            outcome = await controller.submit(answers.pop(0))
-                        elif isinstance(outcome, ApprovalRequired):
-                            if manifest(root) != initial:
-                                violations.append("changed before approval")
-                            if not decisions:
-                                return (
-                                    "simulator_failure",
-                                    f"unscripted approval: {outcome.target_path}",
-                                )
-                            outcome = await (
-                                controller.approve_pending()
-                                if decisions.pop(0)
-                                else controller.reject_pending()
+                            else:
+                                break
+                        if isinstance(outcome, Completed):
+                            changed.extend(
+                                Path(path).relative_to(root).as_posix()
+                                for path in outcome.changed_paths
                             )
                         else:
                             break
-                    if isinstance(outcome, Completed):
-                        changed.extend(
-                            Path(path).relative_to(root).as_posix()
-                            for path in outcome.changed_paths
-                        )
                     if isinstance(outcome, Completed) and task["expect"].get("undo"):
                         outcome = await controller.undo_last_write()
                     return (

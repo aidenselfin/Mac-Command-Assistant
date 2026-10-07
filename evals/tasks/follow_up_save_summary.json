@@ -1,0 +1,58 @@
+{
+  "id": "follow_up_save_summary",
+  "family": "file.followup",
+  "files": {
+    "정리전메모.txt": "배포는 금요일, 담당은 서연",
+    "잡담.txt": "점심"
+  },
+  "request": "정리전메모.txt 요약해줘",
+  "followups": [
+    "그 요약을 요약.txt로 저장해줘"
+  ],
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/정리전메모.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "금요일 배포, 담당 서연."
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/요약.txt",
+            "content": "금요일 배포, 담당 서연."
+          }
+        }
+      ]
+    },
+    {
+      "text": "요약.txt에 저장했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "요약.txt": "*"
+    },
+    "must_run": [
+      "filesystem__read_text_file",
+      "filesystem__write_file"
+    ],
+    "changed_paths": [
+      "요약.txt"
+    ]
+  }
+}

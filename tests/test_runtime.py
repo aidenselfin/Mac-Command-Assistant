@@ -46,7 +46,7 @@ class ScriptedPlanner:
     def set_event_observer(self, observer: PlannerEventObserver | None) -> None:
         self.observer = observer
 
-    async def run(self, text: str) -> PlannerOutcome:
+    async def run(self, text: str, **_options) -> PlannerOutcome:
         self.run_inputs.append(text)
         action = self.run_actions.pop(0)
         if isinstance(action, BaseException):
@@ -506,7 +506,7 @@ class AttachingPlanner(ScriptedPlanner):
         super().__init__(actions)
         self.config, self.attachments = config, []
 
-    async def run(self, text, *, attachment=None):
+    async def run(self, text, *, attachment=None, **_options):
         self.attachments.append(attachment)
         return await super().run(text)
 

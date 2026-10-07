@@ -119,7 +119,7 @@ class OkPlanner:
     def set_event_observer(self, observer):
         pass
 
-    async def run(self, text):
+    async def run(self, text, **_options):
         return Completed("ok")
 
 
