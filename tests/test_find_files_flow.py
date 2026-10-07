@@ -143,3 +143,23 @@ async def test_find_files_is_refused_after_the_user_picked_a_file(config):
     assert await planner.resume(context, str(root / "a.md")) == Completed("읽음")
     refusal = model.generate.await_args_list[1].args[0][-1]["content"]
     assert "이미 파일을 선택" in refusal
+
+
+async def test_big_file_answer_says_it_was_only_partly_read(config):
+    from voice_action.mcp_client import ToolResult
+
+    root = config.allowed_directories[0]
+    big = root / "큰파일.txt"
+    big.write_text("x")
+    model = scripted(read_turn(big), ModelTurn("요약", []))
+    planner, gateway = make_planner(config, model)
+    gateway.call_tool.return_value = ToolResult(True, "가" * 1234, truncated=True)
+
+    outcome = await planner.run("큰파일.txt 요약해줘")
+
+    assert outcome.text.startswith("요약") and "앞부분 약 1,234자만" in outcome.text
+    gateway.call_tool.return_value = ToolResult(True, "짧음")
+    model = scripted(read_turn(big), ModelTurn("요약", []))
+    planner, _ = make_planner(config, model)
+    planner._gateway.call_tool.return_value = ToolResult(True, "짧음")
+    assert await planner.run("큰파일.txt 요약해줘") == Completed("요약")

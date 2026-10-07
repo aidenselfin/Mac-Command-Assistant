@@ -190,6 +190,7 @@ class ApprovalContext:
     active_app_only: bool
     write_completed: bool
     exposed_tool_names: frozenset[str] | None = None
+    partial_read_chars: int | None = None
 
     @property
     def digest(self) -> str:
@@ -401,6 +402,8 @@ class OpenAICompatibleModel:
 
 
 MAX_CLARIFICATIONS = 2
+# Added by code, not the model, so a big file is never summarized as if it were fully read.
+PARTIAL_READ_NOTICE = "\n\n※ 파일이 커서 앞부분 약 {:,}자만 읽고 작성한 답변입니다."
 
 
 def _destructive_request(text: str) -> bool:
@@ -763,6 +766,7 @@ class _LoopState:
     write_completed: bool
     # Names offered on the model turn whose calls are being processed. Only these run.
     exposed_tool_names: frozenset[str] | None = None
+    partial_read_chars: int | None = None  # a file was too big to read fully
 
 
 class Planner:
@@ -1189,6 +1193,9 @@ class Planner:
                     return Error("검증된 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
                 if not turn.text or not turn.text.strip():
                     raise PlannerError("LLM 최종 응답이 비어 있습니다.")
+                if state.partial_read_chars is not None:
+                    notice = PARTIAL_READ_NOTICE.format(state.partial_read_chars)
+                    return Completed(turn.text + notice)
                 return Completed(turn.text)
             state.messages.append(
                 {
@@ -1520,6 +1527,8 @@ class Planner:
             self.emit(
                 f"[TOOL-OK] iteration={state.iteration} name={call.name}\n{result.text}"
             )
+        if call.name in CONTENT_READ_TOOLS and result.truncated is True:
+            state.partial_read_chars = len(result.text)
         if call.name == FIND_FILES_TOOL and result.structured is not None:
             spec = clarification_spec(result.structured)
             if spec is not None:
@@ -1609,6 +1618,7 @@ class Planner:
             active_app_only=state.active_app_only,
             write_completed=state.write_completed,
             exposed_tool_names=state.exposed_tool_names,
+            partial_read_chars=state.partial_read_chars,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -1653,6 +1663,7 @@ class Planner:
             active_app_only=context.active_app_only,
             write_completed=context.write_completed,
             exposed_tool_names=context.exposed_tool_names,
+            partial_read_chars=context.partial_read_chars,
         )
 
     async def _handle_search_result(

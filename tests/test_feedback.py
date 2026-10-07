@@ -224,3 +224,28 @@ def test_correction_pattern():
         assert CORRECTION_PATTERN.search(text), text
     for text in ("아니면 csv만 보여줘", "폴더 내 파일 보여줘", "두 파일 설명해줘"):
         assert not CORRECTION_PATTERN.search(text), text
+
+
+async def test_wasteful_runs_are_flagged_r8_and_repeated_searches_r9(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    searches = [
+        ModelTurn(None, [ToolCall(str(i), "local__find_files", f'{{"keywords": ["k{i}"]}}')])
+        for i in range(4)
+    ]
+    model = loop.wrap(FakeModel([*searches, ModelTurn(None, []), ModelTurn("끝", [])]))
+    loop.user_input("파일 찾아줘", new_run=True)
+    for _ in range(6):
+        await model.generate([], [], allow_tools=True)
+    found = dict(loop.run_finished())
+    assert found.get("R8") == "calls:find_files>find_files>find_files>find_files>답변>답변"
+    assert found.get("R9") == "search:4"
+
+
+async def test_short_runs_are_not_flagged_as_wasteful(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    call = ToolCall("1", "local__find_files", '{"keywords": ["a"]}')
+    model = loop.wrap(FakeModel([ModelTurn(None, [call]), ModelTurn("끝", [])]))
+    loop.user_input("파일 찾아줘", new_run=True)
+    for _ in range(2):
+        await model.generate([], [], allow_tools=True)
+    assert not {"R8", "R9"} & {rule for rule, _ in loop.run_finished()}

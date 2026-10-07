@@ -2,7 +2,7 @@
   "provider": "groq",
   "model": "openai/gpt-oss-20b",
   "allowed_directories": ["./voice-action-test"],
-  "max_tool_rounds": 5,
+  "max_tool_rounds": 10,
   "llm_timeout_seconds": 60,
   "mcp_timeout_seconds": 30,
   "max_tool_result_chars": 50000

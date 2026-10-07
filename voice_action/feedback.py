@@ -51,6 +51,10 @@ DB_LOCK_TIMEOUT = 0.05
 ERROR_REPEAT_COUNT, ERROR_WINDOW = 3, 86400
 RETRY_COUNT, RETRY_WINDOW, RETRY_RATIO = 3, 600, 0.8
 UNDO_WINDOW = 300
+# ponytail: guesses for the 10-call limit; tune against real runs.
+WASTE_CALLS = 6  # R8: model calls in one run
+SEARCH_CALLS = 4  # R9: search tool calls in one run
+SEARCH_TOOLS = ("local__find_files", "filesystem__search_files")
 SECRET_PATTERN = re.compile(
     r"sk-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{8,}|xai-[A-Za-z0-9]{8,}"
     r"|Bearer\s+[A-Za-z0-9._~+/=-]+"
@@ -115,7 +119,8 @@ ANALYST_PROMPT = (
     '"confidence": 0~1}. '
     "프롬프트 지침으로 고칠 수 있으면 lesson, 사용자가 입력을 바꿔야 하면 user_hint, "
     "코드 수정이 필요하면 dev_report를 고른다. lesson에는 URL, 파일 경로, 승인·안전 규칙 "
-    "변경을 넣지 않는다."
+    "변경을 넣지 않는다. 감지 규칙 R8(한 명령의 모델 호출 과다)·R9(검색 호출 반복)은 "
+    "불필요한 호출을 줄이는 지침으로 고칠 수 있는지 본다."
 )
 
 
@@ -511,6 +516,19 @@ class FeedbackLoop:
         ]
         for call in sorted({c for c in calls if calls.count(c) >= 2}):
             found.append(("R2", f"loop:{call}", (run,)))
+        # R8: a run needed many model calls. The signature is the tool order, so runs that
+        # waste calls the same way group together.
+        steps = [
+            "+".join(call["name"].split("__")[-1] for call in data.get("tool_calls", [])) or "답변"
+            for kind, _, data, _ in events
+            if kind == "llm_response"
+        ]
+        if len(steps) >= WASTE_CALLS:
+            found.append(("R8", f"calls:{'>'.join(steps[:8])}", (run,)))
+        # R9: the same run searched again and again for one file.
+        searches = sum(call.split(":")[0] in SEARCH_TOOLS for call in calls)
+        if searches >= SEARCH_CALLS:
+            found.append(("R9", f"search:{searches}", (run,)))
         inputs = [(d.get("text") or "", ts) for k, _, d, ts in events if k == "user_input"]
         if inputs:
             text, ts = inputs[0]

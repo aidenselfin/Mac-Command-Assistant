@@ -34,7 +34,7 @@ class Config:
     api_key: str = field(repr=False)
     allowed_directories: tuple[Path, ...]
     base_url: str | None = None
-    max_tool_rounds: int = 5
+    max_tool_rounds: int = 10
     llm_timeout_seconds: float = 60
     mcp_timeout_seconds: float = 30
     max_tool_result_chars: int = 50000
@@ -121,7 +121,7 @@ def load_config(
         resolved.append(path)
     numbers = {}
     for key, default, kind in (
-        ("max_tool_rounds", 5, int),
+        ("max_tool_rounds", 10, int),
         ("llm_timeout_seconds", 60, float),
         ("mcp_timeout_seconds", 30, float),
         ("max_tool_result_chars", 50000, int),
