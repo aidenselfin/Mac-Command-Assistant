@@ -1835,7 +1835,7 @@ class Planner:
         return json.dumps(
             {
                 "decision": "named",
-                "note": "사용자가 원문에서 이 파일들을 직접 지정했습니다. 묻지 말고 모두 처리하세요.",
+                "note": "사용자가 이 파일들을 직접 지정했습니다. 묻지 말고 모두 처리하세요.",
                 "paths": paths,
             },
             ensure_ascii=False,
