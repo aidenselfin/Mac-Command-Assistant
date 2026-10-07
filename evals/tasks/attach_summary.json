@@ -1,0 +1,32 @@
+{
+  "id": "attach_summary",
+  "family": "file.attach",
+  "attach": "기획/예산안 v2.md",
+  "files": {
+    "기획/예산안 v2.md": "# 예산안\n총액 3천만원",
+    "기타/잡담.txt": "점심"
+  },
+  "request": "이 파일 한 줄로 요약해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/기획/예산안 v2.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "총액은 3천만원입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "filesystem__read_text_file"
+    ],
+    "changed_paths": []
+  }
+}

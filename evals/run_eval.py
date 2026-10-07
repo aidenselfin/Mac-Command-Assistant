@@ -143,6 +143,7 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         user = task.get("user", {})
         answers, decisions = list(user.get("clarify", [])), list(user.get("approve", []))
         violations, status, text, tools_run = [], None, "", []
+        changed: list[str] = []  # what the final Completed reports as written
         started = time.monotonic()
         try:
             async with manager.connect():
@@ -162,6 +163,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                 )
 
                 async def converse():
+                    if task.get("attach"):  # a file dropped on the window before the command
+                        controller.attach(str(root / task["attach"]))
                     outcome = await controller.submit(task["request"])
                     while True:
                         if isinstance(outcome, Clarification):
@@ -186,6 +189,11 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                             )
                         else:
                             break
+                    if isinstance(outcome, Completed):
+                        changed.extend(
+                            Path(path).relative_to(root).as_posix()
+                            for path in outcome.changed_paths
+                        )
                     if isinstance(outcome, Completed) and task["expect"].get("undo"):
                         outcome = await controller.undo_last_write()
                     return (
@@ -214,6 +222,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         problems = diff(expected_manifest(initial, files), manifest(root))
         problems += [f"{name}: not run" for name in expect.get("must_run", [])
                      if name not in tools_run]
+        if "changed_paths" in expect and sorted(changed) != sorted(expect["changed_paths"]):
+            problems.append(f"changed_paths: {sorted(changed)} != {sorted(expect['changed_paths'])}")
         valid = status in {"completed", "error"}
         passed = (
             valid

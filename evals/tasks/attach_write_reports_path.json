@@ -1,0 +1,51 @@
+{
+  "id": "attach_write_reports_path",
+  "family": "file.attach",
+  "attach": "메모 원본.txt",
+  "files": {
+    "메모 원본.txt": "초안: 배포는 금요일"
+  },
+  "request": "이 파일 내용을 읽고 요약을 요약.md로 저장해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/메모 원본.txt"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/요약.md",
+            "content": "배포는 금요일"
+          }
+        }
+      ]
+    },
+    {
+      "text": "요약.md에 저장했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "요약.md": "배포는 금요일"
+    },
+    "must_run": [
+      "filesystem__read_text_file"
+    ],
+    "changed_paths": [
+      "요약.md"
+    ]
+  }
+}

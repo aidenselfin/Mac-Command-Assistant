@@ -1,0 +1,38 @@
+{
+  "id": "attach_delete",
+  "family": "file.attach",
+  "attach": "오래된 로그.log",
+  "files": {
+    "오래된 로그.log": "x",
+    "keep.txt": "keep"
+  },
+  "request": "이 파일 삭제해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__delete_files",
+          "args": {
+            "paths": [
+              "{root}/오래된 로그.log"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "삭제했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "오래된 로그.log": null
+    },
+    "changed_paths": []
+  }
+}
