@@ -379,7 +379,7 @@ async def test_real_search_read_only_candidate_flow(config, processes):
     root = config.allowed_directories[0]
     candidate = root / "회의록-유일.md"
     await asyncio.to_thread(candidate.write_text, "결정 사항: 금요일 배포", encoding="utf-8")
-    mcp = MCPClient(config, allowed_tools={"search_files", "read_text_file"})
+    mcp = MCPClient(config, allowed_tools={"read_text_file"})
     manager = MCPManager({"filesystem": mcp})
     model = AsyncMock()
     model.generate.side_effect = [
@@ -387,12 +387,9 @@ async def test_real_search_read_only_candidate_flow(config, processes):
             None,
             [
                 ToolCall(
-                    "search",
-                    "filesystem__search_files",
-                    json.dumps(
-                            {"path": str(root), "pattern": "**/*회의록*"},
-                        ensure_ascii=False,
-                    ),
+                    "find",
+                    "local__find_files",
+                    json.dumps({"keywords": ["회의록"]}, ensure_ascii=False),
                 )
             ],
         ),
@@ -411,10 +408,8 @@ async def test_real_search_read_only_candidate_flow(config, processes):
 
     async with manager.connect():
         names = {tool.name for tool in await manager.list_tools()}
-        assert names == {
-            "filesystem__search_files",
-            "filesystem__read_text_file",
-        }
+        # File lookup is the app's own local__find_files; the server only reads.
+        assert names == {"filesystem__read_text_file"}
         assert names.isdisjoint(
             {
                 "filesystem__write_file",
@@ -431,18 +426,16 @@ async def test_real_multiple_search_candidates_stop_before_read(config, processe
     root = config.allowed_directories[0]
     for name in ("회의록-1.md", "회의록-2.md"):
         await asyncio.to_thread((root / name).write_text, name, encoding="utf-8")
-    mcp = MCPClient(config, allowed_tools={"search_files", "read_text_file"})
+    mcp = MCPClient(config, allowed_tools={"read_text_file"})
     manager = MCPManager({"filesystem": mcp})
     model = AsyncMock()
     model.generate.return_value = ModelTurn(
         None,
         [
             ToolCall(
-                "search",
-                "filesystem__search_files",
-                    json.dumps(
-                        {"path": str(root), "pattern": "**/*회의록*"}, ensure_ascii=False
-                    ),
+                "find",
+                "local__find_files",
+                json.dumps({"keywords": ["회의록"]}, ensure_ascii=False),
             )
         ],
     )

@@ -109,8 +109,7 @@ def test_document_reader_follows_the_selected_candidate(tmp_path):
     unrelated = root / "unrelated.html"
     unrelated.write_text("<html><body>UNRELATED_REVIEW_DOCUMENT</body></html>")
     config = Config("openai", "scripted", "synthetic-key", (root,), feedback_enabled=False)
-    search = ("filesystem__search_files",
-              {"path": str(root), "pattern": "**/*회의록*", "excludePatterns": []})
+    search = ("local__find_files", {"keywords": ["회의록"]})
     model = Model([
         calls(search), calls((READ_DOCUMENT_TOOL, {"path": str(selected)})),
         ModelTurn("candidate summarized", []),
