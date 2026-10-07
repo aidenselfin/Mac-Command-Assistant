@@ -6,28 +6,37 @@
 협업 도구: 현재 폴더 전용 자동 보존·수정 세션 조정 설치 완료.
 
 # 최근 검증
-- 2026-10-07 Finder 창 배치(원인: Finder가 이미 열린 같은 폴더 창을 재사용해 앱 옆에 안 뜸): pytest 전체 571 passed,
-  ruff·diff check 통과. 배치 좌표·창 선택·권한 없음·재시도는 단위 테스트, 실제 Finder 창은 `CGWindowList`로 이 기기에서 확인
-  (같은 폴더 창이 가운데 (567,180)에서 앱 오른쪽 (828,80), 폭 640으로 이동, 권한 trusted). 사람이 `--ui`에서 눈으로 본 것은 아니다.
-  변경 경로 전달·Finder 표시·첨부의 이전 검증(558 passed, 평가 34/34)은 코드 기준이 위로 바뀌었다.
-- 제품의 마지막 보고: 2026-10-07 Finder 연동 pytest 558 passed, ruff 통과, 평가 재생 34/34.
-  이번 협업 도구 수정으로 제품 전체 검증을 다시 수행한 것은 아니다.
-  상세 근거는 [정리 전 상태 보존](reviews/2026-10-07-vibe-status-archive.md).
+- 2026-10-07 저녁, 코드 기준 `2959471`: pytest 전체 622 passed(통합·Tk 위젯·실제 TkinterDnD 포함), ruff 통과, 평가 재생 39/39.
+  변경: HTTP 400 원인 표시, free_text 질문, 직전 명령 기억, content_keywords, 확인 질문 넛지, 공급자용 스키마 완화(결정은 decisions.md).
+  실제 모델(Groq gpt-oss-120b) 기준선 A(`021977f`, 넛지 **전**): 31과제×3 **80/93, INVALID 1**, 호출 270.
+  실패: delete_pattern 0/3, convert_three_files 1/3, free_text_create_file 1/3(이후 live:false), attach_delete 1/3, convert_approve·convert_reject·
+  delete_approve·overwrite_undo 각 2/3. 대부분 "해도 될까요?" 텍스트로 끝난 유형이고 overwrite_undo는 목록 조회 반복으로 호출 한도(10회) 소진.
+  결과 `evals/results/20261007-203743.json`(git 제외). **넛지(`2959471`) 이후 같은 조건 측정은 컴퓨터 종료 전에 끝났는지 확인하지 못했다** → 아래 다음 작업 1.
+  기억 기능 대조: follow_up 과제를 기억 없이 0/4, 있을 때 6/6. 사람이 `--ui`에서 눈으로 확인한 것은 없다.
 - 2026-10-07 협업 도구: `pytest -q tests/test_vibe.py` 1 passed(동시 소유권·잘못된 token·
   시작 전 상태·새 파일·삭제 복구·무관한 자료 제외·HEAD/index 불변·경로 검사 포함).
   ruff 전체·shell 구문·plist 구문·diff check 통과. 제품 전체 테스트·live 평가는 재실행하지 않았다.
   테스트 전용 LaunchAgent 영구 설치, 첫 실행 exit 0·별도 ref 생성 확인. 재로그인은 직접 확인하지 않았다.
 
 # 다음 작업
-- 사용자 요청으로 [Claude Code 조사·개선 설계](reviews/2026-10-07-claude-code-research.md) 구현은 보류.
-  재개 시 f417855 기준 결과를 현재 코드와 다시 대조하고, 계측(P0) 후 완료 조건(P1)을 검토한다. 개발 프롬프트는 보고서에 보관.
-- Finder 실제 드래그, Finder 창이 앱 옆에 뜨는지(손쉬운 사용 권한 포함), 후보 버튼·평가·원인 칩의 사람 GUI 확인.
-- [GUI 후속 리뷰](reviews/2026-10-07-ui-progress-followup-review.md)의 R1~R4 및 공급자 HTTP 400 원인 검토.
-- 삭제·변환의 텍스트 승인 질문 종료를 lesson 후보 비교로 다룬다. 후보는 아직 채택하지 않았다.
-- 의미 검색·한/영 대체어·pdf/docx 본문 검색은 미구현이다. 추가 요구가 있을 때 범위를 정한다.
-- 장기 보류: HTML 반복 읽기·호출 한도 소진, 변환 쓰기의 fd 기준 경합 방어.
+1. **넛지 효과 측정(이어서 할 첫 일)**: `uv run --locked python evals/run_eval.py --live --repeat 3 2>/dev/null`.
+   기준선 A(80/93)와 과제별로 비교한다. 삭제·변환 과제가 올라가고 3/3이던 과제가 떨어지지 않으면 이 결과를 새 기준선으로 삼고
+   status를 갱신한다. 이미 끝난 결과가 `evals/results/`에 있으면(20261007-204x~) 그것부터 본다.
+2. **lesson A/B(지침서 5.2)**: 후보 #4(폴더 목록 한 번만·변환 호출을 한 응답에 모으기)를 `--lesson`으로 새 기준선과 비교한다.
+   목표 과제는 overwrite_undo(호출 한도 소진)·convert_three_files. 후보 #2(검색 0건 반복 금지)는 find_files 도입으로 낡았고 #3은 #4와 겹쳐 거절 검토.
+   채택 조건: 양쪽 INVALID ≤1, 3/3이던 과제가 안 떨어지고 목표 과제 +2 이상. 자동 채택 금지.
+3. **사람이 `--ui`로 확인**: 자유 입력 질문(버튼 없이 입력창), 후보 선택 버튼, 1~5 평가·원인 칩, Finder 파일 드래그 첨부,
+   Finder 창이 앱 옆에 뜨는지(손쉬운 사용 권한), 직전 대화 기억(`요약해줘` → `그 요약을 파일로 저장해줘`).
+4. 보류: [Claude Code 조사·개선 설계](reviews/2026-10-07-claude-code-research.md) 구현(재개 시 현재 코드와 대조, 계측 P0 먼저),
+   의미 검색·한/영 대체어·pdf/docx 본문 검색, HTML 반복 읽기, 변환 쓰기의 fd 기준 경합 방어.
 
 # 인수인계
+- 이번 작업의 핵심 원인: 반복된 HTTP 400은 공급자가 도구 호출을 스키마로 먼저 검사해 거부한 것이었다. 새 400은 이제 메시지에
+  `HTTP 400: tool_use_failed — <도구>: <위반>`으로 보이므로, 보이면 해당 도구 스키마에서 상한·`oneOf`를 빼고 코드에서 적용한다.
+- 모델이 질문을 남발하면 평가가 INVALID가 된다. free_text는 확인 질문·검색 전 질문을 앱이 돌려보내는 규칙(`_free_text_refusal`)이 있어야 한다.
+- 피드백 DB의 lesson 후보 #2~#4는 미채택이다. 운영 `.voice-action/` DB는 수정하지 않았다.
+- 알려진 불안정: `tests/test_ui.py`의 붙여넣기 테스트는 테스트 중 사람이 키보드를 치면 가끔 실패한다(`d` 같은 글자가 섞임). 코드 결함 아님.
+- 이번 세션 커밋은 `2a74527`~`2959471`(+ 이 문서 커밋). README에 free_text·기억·400 진단·content_keywords 설명을 반영했다.
 - Claude Code 조사 보고서 보관은 문서만 변경했다. 코드·설정·live 평가·GUI 실행은 하지 않았다.
   보고서의 과거 평가·재현을 현재 제품 검증으로 해석하지 않는다.
 - Finder 창 배치는 `finder.arrange`(Accessibility)로 제목이 폴더 이름과 같은 Finder 창만 옮긴다. 권한이 없으면 안내 한 번 후 표시만 한다.
