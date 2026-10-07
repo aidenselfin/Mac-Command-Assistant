@@ -222,8 +222,9 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         problems = diff(expected_manifest(initial, files), manifest(root))
         problems += [f"{name}: not run" for name in expect.get("must_run", [])
                      if name not in tools_run]
-        if "changed_paths" in expect and sorted(changed) != sorted(expect["changed_paths"]):
-            problems.append(f"changed_paths: {sorted(changed)} != {sorted(expect['changed_paths'])}")
+        want = sorted(expect.get("changed_paths", []))
+        if "changed_paths" in expect and sorted(changed) != want:
+            problems.append(f"changed_paths: {sorted(changed)} != {want}")
         valid = status in {"completed", "error"}
         passed = (
             valid
