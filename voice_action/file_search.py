@@ -32,8 +32,11 @@ MAX_VISITED = 20000
 CONTENT_MAX_FILES = 300
 CONTENT_BYTES = 64 * 1024
 CONTENT_SECONDS = 5.0
+WALK_SECONDS = 10.0
 EXCLUDED_DIRS = frozenset({"node_modules", "__pycache__", "venv"})
 TEXT_EXTENSIONS = frozenset({"txt", "md", "csv", "tsv", "json", "rst", "log", "yaml", "yml"})
+# Documents whose text this search does not look into (only their name, folder and dates).
+DOCUMENT_EXTENSIONS = frozenset({"pdf", "docx", "doc", "rtf", "odt", "html", "htm"})
 SEPARATORS = re.compile(r"[-_.\s]+")
 DIGITS = re.compile(r"\d+")
 # Models fill unused optional fields with "", and the provider rejects the call before we see it.
@@ -151,17 +154,22 @@ def _open_below(root: Path, parts: tuple[str, ...], flags: int) -> int:
 Row = tuple[str, bool, bool, tuple]
 
 
-def _list_dir(root: Path, folder: tuple[str, ...]) -> tuple[list[Row], bool]:
-    """(name, is_dir, is_file, (mtime, size)) of the children, read through a held descriptor.
+def _list_dir(root: Path, folder: tuple[str, ...], limit: int) -> tuple[list[Row], bool]:
+    """(rows, more): name, is_dir, is_file and (mtime, size) of at most `limit` children,
+    read through a held descriptor.
 
     A DirEntry from an fd-based scan can only be stat-ed while the descriptor is open, so
-    everything is read before it is closed.
+    everything is read before it is closed. A folder with more entries than the limit is
+    never listed whole in memory.
     """
     descriptor = _open_below(root, folder, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        rows = []
+        rows, more = [], False
         with os.scandir(descriptor) as scanner:
-            for child in sorted(scanner, key=lambda item: item.name):
+            for index, child in enumerate(scanner):
+                if index >= limit:
+                    more = True
+                    break
                 if child.name.startswith(".") or child.is_symlink():
                     rows.append((child.name, False, False, ()))
                     continue
@@ -175,20 +183,24 @@ def _list_dir(root: Path, folder: tuple[str, ...]) -> tuple[list[Row], bool]:
                 rows.append(
                     (child.name, is_dir, is_file, (info.st_mtime, info.st_size) if info else ())
                 )
-        return rows, False
+        return sorted(rows), more
     finally:
         os.close(descriptor)
 
 
 def _walk(roots: tuple[Path, ...]) -> tuple[list[Entry], bool]:
     entries, visited, truncated = [], 0, False
+    started = time.monotonic()
     stack = [(root, ()) for root in reversed(roots)]
     while stack:
+        if time.monotonic() - started > WALK_SECONDS:
+            return entries, True
         root, folder = stack.pop()
         try:
-            rows, _ = _list_dir(root, folder)
+            rows, more = _list_dir(root, folder, MAX_VISITED - visited + 1)
         except OSError:
             continue
+        truncated = truncated or more
         for name, is_dir, is_file, info in rows:
             visited += 1
             if visited > MAX_VISITED:
@@ -232,7 +244,7 @@ def _filter(entries: list[Entry], arguments: dict, roots: tuple[Path, ...]) -> l
         if (not extensions or entry.extension in extensions)
         and (after is None or entry.mtime >= after)
         and (before is None or entry.mtime < before)
-        and (hint is None or hint in _fold("/".join(entry.folder)))
+        and (hint is None or hint in _fold("/".join((entry.root.name, *entry.folder))))
     ]
 
 
@@ -248,8 +260,8 @@ def _read_head(entry: Entry) -> str:
 
 def _search(
     entries: list[Entry], patterns: list[re.Pattern]
-) -> tuple[str, list[tuple[Entry, int]], bool]:
-    """(stage, ranked matches, content scan cut short)."""
+) -> tuple[str, list[tuple[Entry, int]], dict]:
+    """(stage, ranked matches, coverage of the content scan; empty before that stage)."""
     by_name = []
     for entry in entries:
         name = _fold(entry.name)  # with the extension: 'old.log' must find old.log
@@ -257,7 +269,7 @@ def _search(
         if score:
             by_name.append((entry, score))
     if by_name:
-        return "name", by_name, False
+        return "name", by_name, {}
     by_path = []
     for entry in entries:
         folder = _fold("/".join(entry.folder))
@@ -265,23 +277,51 @@ def _search(
         if score:
             by_path.append((entry, score))
     if by_path:
-        return "path", by_path, False
-    started, scanned, cut, by_content = time.monotonic(), 0, False, []
+        return "path", by_path, {}
+    # What the content scan could not look at, so "nothing found" is never over-claimed.
+    coverage = {
+        "cut": False,
+        "head_only": 0,  # text files longer than the part that is read
+        "unreadable": 0,
+        "documents": sum(entry.extension in DOCUMENT_EXTENSIONS for entry in entries),
+    }
+    started, scanned, by_content = time.monotonic(), 0, []
     for entry in entries:
         if entry.extension not in TEXT_EXTENSIONS or entry.size == 0:
             continue
         if scanned >= CONTENT_MAX_FILES or time.monotonic() - started > CONTENT_SECONDS:
-            cut = True
+            coverage["cut"] = True
             break
         scanned += 1
         try:
             text = _fold(_read_head(entry))
         except OSError:
+            coverage["unreadable"] += 1
             continue
+        coverage["head_only"] += entry.size > CONTENT_BYTES
         score = sum(len(pattern.findall(text)) for pattern in patterns)
         if score:
             by_content.append((entry, score))
-    return ("content" if by_content else "none"), by_content, cut
+    return ("content" if by_content else "none"), by_content, coverage
+
+
+def _limits(walk_cut: bool, coverage: dict) -> list[str]:
+    """Why a result may not cover everything, in words for the model and the user."""
+    reasons = []
+    if walk_cut:
+        reasons.append("폴더가 크거나 깊어 일부 폴더·파일을 건너뛰었습니다")
+    if coverage.get("cut"):
+        reasons.append("내용 검사 파일 수·시간 한도에서 멈췄습니다")
+    if coverage.get("head_only"):
+        kib = CONTENT_BYTES // 1024
+        reasons.append(f"긴 텍스트 파일 {coverage['head_only']}개는 앞 {kib} KiB만 검사했습니다")
+    if coverage.get("documents"):
+        reasons.append(
+            f"pdf·docx 등 문서 {coverage['documents']}개는 내용을 검사하지 않았습니다(이름·폴더만)"
+        )
+    if coverage.get("unreadable"):
+        reasons.append(f"읽지 못한 파일이 {coverage['unreadable']}개 있습니다")
+    return reasons
 
 
 def _folder_label(entry: Entry) -> str:
@@ -338,8 +378,7 @@ def _facets(entries: list[Entry]) -> list[tuple[str, str]]:
         # A facet every candidate shares cannot narrow anything.
         for value, count in sorted(counts.items(), key=lambda item: -item[1]):
             if count < len(entries):
-                leaf = value.rsplit("/", 1)[-1] if kind == "폴더" else value
-                facets.append((f"{kind}: {leaf}", f"{kind}: {value} ({count}개)"))
+                facets.append((f"{kind}: {value}", f"{kind}: {value} ({count}개)"))
     return facets[:MAX_FACETS]
 
 
@@ -351,27 +390,37 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     patterns = [_keyword_pattern(item) for item in keywords]
     # Roots come canonical from the config; resolving here would follow a link swapped in later.
     entries, walk_cut = _walk(roots)
-    stage, matches, content_cut = _search(_filter(entries, arguments, roots), patterns)
+    stage, matches, coverage = _search(_filter(entries, arguments, roots), patterns)
     filtered = any(arguments.get(key) for key in FILTER_KEYS)
     # Best match first; newer files break ties.
     ranked = [entry for entry, _ in sorted(matches, key=lambda m: (-m[1], -m[0].mtime, m[0].name))]
     count = len(ranked)
+    reasons = _limits(walk_cut, coverage)
     decision = (
         "none" if count == 0 else "single" if count == 1
         else "choose" if count <= MAX_SHOW else "narrow"
     )
+    if decision == "single" and reasons:
+        # One hit among files that were not fully looked at is not "the only one": confirm it.
+        decision = "choose"
     response: dict = {
         "stage": stage, "decision": decision, "total": count,
-        "truncated": walk_cut or content_cut,
+        "truncated": walk_cut or coverage.get("cut", False),
+        "complete": not reasons,
     }
-    if response["truncated"]:
-        response["note"] = "폴더가 크거나 깊어 일부만 검사했습니다. 결과가 전부가 아닐 수 있습니다."
+    notes = []
+    if reasons:
+        notes.append("검사 범위의 한계: " + "; ".join(reasons) + ".")
+        if decision == "none":
+            notes.append("없다고 단정하지 말고, 파일명·폴더 같은 단서를 사용자에게 물으세요.")
     if filtered and decision == "none":
         # Never widen on our own: a condition the user named must not be dropped silently.
-        response["note"] = response.get("note", "") + (
-            " 형식·폴더·날짜 조건을 적용했을 때 결과가 없습니다. 사용자가 말한 조건이면 풀지 말고 "
+        notes.append(
+            "형식·폴더·날짜 조건을 적용했을 때 결과가 없습니다. 사용자가 말한 조건이면 풀지 말고 "
             "그대로 알리세요. 사용자가 말하지 않은 추측 조건이면 빼고 다시 호출하세요."
-        ).strip()
+        )
+    if notes:
+        response["note"] = " ".join(notes)
     if decision in {"single", "choose"}:
         response["candidates"] = [
             {"path": str(entry.path), "label": _describe(entry)} for entry in ranked
@@ -394,8 +443,9 @@ def clarification_spec(response: dict) -> tuple[str, str, tuple[str, ...], tuple
     decision = response.get("decision")
     if decision == "choose":
         items = response["candidates"]
+        partial = " (일부만 검사한 결과예요)" if response.get("complete") is False else ""
         return (
-            "어떤 파일인가요? 하나를 선택해 주세요.", "file_candidate",
+            f"어떤 파일인가요? 하나를 선택해 주세요.{partial}", "file_candidate",
             tuple(item["path"] for item in items), tuple(item["label"] for item in items),
         )
     if decision != "narrow":

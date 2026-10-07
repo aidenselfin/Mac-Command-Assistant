@@ -44,7 +44,7 @@ def test_widens_to_folder_path_then_content(tmp_path):
     response = find(tmp_path, "예산")
     assert (response["stage"], names(response)) == ("content", ["memo.txt"])
     assert find(tmp_path, "존재하지않는단어") == {
-        "stage": "none", "decision": "none", "total": 0, "truncated": False,
+        "stage": "none", "decision": "none", "total": 0, "truncated": False, "complete": True,
     }
 
 
@@ -60,7 +60,8 @@ def test_content_scan_limit_marks_truncated(tmp_path, monkeypatch):
     for index in range(5):
         (tmp_path / f"f{index}.txt").write_text("nothing")
     response = find(tmp_path, "zzz")
-    assert response["truncated"] is True and "일부만" in response["note"]
+    assert response["truncated"] is True and "한도" in response["note"]
+    assert response["complete"] is False
 
 
 def test_subfolders_symlinks_hidden_and_excluded_dirs(tmp_path):
@@ -133,8 +134,9 @@ def test_many_unrelated_candidates_offer_folder_and_type_facets(tmp_path):
     (tmp_path / "나" / "보고서z.txt").write_text("x")
     question, kind, options, labels = clarification_spec(find(tmp_path, "보고서"))
     assert kind == "narrow_search" and "7개" in question
-    assert "폴더: 가" in options and "형식: .md" in options
-    assert labels[options.index("폴더: 가")].endswith("(3개)")
+    folder = f"폴더: {tmp_path.name}/가"
+    assert folder in options and "형식: .md" in options
+    assert labels[options.index(folder)].endswith("(3개)")
 
 
 def test_single_and_none_need_no_question(tmp_path):
@@ -274,3 +276,85 @@ def test_a_root_replaced_by_a_link_is_not_searched(tmp_path):
     link = tmp_path / "link"
     os.symlink(real, link)
     assert find(link, "a")["decision"] == "none"
+
+
+def test_text_beyond_the_scanned_head_is_reported_as_not_fully_searched(tmp_path, monkeypatch):
+    monkeypatch.setattr(file_search, "CONTENT_BYTES", 10)
+    (tmp_path / "late.txt").write_text("가" * 20 + "찾는말")
+    response = find(tmp_path, "찾는말")
+    assert response["decision"] == "none" and response["complete"] is False
+    assert "앞" in response["note"] and "단정하지 말고" in response["note"]
+
+
+def test_one_hit_among_partly_searched_files_is_confirmed_not_assumed(tmp_path, monkeypatch):
+    monkeypatch.setattr(file_search, "CONTENT_BYTES", 10)
+    (tmp_path / "hit.txt").write_text("찾는말")
+    (tmp_path / "long.txt").write_text("가" * 30)
+    response = find(tmp_path, "찾는말")
+    assert response["stage"] == "content" and response["decision"] == "choose"
+    question, kind, options, _ = clarification_spec(response)
+    assert kind == "file_candidate" and options == (str(tmp_path / "hit.txt"),)
+    assert "일부만 검사" in question
+
+
+def test_documents_and_unreadable_files_are_named_in_the_limits(tmp_path):
+    (tmp_path / "보고서.pdf").write_bytes(b"%PDF")
+    (tmp_path / "locked.txt").write_text("x")
+    os.chmod(tmp_path / "locked.txt", 0)
+    try:
+        response = find(tmp_path, "예산")
+    finally:
+        os.chmod(tmp_path / "locked.txt", 0o600)
+    assert response["decision"] == "none" and response["complete"] is False
+    assert "문서 1개" in response["note"] and "읽지 못한 파일" in response["note"]
+
+
+def test_a_fully_read_small_tree_is_complete(tmp_path):
+    (tmp_path / "a.txt").write_text("예산 3천만원")
+    response = find(tmp_path, "예산")
+    assert response["decision"] == "single" and response["complete"] is True
+    assert "note" not in response
+
+
+def test_a_huge_folder_is_never_listed_whole(tmp_path, monkeypatch):
+    for index in range(50):
+        (tmp_path / f"f{index:02}.txt").write_text("x")
+    monkeypatch.setattr(file_search, "MAX_VISITED", 10)
+    rows, more = file_search._list_dir(tmp_path, (), 10)
+    assert len(rows) == 10 and more is True
+    entries, truncated = file_search._walk((tmp_path,))
+    assert len(entries) <= 10 and truncated is True
+
+
+def test_walk_time_limit_marks_truncated(tmp_path, monkeypatch):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "x.txt").write_text("x")
+    monkeypatch.setattr(file_search, "WALK_SECONDS", -1)
+    assert file_search._walk((tmp_path,)) == ([], True)
+
+
+def test_same_leaf_folder_names_stay_distinct_buttons_and_filter_correctly(tmp_path):
+    for project in ("프로젝트A", "프로젝트B"):
+        (tmp_path / project / "자료").mkdir(parents=True)
+        for index in range(4):
+            (tmp_path / project / "자료" / f"보고{index}.md").write_text("x")
+    response = find(tmp_path, "보고")
+    options = [item["option"] for item in response["narrow_options"]]
+    a_option = f"폴더: {tmp_path.name}/프로젝트A/자료"
+    b_option = f"폴더: {tmp_path.name}/프로젝트B/자료"
+    assert a_option in options and b_option in options
+    only_a = find(tmp_path, "보고", folder_hint=a_option.removeprefix("폴더: "))
+    assert {item["path"].split("/")[-3] for item in only_a["candidates"]} == {"프로젝트A"}
+
+
+def test_same_relative_folder_in_two_roots_is_told_apart_by_root(tmp_path):
+    roots = []
+    for name in ("rootA", "rootB"):
+        root = tmp_path / name
+        (root / "자료").mkdir(parents=True)
+        (root / "자료" / "보고.md").write_text("x")
+        roots.append(root)
+    response = find_files({"keywords": ["보고"], "folder_hint": "rootB/자료"}, tuple(roots))
+    assert [c["path"] for c in response.structured["candidates"]] == [
+        str(roots[1] / "자료" / "보고.md")
+    ]
