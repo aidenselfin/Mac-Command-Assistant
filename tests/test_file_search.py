@@ -153,7 +153,7 @@ def test_number_in_keyword_does_not_match_longer_number(tmp_path):
 
 @pytest.mark.parametrize(
     "arguments",
-    [{}, {"keywords": []}, {"keywords": ["a"] * 7}, {"keywords": ["a"], "modified_after": "어제"}],
+    [{}, {"keywords": []}, {"keywords": [" "]}, {"keywords": ["a"], "modified_after": "어제"}],
 )
 def test_invalid_arguments_are_rejected(tmp_path, arguments):
     with pytest.raises(ToolRejectedError):
@@ -358,3 +358,77 @@ def test_same_relative_folder_in_two_roots_is_told_apart_by_root(tmp_path):
     assert [c["path"] for c in response.structured["candidates"]] == [
         str(roots[1] / "자료" / "보고.md")
     ]
+
+
+# ---- review R1: a content clue narrows the candidates the name already found --------------
+
+
+def make_proposals(root):
+    for index in range(1, 8):
+        (root / f"proposal-{index}.txt").write_text("예산 승인 건" if index == 3 else "일반 내용")
+
+
+def test_a_content_clue_narrows_name_candidates_that_the_name_alone_could_not(tmp_path):
+    make_proposals(tmp_path)
+    assert find(tmp_path, "proposal")["decision"] == "narrow"  # seven by name
+    response = find(tmp_path, "proposal", content_keywords=["예산 승인"])
+    assert response["stage"] == "name+content" and response["decision"] == "single"
+    assert names(response) == ["proposal-3.txt"] and response["complete"] is True
+
+
+def test_the_content_clue_stays_inside_the_name_and_other_conditions(tmp_path):
+    make_proposals(tmp_path)
+    (tmp_path / "other.txt").write_text("예산 승인 건")  # matches the clue, not the name
+    (tmp_path / "자료").mkdir()
+    (tmp_path / "자료" / "proposal-9.txt").write_text("예산 승인 건")
+    inside = find(tmp_path, "proposal", content_keywords=["예산 승인"], folder_hint="자료")
+    assert names(inside) == ["proposal-9.txt"]
+    both = find(tmp_path, "proposal", content_keywords=["예산 승인"])
+    assert sorted(names(both)) == ["proposal-3.txt", "proposal-9.txt"]  # never other.txt
+
+
+def test_a_clue_nothing_matches_says_so_and_never_widens(tmp_path):
+    make_proposals(tmp_path)
+    response = find(tmp_path, "proposal", content_keywords=["존재하지 않는 말"])
+    assert response["decision"] == "none" and "조건" in response["note"]
+
+
+def test_candidates_that_cannot_be_read_are_left_out_and_reported(tmp_path):
+    (tmp_path / "proposal-1.txt").write_text("예산 승인")
+    (tmp_path / "proposal-2.pdf").write_bytes(b"%PDF")
+    response = find(tmp_path, "proposal", content_keywords=["예산"])
+    assert names(response) == ["proposal-1.txt"]  # confirmed rather than assumed: a pdf is unseen
+    assert response["complete"] is False and "문서 1개" in " ".join(response["limits"])
+
+
+def test_without_a_content_clue_the_name_search_is_unchanged(tmp_path):
+    make_proposals(tmp_path)
+    response = find(tmp_path, "proposal")
+    assert response["stage"] == "name" and response["total"] == 7
+
+
+# ---- review R2: an incomplete search says what it did not look at -------------------------
+
+
+def test_an_incomplete_narrow_question_says_the_count_may_be_higher(tmp_path, monkeypatch):
+    monkeypatch.setattr(file_search, "MAX_VISITED", 8)
+    for index in range(30):
+        (tmp_path / f"보고서-{index:02}.md").write_text("x")
+    response = find(tmp_path, "보고서")
+    assert response["complete"] is False and response["limits"]
+    question, _, _, _ = clarification_spec(response)
+    assert "일부만 검사한 결과" in question
+
+
+def test_oversized_lists_are_cut_in_code_instead_of_failing_the_provider_check(tmp_path):
+    (tmp_path / "a.md").write_text("x")
+    response = find(
+        tmp_path, *["a", *[f"쓸데없는{i}" for i in range(20)]],
+        extensions=[f"e{i}" for i in range(30)] + ["md"],
+        content_keywords=[f"단어{i}" for i in range(30)],
+    )
+    # Nothing raised. The first six keywords were kept, so "a" still found the file; the
+    # extensions list was cut before "md", so that filter excluded nothing it should not.
+    assert response["decision"] in {"none", "single", "choose"}
+    schema = file_search.FIND_FILES_DEFINITION.schema["properties"]
+    assert not any("maxItems" in value or "maxLength" in value for value in schema.values())

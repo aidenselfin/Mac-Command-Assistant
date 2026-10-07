@@ -30,6 +30,7 @@ from voice_action.file_search import (
     clarification_spec,
 )
 from voice_action.mcp_client import (
+    TRUNCATION_MARKER,
     MCPError,
     ToolDefinition,
     ToolRejectedError,
@@ -454,7 +455,10 @@ MAX_CLARIFICATIONS = 2
 # A request only to locate a file needs no read; anything about its content does.
 LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")
-FIND_ARGUMENT_KEYS = ("keywords", "extensions", "folder_hint", "modified_after", "modified_before")
+FIND_ARGUMENT_KEYS = (
+    "keywords", "extensions", "folder_hint", "modified_after", "modified_before",
+    "content_keywords",
+)
 # Added by code, not the model, so a big file is never summarized as if it were fully read.
 MEMORY_REPLY_CHARS = 300
 MEMORY_MAX_FILES = 3
@@ -566,7 +570,8 @@ def _partial_read(call: ToolCall, result: ToolResult) -> str | None:
         if isinstance(wanted, int) and len(result.text.splitlines()) >= wanted:
             return f"{where} {wanted}줄"
     if result.truncated is True:
-        return f"앞부분 약 {len(result.text):,}자"
+        # The cut-off marker was added by the app; it is not part of what was read.
+        return f"앞부분 약 {len(result.text.removesuffix(TRUNCATION_MARKER)):,}자"
     return None
 
 
@@ -993,7 +998,7 @@ class Planner:
                 f"이전 검색 인자: {context.search_arguments or '없음'}. 원래 요청의 검색어와 "
                 "이 조건을 모두 적용해 local__find_files를 다시 호출하세요(폴더는 folder_hint, "
                 "형식은 extensions, 날짜는 modified_after/modified_before, 번호나 이름은 "
-                "keywords)."
+                "keywords, 파일 안에 있어야 할 내용은 content_keywords). 이전 조건은 유지하세요."
             )
         else:
             resolution = f"사용자가 선택한 편집 기준: {selection}"
@@ -1084,10 +1089,13 @@ class Planner:
                     "정확한 파일명이 없는 파일 요청은 사용자에게 되묻기 전에 "
                     "반드시 local__find_files를 먼저 호출하세요. 안 쓰는 선택 인자는 "
                     "생략하세요(빈 문자열 금지). keywords에는 파일명·주제어와 "
-                    "한/영 변형을 넣고 '파일' 같은 일반 단어는 빼세요. "
+                    "한/영 변형을 넣고 '파일' 같은 일반 단어는 빼세요. 사용자가 '…가 들어 있는', "
+                    "'…얘기가 있는'처럼 본문 내용을 단서로 말하면 그 말은 keywords가 아니라 "
+                    "content_keywords에 넣으세요. "
                     "앱이 파일명, 폴더, 내용 순으로 넓혀 "
                     "찾고 후보가 여럿이면 사용자에게 직접 묻습니다. decision이 single이면 "
-                    "그 파일로 진행하고, none이면 찾지 못했다고 알리세요. "
+                    "그 파일로 진행하고, none이면 찾지 못했다고 알리되 complete가 false면 "
+                    "limits에 적힌 검사하지 못한 범위를 함께 알리세요. "
                     "후보가 하나면 자동 진행하고, "
                     "여러 개면 파일을 읽거나 선택하지 마세요. "
                     "파일명이 특정되지 않은 회의록 요약은 local__find_files의 keywords에 "
@@ -1735,6 +1743,12 @@ class Planner:
             return Clarification(question, options, context, labels)
         decision = response.get("decision")
         if decision == "none" and state.search_required:
+            if response.get("complete") is False:  # never claim a full search that was not
+                limits = "; ".join(response.get("limits") or [])
+                return Completed(
+                    f"검사한 범위에서는 일치하는 파일을 찾지 못했습니다. ({limits}) "
+                    "파일명 일부나 폴더를 알려주세요."
+                )
             return Completed(
                 "요청과 일치하는 파일을 찾지 못했습니다. 파일명을 더 구체적으로 알려주세요."
             )

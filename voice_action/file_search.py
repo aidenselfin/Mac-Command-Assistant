@@ -39,9 +39,9 @@ TEXT_EXTENSIONS = frozenset({"txt", "md", "csv", "tsv", "json", "rst", "log", "y
 DOCUMENT_EXTENSIONS = frozenset({"pdf", "docx", "doc", "rtf", "odt", "html", "htm"})
 SEPARATORS = re.compile(r"[-_.\s]+")
 DIGITS = re.compile(r"\d+")
-# Models fill unused optional fields with "", and the provider rejects the call before we see it.
-DATE_PATTERN = r"^(\d{4}-\d{2}-\d{2})?$"
-FILTER_KEYS = frozenset({"extensions", "folder_hint", "modified_after", "modified_before"})
+FILTER_KEYS = frozenset(
+    {"extensions", "folder_hint", "modified_after", "modified_before", "content_keywords"}
+)
 
 FIND_FILES_DEFINITION = ToolDefinition(
     FIND_FILES_TOOL,
@@ -49,29 +49,25 @@ FIND_FILES_DEFINITION = ToolDefinition(
     "순서로 앱이 알아서 넓혀 가며 찾으므로 keywords에 파일명·주제어와 한/영 변형(예: 회의록, "
     "meeting, minutes)을 넣는다. 각 keyword는 대체어이며 하나만 맞아도 된다. "
     "extensions·folder_hint·modified_*는 사용자가 형식·폴더·날짜를 말했을 때만 쓴다. "
-    "folder_hint는 폴더 이름이지 절대경로가 아니다. 조건 때문에 못 찾으면 앱이 조건을 풀어 "
-    "다시 찾는다. 결과의 decision이 single이면 그 파일을 쓰고, choose·narrow는 앱이 "
-    "사용자에게 직접 묻는다.",
+    "folder_hint는 폴더 이름이지 절대경로가 아니다. content_keywords는 파일 이름이 아니라 "
+    "본문에 들어 있어야 할 말(예: 예산 승인)로, 이름·폴더로 찾은 후보 안에서만 본문을 확인해 "
+    "좁힌다. 앱은 사용자가 지정한 조건을 스스로 풀지 않는다. 조건 때문에 결과가 없으면 "
+    "사용자가 말한 조건은 그대로 두고 알리고, 추측해 넣은 조건만 빼고 다시 호출할 수 있다. "
+    "결과의 decision이 single이면 그 파일을 쓰고, choose·narrow는 앱이 사용자에게 직접 "
+    "묻는다. complete가 false면 limits에 적힌 검사하지 못한 범위를 사용자에게 함께 알린다.",
     {
         "type": "object",
+        # No size limits here: a provider checks a generated call against this schema before we
+        # ever see it and answers HTTP 400 for "9 items, want 8". The limits are applied in code.
         "properties": {
-            "keywords": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1, "maxLength": 100},
-                "minItems": 1,
-                "maxItems": MAX_KEYWORDS,
-            },
-            "extensions": {
-                "type": ["array", "null"],
-                "items": {"type": "string", "maxLength": 10},
-                "maxItems": 8,
-            },
-            "folder_hint": {"type": ["string", "null"], "maxLength": 400},
-            "modified_after": {"type": ["string", "null"], "pattern": DATE_PATTERN},
-            "modified_before": {"type": ["string", "null"], "pattern": DATE_PATTERN},
+            "keywords": {"type": "array", "items": {"type": "string"}},
+            "extensions": {"type": ["array", "null"], "items": {"type": "string"}},
+            "content_keywords": {"type": ["array", "null"], "items": {"type": "string"}},
+            "folder_hint": {"type": ["string", "null"]},
+            "modified_after": {"type": ["string", "null"]},
+            "modified_before": {"type": ["string", "null"]},
         },
         "required": ["keywords"],
-        # Stray fields a model invents are ignored, not refused by the provider.
     },
 )
 
@@ -232,7 +228,9 @@ def _folder_hint(arguments: dict, roots: tuple[Path, ...]) -> str | None:
 
 
 def _filter(entries: list[Entry], arguments: dict, roots: tuple[Path, ...]) -> list[Entry]:
-    extensions = {item.lower().lstrip(".") for item in arguments.get("extensions") or [] if item}
+    extensions = {
+        item.lower().lstrip(".") for item in (arguments.get("extensions") or [])[:20] if item
+    }
     after = _day(arguments.get("modified_after"), end=False)
     before = _day(arguments.get("modified_before"), end=True)
     if after is not None and before is not None and after >= before:
@@ -382,9 +380,42 @@ def _facets(entries: list[Entry]) -> list[tuple[str, str]]:
     return facets[:MAX_FACETS]
 
 
+def _narrow_by_content(
+    ranked: list[Entry], words: list[re.Pattern], coverage: dict
+) -> tuple[list[Entry], dict]:
+    """Keep the candidates whose beginning mentions one of the words; best match first.
+
+    Only text files can be checked. A candidate that cannot be (a pdf, an unreadable file) is
+    left out and counted, so the answer says what it could not look into.
+    """
+    coverage = {"cut": False, "head_only": 0, "unreadable": 0, "documents": 0, **coverage}
+    started, scanned, kept = time.monotonic(), 0, []
+    for entry in ranked:
+        if entry.extension not in TEXT_EXTENSIONS:
+            coverage["documents"] += entry.extension in DOCUMENT_EXTENSIONS
+            continue
+        if scanned >= CONTENT_MAX_FILES or time.monotonic() - started > CONTENT_SECONDS:
+            coverage["cut"] = True
+            break
+        scanned += 1
+        try:
+            text = _fold(_read_head(entry))
+        except OSError:
+            coverage["unreadable"] += 1
+            continue
+        coverage["head_only"] += entry.size > CONTENT_BYTES
+        score = sum(len(pattern.findall(text)) for pattern in words)
+        if score:
+            kept.append((entry, score))
+    kept.sort(key=lambda item: (-item[1], -item[0].mtime, item[0].name))
+    return [entry for entry, _ in kept], coverage
+
+
 def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     _validate(arguments)
-    keywords = list(dict.fromkeys(_fold(item) for item in arguments["keywords"] if _fold(item)))
+    keywords = list(
+        dict.fromkeys(_fold(item[:100]) for item in arguments["keywords"] if _fold(item[:100]))
+    )[:MAX_KEYWORDS]
     if not keywords:
         raise ToolRejectedError("검색어가 비어 있습니다.")
     patterns = [_keyword_pattern(item) for item in keywords]
@@ -394,6 +425,16 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     filtered = any(arguments.get(key) for key in FILTER_KEYS)
     # Best match first; newer files break ties.
     ranked = [entry for entry, _ in sorted(matches, key=lambda m: (-m[1], -m[0].mtime, m[0].name))]
+    content_words = [
+        _keyword_pattern(word)
+        for word in dict.fromkeys(
+            _fold(item[:100]) for item in (arguments.get("content_keywords") or [])[:MAX_KEYWORDS]
+        )
+        if word
+    ]
+    if content_words and ranked:
+        ranked, coverage = _narrow_by_content(ranked, content_words, coverage)
+        stage = f"{stage}+content"
     count = len(ranked)
     reasons = _limits(walk_cut, coverage)
     decision = (
@@ -410,6 +451,7 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     }
     notes = []
     if reasons:
+        response["limits"] = reasons  # for the app's own wording; the note is for the model
         notes.append("검사 범위의 한계: " + "; ".join(reasons) + ".")
         if decision == "none":
             notes.append("없다고 단정하지 말고, 파일명·폴더 같은 단서를 사용자에게 물으세요.")
@@ -452,17 +494,21 @@ def clarification_spec(response: dict) -> tuple[str, str, tuple[str, ...], tuple
         return None
     options, labels = [], []
     series = response.get("series")
+    partial = (
+        " (일부만 검사한 결과라 실제 후보는 더 많을 수 있어요)"
+        if response.get("complete") is False else ""
+    )
     if series:
         options.append(series["newest"])
         labels.append(series["newest_label"])
         head = (
             f"번호만 다른 파일이 {series['count']}개 있어요 ({series['range']}). "
-            "원하는 번호나 날짜를 입력하거나 버튼을 눌러 주세요."
+            f"원하는 번호나 날짜를 입력하거나 버튼을 눌러 주세요.{partial}"
         )
     else:
         head = (
             f"후보가 {response['total']}개로 많아요. 폴더, 날짜, 형식, 파일 내용의 단서를 "
-            "입력하거나 버튼으로 범위를 좁혀 주세요."
+            f"입력하거나 버튼으로 범위를 좁혀 주세요.{partial}"
         )
     for item in response.get("narrow_options", ()):
         options.append(item["option"])

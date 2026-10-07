@@ -198,3 +198,38 @@ async def test_head_and_tail_reads_say_which_part_was_read(config):
             assert outcome == Completed("요약")
         else:
             assert expected in outcome.text, (extra, outcome.text)
+
+
+async def test_an_incomplete_search_for_meeting_notes_names_what_it_could_not_check(config):
+    root = config.allowed_directories[0]
+    (root / "보고서.pdf").write_bytes(b"%PDF")  # a document whose text is never searched
+    model = scripted(find_turn("회의록"))
+    planner, _ = make_planner(config, model)
+
+    outcome = await planner.run("회의록 요약해줘")
+
+    assert isinstance(outcome, Completed)
+    assert outcome.text.startswith("검사한 범위에서는 일치하는 파일을 찾지 못했습니다.")
+    assert "pdf·docx 등 문서 1개" in outcome.text
+    # A complete search keeps the plain wording.
+    (root / "보고서.pdf").unlink()
+    model = scripted(find_turn("회의록"))
+    planner, _ = make_planner(config, model)
+    plain = await planner.run("회의록 요약해줘")
+    assert plain.text == (
+        "요청과 일치하는 파일을 찾지 못했습니다. 파일명을 더 구체적으로 알려주세요."
+    )
+
+
+async def test_partial_read_counts_only_what_was_read_not_the_cut_off_marker(config):
+    from voice_action.mcp_client import TRUNCATION_MARKER, ToolResult
+
+    big = config.allowed_directories[0] / "큰.txt"
+    big.write_text("x")
+    model = scripted(read_turn(big), ModelTurn("요약", []))
+    planner, gateway = make_planner(config, model)
+    gateway.call_tool.return_value = ToolResult(
+        True, "가" * 50_000 + TRUNCATION_MARKER, truncated=True
+    )
+    outcome = await planner.run("큰.txt 요약해줘")
+    assert "앞부분 약 50,000자만" in outcome.text and "50,012" not in outcome.text
