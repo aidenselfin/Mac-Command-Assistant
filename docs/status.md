@@ -19,6 +19,8 @@
   테스트 전용 LaunchAgent 영구 설치, 첫 실행 exit 0·별도 ref 생성 확인. 재로그인은 직접 확인하지 않았다.
 
 # 다음 작업
+- 사용자 요청으로 [Claude Code 조사·개선 설계](reviews/2026-10-07-claude-code-research.md) 구현은 보류.
+  재개 시 f417855 기준 결과를 현재 코드와 다시 대조하고, 계측(P0) 후 완료 조건(P1)을 검토한다. 개발 프롬프트는 보고서에 보관.
 - Finder 실제 드래그, Finder 창이 앱 옆에 뜨는지(손쉬운 사용 권한 포함), 후보 버튼·평가·원인 칩의 사람 GUI 확인.
 - [GUI 후속 리뷰](reviews/2026-10-07-ui-progress-followup-review.md)의 R1~R4 및 공급자 HTTP 400 원인 검토.
 - 삭제·변환의 텍스트 승인 질문 종료를 lesson 후보 비교로 다룬다. 후보는 아직 채택하지 않았다.
@@ -26,6 +28,8 @@
 - 장기 보류: HTML 반복 읽기·호출 한도 소진, 변환 쓰기의 fd 기준 경합 방어.
 
 # 인수인계
+- Claude Code 조사 보고서 보관은 문서만 변경했다. 코드·설정·live 평가·GUI 실행은 하지 않았다.
+  보고서의 과거 평가·재현을 현재 제품 검증으로 해석하지 않는다.
 - Finder 창 배치는 `finder.arrange`(Accessibility)로 제목이 폴더 이름과 같은 Finder 창만 옮긴다. 권한이 없으면 안내 한 번 후 표시만 한다.
   기본 on, `VOICE_ACTION_FINDER_DOCK=off`로 끈다. 이전 "배치 보류" 결정은 decisions.md 항목으로 대체했다.
 - 모든 세션은 AGENTS.md·이 문서·decisions.md를 재독한다. 수정 소유권의 원본은 `vibe.py status`다.
