@@ -499,3 +499,60 @@ async def test_a_cancelled_question_and_an_undo_are_not_rateable(tmp_path):
     await controller.undo_last_write()
     assert not controller.ratable and not await controller.rate(5)
     feedback.db.close()
+
+
+class AttachingPlanner(ScriptedPlanner):
+    def __init__(self, config, actions):
+        super().__init__(actions)
+        self.config, self.attachments = config, []
+
+    async def run(self, text, *, attachment=None):
+        self.attachments.append(attachment)
+        return await super().run(text)
+
+
+async def test_an_attachment_belongs_to_the_next_command_only(config):
+    from voice_action.attachment import AttachmentError
+
+    root = config.allowed_directories[0]
+    target = root / "a b.md"
+    target.write_text("x")
+    planner = AttachingPlanner(config, [Completed("1"), Completed("2")])
+    controller = RuntimeController(planner)
+
+    assert controller.attach(str(target)) == str(target) and controller.attachment == str(target)
+    await controller.submit("이 파일 요약해줘")
+    await controller.submit("그냥 질문")
+
+    assert planner.attachments == [str(target), None]
+    assert controller.attachment is None
+    with pytest.raises(AttachmentError):
+        controller.attach(str(root.parent / "밖.txt"))
+    assert controller.attachment is None
+
+
+async def test_a_refused_drop_keeps_the_earlier_attachment_and_detach_clears_it(config):
+    from voice_action.attachment import AttachmentError
+
+    root = config.allowed_directories[0]
+    (root / "a.md").write_text("x")
+    controller = RuntimeController(AttachingPlanner(config, []))
+    controller.attach(str(root / "a.md"))
+    with pytest.raises(AttachmentError):
+        controller.attach(str(root))  # a folder
+    assert controller.attachment == str(root / "a.md")
+    controller.detach()
+    assert controller.attachment is None
+
+
+async def test_attaching_is_refused_while_a_command_is_running_or_waiting(config):
+    from voice_action.attachment import AttachmentError
+
+    root = config.allowed_directories[0]
+    (root / "a.md").write_text("x")
+    options = ("1",)
+    context = ClarificationContext("요약", "file_candidate", options, 1)
+    controller = RuntimeController(AttachingPlanner(config, [Clarification("?", options, context)]))
+    await controller.submit("요약해줘")  # now waiting for an answer
+    with pytest.raises(AttachmentError):
+        controller.attach(str(root / "a.md"))

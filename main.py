@@ -14,6 +14,7 @@ from pathlib import Path
 from openai import AsyncOpenAI
 from rich.console import Console
 
+from voice_action.attachment import AttachmentError
 from voice_action.config import ConfigError, load_config
 from voice_action.feedback import DEFAULT_DB_PATH, RATING_TAGS, FeedbackLoop, build_feedback
 from voice_action.finder import reveal
@@ -288,6 +289,10 @@ async def _interactive_loop(config, console, undo_journal, manager, feedback) ->
                         except Exception as exc:
                             console.print(f"[ERROR] {error_message(exc)}", markup=False)
                         continue
+                    if controller.state is RuntimeState.IDLE and attach_command(
+                        controller, text, console
+                    ):
+                        continue
                     rating = parse_rating(text)
                     if rating is not None and controller.state is RuntimeState.IDLE:
                         saved = await controller.rate(*rating)
@@ -310,6 +315,23 @@ RATE_HINT = (
     "[RATE] 답변 평가: rate 1~5 (5가 최고). 3점 이하면 원인을 덧붙일 수 있어요: "
     + " ".join(sorted(RATING_TAGS))
 )
+
+
+def attach_command(controller: RuntimeController, text: str, console: Console) -> bool:
+    """`attach <path>` / `detach`: the terminal twin of dropping a file on the window."""
+    head, _, rest = text.strip().partition(" ")
+    if head.casefold() == "detach" and not rest:
+        controller.detach()
+        console.print("[ATTACH] 첨부를 해제했습니다.", markup=False)
+        return True
+    if head.casefold() != "attach" or not rest.strip():
+        return False
+    try:
+        path = controller.attach(rest.strip().strip("'\""))
+        console.print(f"[ATTACH] 다음 명령의 대상 파일: {path}", markup=False, highlight=False)
+    except AttachmentError as exc:
+        console.print(f"[ATTACH-ERROR] {exc}", markup=False, highlight=False)
+    return True
 
 
 def parse_rating(text: str) -> tuple[int, tuple[str, ...]] | None:

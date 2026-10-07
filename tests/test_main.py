@@ -731,3 +731,31 @@ def test_approval_output_and_repr_hide_unbounded_content(config, capsys):
 )
 def test_parse_rating(text, expected):
     assert main.parse_rating(text) == expected
+
+
+def test_attach_command_attaches_inside_the_folders_and_reports_refusals(config, capsys):
+    from voice_action.runtime import RuntimeController
+
+    class Planner:
+        def __init__(self, config):
+            self.config = config
+
+        def set_event_observer(self, _observer):
+            pass
+
+    root = config.allowed_directories[0]
+    inside = root / "내 문서.md"
+    inside.write_text("x")
+    controller = RuntimeController(Planner(config))
+    console = main.Console(width=300, highlight=False)
+
+    assert main.attach_command(controller, f'attach "{inside}"', console)
+    assert controller.attachment == str(inside)
+    assert main.attach_command(controller, f"attach {root.parent / '밖.txt'}", console)
+    assert controller.attachment == str(inside)  # a refused drop keeps the earlier one
+    assert main.attach_command(controller, "detach", console)
+    assert controller.attachment is None
+    assert not main.attach_command(controller, "attach", console)  # no path: a normal command
+    assert not main.attach_command(controller, "attached files?", console)
+    output = capsys.readouterr().out
+    assert f"다음 명령의 대상 파일: {inside}" in output and "[ATTACH-ERROR]" in output

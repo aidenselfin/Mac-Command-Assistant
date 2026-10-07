@@ -651,6 +651,15 @@ wheels = [
 ]
 
 [[package]]
+name = "tkinterdnd2"
+version = "0.6.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/e7/50713531e91cbbd546a72f3044742fa43914bdebab3e012cccb28da5eb8a/tkinterdnd2-0.6.3.tar.gz", hash = "sha256:53ed472ec08705702e087b5664f0534ca53a07a67102255f9cdc82bc5094158b", size = 735139, upload-time = "2026-09-04T16:36:38.159Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/86/fb62a6251863085d9e4ccf80cd0e55a19b91fab752a0b245d59aecade8f8/tkinterdnd2-0.6.3-py3-none-any.whl", hash = "sha256:50c7386302104bfb30d8e15b4cc53c0581bc51a28186ff4d7ad3cb2cc820c936", size = 816576, upload-time = "2026-09-04T16:36:36.456Z" },
+]
+
+[[package]]
 name = "tqdm"
 version = "4.70.0"
 source = { registry = "https://pypi.org/simple" }
@@ -709,6 +718,7 @@ dependencies = [
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
     { name = "python-dotenv" },
     { name = "rich" },
+    { name = "tkinterdnd2" },
 ]
 
 [package.dev-dependencies]
@@ -728,6 +738,7 @@ requires-dist = [
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=10,<13" },
     { name = "python-dotenv", specifier = ">=1,<2" },
     { name = "rich", specifier = ">=14,<15" },
+    { name = "tkinterdnd2", specifier = ">=0.6.3" },
 ]
 
 [package.metadata.requires-dev]

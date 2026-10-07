@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 
+from voice_action.attachment import AttachmentError, check_attachment
 from voice_action.planner import (
     MAX_CLARIFICATIONS,
     ApprovalRequired,
@@ -124,6 +125,7 @@ class RuntimeController:
         self._pending: Clarification | None = None
         self._pending_approval: ApprovalRequired | None = None
         self._in_flight = False
+        self._attachment: str | None = None  # one dropped file, for the next command only
         self._answered_run: str | None = None  # the run whose Completed answer can be rated
         self.planner.set_event_observer(self._on_planner_event)
 
@@ -138,6 +140,23 @@ class RuntimeController:
     @property
     def pending_approval(self) -> ApprovalRequired | None:
         return self._pending_approval
+
+    @property
+    def attachment(self) -> str | None:
+        return self._attachment
+
+    def attach(self, path: str) -> str:
+        """Make one file inside the allowed folders the target of the next command.
+
+        Raises AttachmentError (and keeps any earlier attachment) when it is refused.
+        """
+        if self._in_flight or self.state is not RuntimeState.IDLE:
+            raise AttachmentError("작업이 끝난 뒤에 파일을 놓아 주세요.")
+        self._attachment = check_attachment(path, self.planner.config.allowed_directories)
+        return self._attachment
+
+    def detach(self) -> None:
+        self._attachment = None
 
     @property
     def ratable(self) -> bool:
@@ -170,7 +189,12 @@ class RuntimeController:
             if self.state is RuntimeState.WAITING_USER_INPUT:
                 return await self._submit_clarification_answer(text)
             self._transition(RuntimeState.PLANNING, "command_started")
-            outcome = await self.planner.run(text)
+            attachment, self._attachment = self._attachment, None  # one command, then gone
+            outcome = await (
+                self.planner.run(text, attachment=attachment)
+                if attachment is not None
+                else self.planner.run(text)
+            )
             return self._finish(outcome)
         except BaseException as exc:
             if self._feedback is not None:

@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, AuthenticationError
 
+from voice_action.attachment import AttachmentError, check_attachment
 from voice_action.config import Config
 from voice_action.conversion import (
     CONVERT_DEFINITION,
@@ -155,6 +156,7 @@ class ClarificationContext:
     # What the user narrowed so far and the last search, so another round adds to them.
     conditions: tuple[str, ...] = ()
     search_arguments: str = ""
+    attachment: str = ""  # the dropped file this command is about, if any
 
 
 @dataclass(frozen=True)
@@ -197,6 +199,7 @@ class ApprovalContext:
     conditions: tuple[str, ...] = ()
     last_search: str = ""
     changed_paths: tuple[str, ...] = ()
+    attachment: str | None = None
 
     @property
     def digest(self) -> str:
@@ -757,12 +760,16 @@ def _without_quoted_text(text: str, *, action_pattern=WEB_SAVE_ACTION_PATTERN) -
     return "".join(masked)
 
 
-def _edit_clarification(original_request: str, count: int = 1) -> Clarification:
+def _edit_clarification(
+    original_request: str, count: int = 1, attachment: str = ""
+) -> Clarification:
     options = ("문서 구조와 제목 정리", "문장을 간결하게 다듬기", "맞춤법과 표현 교정")
     return Clarification(
         "어떤 기준으로 문서를 정리할까요?",
         options,
-        ClarificationContext(original_request, "edit_criteria", options, count),
+        ClarificationContext(
+            original_request, "edit_criteria", options, count, attachment=attachment
+        ),
     )
 
 
@@ -799,6 +806,7 @@ class _LoopState:
     conditions: tuple[str, ...] = ()
     last_search: str = ""
     changed_paths: tuple[str, ...] = ()
+    attachment: str | None = None
 
 
 class Planner:
@@ -848,16 +856,25 @@ class Planner:
             return Completed(result.message)
         return Error(result.message)
 
-    async def run(self, user_text: str) -> PlannerOutcome:
+    async def run(self, user_text: str, *, attachment: str | None = None) -> PlannerOutcome:
+        """`attachment` is a dropped file the command is about; it is checked again here."""
         if not user_text.strip():
             raise PlannerError("명령이 비어 있습니다.")
         self.timing.reset()
+        if attachment is not None:
+            try:
+                attachment = check_attachment(attachment, self.config.allowed_directories)
+                await self._gateway.validate_result_path(attachment)
+            except AttachmentError as exc:
+                return Error(str(exc))
+            except (MCPError, OSError):
+                return Error("첨부한 파일이 허용 경로 안의 읽을 수 있는 파일이 아닙니다.")
         if _has_ambiguous_user_url(user_text):
             return Error(
                 "URL 경계가 모호합니다. 주소를 <https://example.com/경로>처럼 "
                 "꺾쇠로 감싸거나 URL 뒤에 공백을 넣어 다시 요청해 주세요."
             )
-        if _destructive_request(user_text) and not (
+        if _destructive_request(user_text) and attachment is None and not (
             OUTPUT_FILENAME_PATTERN.search(user_text)
             or any(root.name in user_text or str(root) in user_text
                    for root in self.config.allowed_directories)
@@ -867,7 +884,14 @@ class Planner:
                 "먼저 파일 목록 조회로 대상을 확인할 수 있습니다."
             )
         if _ambiguous_mutation(user_text):
-            return _edit_clarification(user_text)
+            return _edit_clarification(user_text, attachment=attachment or "")
+        if attachment is not None:
+            return await self._run_loop(
+                user_text,
+                resolution=f"사용자가 첨부한 파일: {attachment}. 이 파일이 요청의 대상입니다.",
+                selected_file=attachment,
+                attachment=attachment,
+            )
         return await self._run_loop(user_text)
 
     async def resume(self, context: ClarificationContext, selection: str) -> PlannerOutcome:
@@ -898,11 +922,15 @@ class Planner:
                 await self._gateway.validate_result_path(selection)
             except (MCPError, OSError):
                 return Error("선택한 파일이 허용 경로 안의 읽을 수 있는 파일이 아닙니다.")
+        attachment = context.attachment or None
+        if attachment is not None and not is_file:
+            resolution += f" 사용자가 첨부한 파일: {attachment}. 이 파일이 요청의 대상입니다."
         return await self._run_loop(
             context.original_request,
             resolution=resolution,
             prior_clarifications=context.clarification_count,
-            selected_file=selection if is_file else None,
+            selected_file=selection if is_file else attachment,
+            attachment=attachment,
             conditions=conditions,
             last_search=context.search_arguments if narrowing and not is_file else "",
         )
@@ -916,6 +944,7 @@ class Planner:
         selected_file: str | None = None,
         conditions: tuple[str, ...] = (),
         last_search: str = "",
+        attachment: str | None = None,
     ) -> PlannerOutcome:
         self.timing.reset()
         tools = list(self._tools if self._tools is not None else await self._gateway.list_tools())
@@ -1020,6 +1049,7 @@ class Planner:
             write_completed=False,
             conditions=conditions,
             last_search=last_search,
+            attachment=attachment,
         )
         return await self._continue(state)
 
@@ -1206,7 +1236,8 @@ class Planner:
                     turn.clarification.question,
                     options,
                     ClarificationContext(
-                        state.user_text, turn.clarification.kind, options, count
+                        state.user_text, turn.clarification.kind, options, count,
+                        attachment=state.attachment or "",
                     ),
                 )
             if not turn.tool_calls:
@@ -1368,6 +1399,11 @@ class Planner:
     async def _policy_error(
         self, state: _LoopState, call: ToolCall, arguments: dict
     ) -> str | None:
+        if state.attachment is not None:
+            if call.name == CONVERT_TOOL and arguments.get("source") != state.attachment:
+                return "첨부한 파일만 변환할 수 있습니다."
+            if call.name == DELETE_TOOL and arguments.get("paths") != [state.attachment]:
+                return "첨부한 파일 하나만 삭제할 수 있습니다."
         if call.name == CONVERT_TOOL and state.read_only_candidate_request:
             return "읽기 전용 요청에서는 파일을 변환할 수 없습니다."
         if call.name == CONVERT_TOOL and (state.user_urls or state.web_attempted):
@@ -1377,6 +1413,14 @@ class Planner:
                 return "읽기 전용 요청에서는 파일을 삭제할 수 없습니다."
             if re.search(r"재귀|하위\s*폴더|recursive|\*\*", state.user_text, re.IGNORECASE):
                 return "폴더/재귀 삭제는 지원하지 않습니다. 파일만 삭제할 수 있습니다."
+            if state.attachment is not None:
+                # The attached file is the named target (checked above to be the only one);
+                # the delete must still be the user's own plain request, not a web command.
+                if not _destructive_request(state.user_text) or USER_URL_PATTERN.search(
+                    state.user_text
+                ):
+                    return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹과 분리하세요."
+                return None
             return _delete_scope_error(arguments, state.user_text, self.config.allowed_directories)
         if call.name == FILESYSTEM_WRITE_TOOL and (
             state.user_urls or USER_URL_PATTERN.search(state.user_text)
@@ -1585,7 +1629,8 @@ class Planner:
                 )
             question, kind, options, labels = spec
             context = ClarificationContext(
-                state.user_text, kind, options, count, state.conditions, state.last_search
+                state.user_text, kind, options, count, state.conditions, state.last_search,
+                state.attachment or "",
             )
             return Clarification(question, options, context, labels)
         decision = response.get("decision")
@@ -1641,6 +1686,7 @@ class Planner:
             conditions=state.conditions,
             last_search=state.last_search,
             changed_paths=state.changed_paths,
+            attachment=state.attachment,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -1686,6 +1732,7 @@ class Planner:
             conditions=context.conditions,
             last_search=context.last_search,
             changed_paths=context.changed_paths,
+            attachment=context.attachment,
         )
 
     def _append_tool_error(
