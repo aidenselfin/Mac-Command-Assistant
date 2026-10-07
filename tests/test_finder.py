@@ -3,6 +3,7 @@
 import json
 import shutil
 import sys
+import unicodedata
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -118,3 +119,69 @@ async def test_conversion_reports_the_new_file_not_the_source(config):
     done = await planner.approve(pending.context)
     assert done.changed_paths == (str(root / "메모.html"),)
     assert Path(done.changed_paths[0]).exists()  # noqa: ASYNC240 - one stat in a test
+
+
+# ---- reveal -----------------------------------------------------------------------------
+
+from voice_action import finder  # noqa: E402
+
+pytestmark_mac = pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+
+
+class FakeWorkspace:
+    def __init__(self, error=None):
+        self.shown, self.error = [], error
+
+    def activateFileViewerSelectingURLs_(self, urls):  # noqa: N802 - the Cocoa method name
+        if self.error:
+            raise self.error
+        # Cocoa hands paths back decomposed (NFD); that is the same file, so compare as NFC.
+        self.shown.append([unicodedata.normalize("NFC", str(url.path())) for url in urls])
+
+
+@pytestmark_mac
+def test_reveal_selects_exactly_the_given_files_including_hangul_and_spaces(tmp_path):
+    root = tmp_path.resolve()
+    first, second = root / "한글 요약.txt", root / "하위 폴더" / "b c.md"
+    second.parent.mkdir()
+    first.write_text("x")
+    second.write_text("x")
+    workspace = FakeWorkspace()
+
+    assert finder.reveal((str(first), str(second)), (root,), workspace=lambda: workspace)
+    nfc = unicodedata.normalize
+    assert workspace.shown == [[nfc("NFC", str(first)), nfc("NFC", str(second))]]
+
+
+@pytestmark_mac
+def test_reveal_refuses_files_outside_the_allowed_folders_links_and_missing_files(tmp_path):
+    (tmp_path / "work").mkdir()
+    root = (tmp_path / "work").resolve()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x")
+    link = root / "link.txt"
+    link.symlink_to(outside)
+    inside = root / "ok.txt"
+    inside.write_text("x")
+    workspace = FakeWorkspace()
+
+    assert not finder.reveal(
+        (str(outside), str(link), str(root / "missing.txt"), "relative.txt"),
+        (root,), workspace=lambda: workspace,
+    )
+    assert workspace.shown == []
+    # One valid file among bad ones is still shown; the bad ones are dropped, not fatal.
+    assert finder.reveal((str(outside), str(inside)), (root,), workspace=lambda: workspace)
+    assert workspace.shown == [[str(inside)]]
+
+
+@pytestmark_mac
+def test_a_finder_failure_is_swallowed(tmp_path):
+    root = tmp_path.resolve()
+    (root / "a.txt").write_text("x")
+    broken = FakeWorkspace(error=RuntimeError("AppKit refused"))
+    assert finder.reveal((str(root / "a.txt"),), (root,), workspace=lambda: broken) is False
+
+
+def test_nothing_to_show_is_not_an_error(tmp_path):
+    assert finder.reveal((), (tmp_path,), workspace=lambda: FakeWorkspace()) is False

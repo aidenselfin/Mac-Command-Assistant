@@ -46,6 +46,10 @@ class FakeView:
         self.approval_enabled = []
         self.choices = ()
         self.rating = (False, None, ())
+        self.revealed = []
+
+    def reveal_files(self, paths):
+        self.revealed.append(paths)
 
     def set_choices(self, labels):
         self.choices = labels
@@ -955,3 +959,12 @@ def test_a_cancel_or_undo_result_offers_no_rating_bar():
     adapter.rateable = False
     presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("요청을 취소했습니다.")))
     assert view.rating[0] is False and not presenter.rate(5) and adapter.ratings == []
+
+
+def test_only_a_completed_result_with_changed_files_reveals_them():
+    presenter, _, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Error("실패")))
+    assert view.revealed == []  # nothing changed, or it failed
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("저장", ("/r/한글 파일.txt",))))
+    assert view.revealed == [("/r/한글 파일.txt",)]

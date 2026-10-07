@@ -17,6 +17,7 @@ from typing import Protocol
 from openai import AsyncOpenAI
 
 from voice_action.feedback import LOW_RATING, build_feedback
+from voice_action.finder import reveal
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
@@ -87,6 +88,8 @@ class UIView(Protocol):
     def set_approval_enabled(self, enabled: bool) -> None: ...
 
     def set_choices(self, labels: tuple[str, ...]) -> None: ...
+
+    def reveal_files(self, paths: tuple[str, ...]) -> None: ...
 
     def set_rating(
         self, visible: bool, score: int | None = None, tags: tuple[str, ...] = ()
@@ -189,6 +192,8 @@ class UIPresenter:
             outcome = message.value
             if isinstance(outcome, (Completed, Error, Clarification, ApprovalRequired, Busy)):
                 self._dispatch_pending = False
+                if isinstance(outcome, Completed) and outcome.changed_paths:
+                    self.view.reveal_files(outcome.changed_paths)
                 if not isinstance(outcome, Busy):
                     self._choices = (
                         outcome.shown_options if isinstance(outcome, Clarification) else ()
@@ -843,13 +848,14 @@ class TkView:
     tinted conversation cards, tool line, approval panel, input bar and footer.
     """
 
-    def __init__(self, root, folders: tuple[Path, ...] = ()):
+    def __init__(self, root, folders: tuple[Path, ...] = (), *, reveal: bool = False):
         import tkinter as tk
         from tkinter import font, ttk
 
         self.root = root
         self._tk = tk
         self._ttk = ttk
+        self._folders, self._reveal = folders, reveal
         self.presenter: UIPresenter | None = None
         self.closed = False
         self._approval_ready = False
@@ -1236,6 +1242,11 @@ class TkView:
         self.approve_button.configure(state=state)
         self.reject_button.configure(state=state)
 
+    def reveal_files(self, paths: tuple[str, ...]) -> None:
+        """Show what a command changed in Finder. Runs on the Tk thread, where AppKit belongs."""
+        if self._reveal:
+            reveal(paths, self._folders)
+
     def set_choices(self, labels: tuple[str, ...]) -> None:
         if labels == self._choices_shown:
             return
@@ -1479,7 +1490,7 @@ def run_ui(config) -> None:
     root = tk.Tk()
     messages: queue.Queue[UIMessage] = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
-    view = TkView(root, config.allowed_directories)
+    view = TkView(root, config.allowed_directories, reveal=config.finder_reveal)
     presenter = UIPresenter(worker, view)
     view.bind_presenter(presenter)
 

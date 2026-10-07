@@ -16,6 +16,7 @@ from rich.console import Console
 
 from voice_action.config import ConfigError, load_config
 from voice_action.feedback import DEFAULT_DB_PATH, RATING_TAGS, FeedbackLoop, build_feedback
+from voice_action.finder import reveal
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient, MCPError
 from voice_action.mcp_manager import MCPManager
@@ -103,12 +104,26 @@ def print_outcome(console: Console, outcome: RuntimeResult) -> None:
         console.print(f"[BUSY] {outcome.message}", markup=False, highlight=False)
 
 
+def show_outcome(console: Console, outcome: RuntimeResult, reveal=None) -> None:
+    """Print an outcome, then show the files it changed in Finder if `reveal` is given."""
+    print_outcome(console, outcome)
+    if reveal is not None and isinstance(outcome, Completed) and outcome.changed_paths:
+        reveal(outcome.changed_paths)
+
+
+def finder_reveal(config):
+    """The Finder hook for this config, or None when it is switched off."""
+    if not config.finder_reveal:
+        return None
+    return lambda paths: reveal(paths, config.allowed_directories)
+
+
 async def run_command(
-    controller: RuntimeController, text: str, console: Console
+    controller: RuntimeController, text: str, console: Console, reveal=None
 ) -> RuntimeResult:
     console.print("[PLAN] 모델 응답 대기 중...", markup=False)
     outcome = await controller.submit(text)
-    print_outcome(console, outcome)
+    show_outcome(console, outcome, reveal)
     return outcome
 
 
@@ -247,13 +262,13 @@ async def _interactive_loop(config, console, undo_journal, manager, feedback) ->
                         try:
                             token = text.casefold()
                             if token in APPROVE_TOKENS:
-                                print_outcome(
-                                    console, await controller.approve_pending()
+                                show_outcome(
+                                    console,
+                                    await controller.approve_pending(),
+                                    finder_reveal(config),
                                 )
                             elif token in REJECT_TOKENS:
-                                print_outcome(
-                                    console, await controller.reject_pending()
-                                )
+                                show_outcome(console, await controller.reject_pending())
                             else:
                                 console.print(
                                     "[APPROVAL REQUIRED] 승인 또는 거절 입력이 "
@@ -269,9 +284,7 @@ async def _interactive_loop(config, console, undo_journal, manager, feedback) ->
                         and text in UNDO_TOKENS
                     ):
                         try:
-                            print_outcome(
-                                console, await controller.undo_last_write()
-                            )
+                            show_outcome(console, await controller.undo_last_write())
                         except Exception as exc:
                             console.print(f"[ERROR] {error_message(exc)}", markup=False)
                         continue
@@ -286,7 +299,7 @@ async def _interactive_loop(config, console, undo_journal, manager, feedback) ->
                         continue
                     if text:
                         try:
-                            await run_command(controller, text, console)
+                            await run_command(controller, text, console, finder_reveal(config))
                             if controller.ratable:
                                 console.print(RATE_HINT, markup=False, highlight=False)
                         except Exception as exc:
