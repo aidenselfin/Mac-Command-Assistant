@@ -2274,7 +2274,9 @@ async def test_read_provider_schema_accepts_null_without_changing_mcp_schema():
     for options in ({}, {"head": None, "tail": None}, {"head": 1}):
         validator.validate({"path": "/source.txt", **options})
     assert not validator.is_valid({"path": "/source.txt", "head": "1"})
-    assert not validator.is_valid({"path": None})
+    # A null path passes the provider's check on purpose: the app drops nulls and answers the
+    # model with a tool error, where a provider rejection would end the whole command.
+    assert validator.is_valid({"path": None})
     assert schema == original
     with pytest.raises(PlannerError, match="비어"):
         await model.generate(

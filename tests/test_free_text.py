@@ -366,10 +366,10 @@ def test_the_provider_schema_keeps_types_and_choices_but_no_hard_limits():
         "type": "object",
         "properties": {
             "format": {"type": "string", "enum": ["a", "b"]},
-            "items": {"type": "array", "items": {"type": "string"}},
+            "items": {"type": ["array", "null"], "items": {"type": "string"}},
             "head": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
         },
-    }
+    }  # null is allowed for what is not an enum; the app drops nulls before using a call
     assert "required" in schema and "oneOf" in schema  # the original is not touched
     assert provider_description("변환한다.", schema) == "변환한다. 필수 인자: format."
     assert provider_description("목록.", {"type": "object"}) == "목록."
@@ -409,3 +409,18 @@ async def test_an_empty_final_reply_is_sent_back_once_before_the_command_fails(c
     with pytest.raises(PlannerError, match="비어 있습니다"):
         await planner.run("안녕")
     assert model.generate.await_count == 2  # one retry, not a loop
+
+
+async def test_null_arguments_are_dropped_before_the_call_is_checked(config):
+    root = config.allowed_directories[0]
+    (root / "a.txt").write_text("x")
+    # The provider let `head: null` and `tail: null` through; the app must not forward them.
+    arguments = json.dumps({"path": str(root / "a.txt"), "head": None, "tail": None})
+    planner, model = make(
+        config, [ModelTurn(None, [ToolCall("r", "filesystem__list_directory", arguments)]),
+                 ModelTurn("끝", [])]
+    )
+    gateway_calls = planner._gateway.call_tool
+    await planner.run("a.txt 목록")
+    sent = gateway_calls.await_args_list[0].args[1]
+    assert sent == {"path": str(root / "a.txt")}

@@ -331,11 +331,22 @@ SCHEMA_KEYS_DROPPED = frozenset(
 )
 
 
+def _nullable(prop):
+    """A model often writes null for an argument it does not use; allow it, the app drops it."""
+    if isinstance(prop, dict) and isinstance(prop.get("type"), str) and "enum" not in prop:
+        return {**prop, "type": [prop["type"], "null"]}
+    return prop
+
+
 def provider_schema(schema):
     """The schema as the provider should check it: types and choices, no hard limits."""
     if isinstance(schema, dict):
         return {
-            key: provider_schema(value)
+            key: (
+                {name: _nullable(provider_schema(prop)) for name, prop in value.items()}
+                if key == "properties" and isinstance(value, dict)
+                else provider_schema(value)
+            )
             for key, value in schema.items()
             if key not in SCHEMA_KEYS_DROPPED
         }
@@ -403,13 +414,7 @@ class OpenAICompatibleModel:
         ]
         for tool in provider_tools:
             function = tool["function"]
-            if function["name"] == FILESYSTEM_READ_TOOL:
-                function["parameters"] = deepcopy(function["parameters"])
-                properties = function["parameters"].get("properties", {})
-                for name in ("head", "tail"):
-                    required = function["parameters"].get("required", [])
-                    if name in properties and name not in required:
-                        properties[name] = {"anyOf": [properties[name], {"type": "null"}]}
+            if function["name"] == FILESYSTEM_READ_TOOL:  # null for an unused argument is allowed
                 function["description"] += " 전체 파일을 읽을 때 head와 tail은 생략하세요."
         if allow_tools and allow_clarification:
             function = CLARIFICATION_TOOL["function"]
@@ -1583,6 +1588,9 @@ class Planner:
                 )
                 state.next_call_index += 1
                 continue
+            # null means "not given". Dropping it here keeps every policy and schema below
+            # looking at the arguments the model actually meant.
+            arguments = {key: value for key, value in arguments.items() if value is not None}
 
             if call.name == MACOS_ACTIVE_APP_TOOL and state.active_app_name is not None:
                 state.messages.append(
