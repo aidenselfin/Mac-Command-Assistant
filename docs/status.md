@@ -8,6 +8,10 @@
 https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
 
 # 최근 검증
+- 2026-10-07 GUI 진행 보고서 후속 리뷰 (`0754d99` 기준): 관련 테스트 117 passed·6 skipped,
+  ruff·diff check 통과. 내용 단서 추가에도 후보 불변, 불완전 none 안내 누락, 표식 포함 문자 수를 로컬 재현.
+  [수정 필요성·최소 대안·후속 검증](reviews/2026-10-07-ui-progress-followup-review.md).
+  운영 코드 수정 없음. 새 GUI 조작·HTTP 400 공급자 재현·R7 live 분석은 실행하지 않았다.
 - 2026-10-07 Codex 코드 리뷰 (`9070351` 기준): 재현 결함 F1~F7 확인.
   관련 테스트 125 passed·6 skipped, 비통합 전체 450 passed·7 skipped·35 deselected·2 failed.
   실패한 HEIC 변환 2건은 샌드박스 밖 재실행에서 2 passed. ruff 통과.
@@ -28,6 +32,8 @@ https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
   이전 `--lesson` 주입 검증 결과도 유지된다.
 
 # 다음 작업
+- GUI 후속 리뷰 R1~R4 검토: 내용 조건 분리, 부분 검사 안내 보존, 자동 필터 완화 설명 제거,
+  읽기 문자 수 안내 보정. HTTP 400은 원인을 구분한 후 수정하며 자유 질문 schema만 완화하지 않는다.
 - `--ui`에서 후보 버튼·1~5 평가·원인 칩·저장 실패 안내를 직접 눌러 확인하고 필요하면 UI를 다듬는다.
 - (리뷰 5절, 미조치) 모델이 `request_clarification`을 `options: []`로 부르면 공급자가 400으로 거부해 명령이 끝난다(기존 스키마 minItems 1).
   못 찾은 파일을 되묻는 경우에 나타난다. 옵션 없는 자유 질문을 허용할지 결정한다.
@@ -42,6 +48,8 @@ https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
 - 다른 남은 문제: `docs/reviews/2026-10-04-fixes.md`, `docs/reviews/2026-10-04-recent-changes-fixes.md`.
 
 # 인수인계
+- GUI 진행 보고서의 한계는 결함·검증 공백·선택 기능을 구분한 후속 리뷰로 판단한다.
+  기존 후보 고정·조건 이력·최신 평가 집계는 재구현보다 고정 버전 GUI 검증을 우선한다.
 - 리뷰 F1~F7·A1~A4와 설계 제안 중 평가 대상 제외는 처리했다. 남긴 것: 한/영 번역 사전·의미 검색, 이름 키워드와 내용 조건을 구분하는
   2단계 검색(keywords는 지금도 모두 OR 대체어), pdf/docx 본문 검색(미검사임을 표시만 함), 옵션 없는 모델 질문 처리.
 - 검색 경계는 fd 기준 순회로 바꿨고 root를 다시 resolve하지 않는다. RiskGuard가 넘기는 root는 config에서 이미 canonical이어야 한다.
