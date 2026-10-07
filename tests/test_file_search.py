@@ -151,8 +151,7 @@ def test_number_in_keyword_does_not_match_longer_number(tmp_path):
 
 @pytest.mark.parametrize(
     "arguments",
-    [{}, {"keywords": []}, {"keywords": ["a"] * 7}, {"keywords": ["a"], "x": 1},
-     {"keywords": ["a"], "modified_after": "어제"}],
+    [{}, {"keywords": []}, {"keywords": ["a"] * 7}, {"keywords": ["a"], "modified_after": "어제"}],
 )
 def test_invalid_arguments_are_rejected(tmp_path, arguments):
     with pytest.raises(ToolRejectedError):
@@ -173,3 +172,11 @@ def test_wrong_filters_are_relaxed_instead_of_hiding_the_file(tmp_path):
     assert response["total"] == 1 and response["filters_relaxed"] is True
     assert "filters_relaxed" not in find(tmp_path, "임시", extensions=["txt"])
     assert find(tmp_path, "존재안함", extensions=["tmp"])["decision"] == "none"
+
+
+def test_empty_optional_fields_and_stray_keys_are_ignored(tmp_path):
+    (tmp_path / "a.md").write_text("x")
+    response = find(
+        tmp_path, "a", extensions=[""], folder_hint="", modified_after="", maxItems=8
+    )
+    assert response["total"] == 1 and "filters_relaxed" not in response

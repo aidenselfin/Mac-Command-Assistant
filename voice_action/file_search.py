@@ -36,7 +36,8 @@ EXCLUDED_DIRS = frozenset({"node_modules", "__pycache__", "venv"})
 TEXT_EXTENSIONS = frozenset({"txt", "md", "csv", "tsv", "json", "rst", "log", "yaml", "yml"})
 SEPARATORS = re.compile(r"[-_.\s]+")
 DIGITS = re.compile(r"\d+")
-DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
+# Models fill unused optional fields with "", and the provider rejects the call before we see it.
+DATE_PATTERN = r"^(\d{4}-\d{2}-\d{2})?$"
 FILTER_KEYS = frozenset({"extensions", "folder_hint", "modified_after", "modified_before"})
 
 FIND_FILES_DEFINITION = ToolDefinition(
@@ -59,15 +60,15 @@ FIND_FILES_DEFINITION = ToolDefinition(
             },
             "extensions": {
                 "type": "array",
-                "items": {"type": "string", "minLength": 1, "maxLength": 10},
+                "items": {"type": "string", "maxLength": 10},
                 "maxItems": 8,
             },
-            "folder_hint": {"type": "string", "minLength": 1, "maxLength": 400},
+            "folder_hint": {"type": "string", "maxLength": 400},
             "modified_after": {"type": "string", "pattern": DATE_PATTERN},
             "modified_before": {"type": "string", "pattern": DATE_PATTERN},
         },
         "required": ["keywords"],
-        "additionalProperties": False,
+        # Stray fields a model invents are ignored, not refused by the provider.
     },
 )
 
@@ -110,7 +111,7 @@ def _validate(arguments: dict) -> None:
 
 
 def _day(value: str | None, *, end: bool) -> float | None:
-    if value is None:
+    if not value:
         return None
     try:
         day = date.fromisoformat(value)
@@ -155,7 +156,7 @@ def _walk(roots: tuple[Path, ...]) -> tuple[list[Entry], bool]:
 def _folder_hint(arguments: dict, roots: tuple[Path, ...]) -> str | None:
     """The hint as folder words. A path under an allowed root counts as its folders below."""
     raw = arguments.get("folder_hint")
-    if raw is None:
+    if not raw:
         return None
     path = Path(raw)
     if path.is_absolute():
@@ -167,7 +168,7 @@ def _folder_hint(arguments: dict, roots: tuple[Path, ...]) -> str | None:
 
 
 def _filter(entries: list[Entry], arguments: dict, roots: tuple[Path, ...]) -> list[Entry]:
-    extensions = {item.lower().lstrip(".") for item in arguments.get("extensions", [])}
+    extensions = {item.lower().lstrip(".") for item in arguments.get("extensions", []) if item}
     after = _day(arguments.get("modified_after"), end=False)
     before = _day(arguments.get("modified_before"), end=True)
     hint = _folder_hint(arguments, roots)
@@ -298,7 +299,7 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     entries, walk_cut = _walk(roots)
     stage, matches, content_cut = _search(_filter(entries, arguments, roots), patterns)
     relaxed = False
-    if stage == "none" and FILTER_KEYS & arguments.keys():
+    if stage == "none" and any(arguments.get(key) for key in FILTER_KEYS):
         # The model guesses filters; a wrong one must not hide a file the words do match.
         stage, matches, content_cut = _search(entries, patterns)
         relaxed = stage != "none"
