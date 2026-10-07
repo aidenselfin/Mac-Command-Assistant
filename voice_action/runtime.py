@@ -124,6 +124,7 @@ class RuntimeController:
         self._pending: Clarification | None = None
         self._pending_approval: ApprovalRequired | None = None
         self._in_flight = False
+        self._answered_run: str | None = None  # the run whose Completed answer can be rated
         self.planner.set_event_observer(self._on_planner_event)
 
     @property
@@ -137,6 +138,21 @@ class RuntimeController:
     @property
     def pending_approval(self) -> ApprovalRequired | None:
         return self._pending_approval
+
+    @property
+    def ratable(self) -> bool:
+        """True while the last answer is still the current run, i.e. before the next command."""
+        return (
+            self._feedback is not None
+            and self._answered_run is not None
+            and self._feedback.run_id == self._answered_run
+        )
+
+    async def rate(self, score: int, tags: tuple[str, ...] = ()) -> bool:
+        """Record a 1-5 rating for the last answer. False if there is nothing to rate."""
+        if not self.ratable or self.state is not RuntimeState.IDLE:
+            return False
+        return bool(self._feedback.rating(score, tags))
 
     async def submit(self, text: str) -> RuntimeResult:
         if self._in_flight or self.state not in {
@@ -288,6 +304,8 @@ class RuntimeController:
         self._pending = None
         self._pending_approval = None
         if isinstance(outcome, Completed):
+            if self._feedback is not None:
+                self._answered_run = self._feedback.run_id
             self._transition(RuntimeState.DONE, "completed")
             self._transition(RuntimeState.IDLE, "result_observed")
             return outcome

@@ -23,6 +23,7 @@ from typing import Any
 import jsonschema
 from openai import AsyncOpenAI
 
+from voice_action.mcp_client import TRUNCATION_MARKER
 from voice_action.planner import (
     ApprovalRequired,
     Clarification,
@@ -55,6 +56,13 @@ UNDO_WINDOW = 300
 WASTE_CALLS = 6  # R8: model calls in one run
 SEARCH_CALLS = 4  # R9: search tool calls in one run
 SEARCH_TOOLS = ("local__find_files", "filesystem__search_files")
+# R7: a user's low answer rating (1-5). The cause is guessed from the run's own events first;
+# the paid analysis runs only when the same guess comes back with another low rating.
+RATING_TAGS = frozenset(
+    {"wrong_file", "missing_content", "wrong_content", "too_long", "too_slow", "other"}
+)
+LOW_RATING, RATING_REPEAT, RATING_WINDOW = 3, 2, 7 * 86400
+SLOW_MS = 20000
 SECRET_PATTERN = re.compile(
     r"sk-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{8,}|xai-[A-Za-z0-9]{8,}"
     r"|Bearer\s+[A-Za-z0-9._~+/=-]+"
@@ -193,6 +201,19 @@ def _safe_arguments(arguments: Any) -> Any:
     }
 
 
+def _tool_meta(content: str) -> dict:
+    """Outcome facts of a tool result with no file or web text, so a rating can be explained."""
+    meta: dict = {}
+    if content.startswith("tool_error:"):
+        meta["error"] = True
+    if content.endswith(TRUNCATION_MARKER):
+        meta["truncated"] = True
+    data = _load(content) if content.startswith("{") else None
+    if isinstance(data, dict) and {"stage", "decision", "total"} <= data.keys():
+        meta.update({key: data[key] for key in ("stage", "decision", "total")})
+    return meta
+
+
 def _summarize_message(message: dict, secrets: tuple[str, ...]) -> dict:
     role, content = message.get("role"), message.get("content")
     content = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
@@ -203,6 +224,8 @@ def _summarize_message(message: dict, secrets: tuple[str, ...]) -> dict:
         content = redact(content, secrets)
         stored = _clip(content, TEXT_CHARS if role == "assistant" else FIELD_CHARS)
     summary = {"role": role, "content": stored}
+    if role == "tool" and (meta := _tool_meta(content)):
+        summary["meta"] = meta
     if message.get("tool_calls"):
         summary["tool_calls"] = [
             {
@@ -447,6 +470,59 @@ class FeedbackLoop:
         if not self._warned:
             self._warned = True
             self._say("[FEEDBACK] 일부 실행 기록을 저장하지 못했습니다. 명령 실행은 계속됩니다.")
+
+    # ---- answer rating ---------------------------------------------------------------
+
+    @_safe
+    def rating(self, score: int, tags: tuple[str, ...] = ()) -> bool:
+        """Record the user's 1-5 rating of the run just answered. Rating again replaces it."""
+        if self.run_id is None or isinstance(score, bool) or score not in range(1, 6):
+            return False
+        tags = tuple(dict.fromkeys(tag for tag in tags if tag in RATING_TAGS))
+        hypotheses = self._hypotheses()
+        cause, tag = hypotheses[0] if hypotheses else "unknown", tags[0] if tags else "none"
+        signature = f"rating:{cause}:{tag}"
+        self.record("rating", signature=signature, score=score, tags=list(tags),
+                    hypotheses=hypotheses)
+        if score <= LOW_RATING:
+            latest: dict[str, int] = {}
+            for run, payload in self._rows(
+                "SELECT run_id, payload FROM events WHERE kind = 'rating' AND signature = ? "
+                "AND ts >= ? AND run_id IS NOT NULL ORDER BY id",
+                signature, self.clock() - RATING_WINDOW,
+            ):
+                latest[run] = (_load(payload) or {}).get("score", 5)
+            runs = tuple(run for run, value in latest.items() if value <= LOW_RATING)
+            if len(runs) >= RATING_REPEAT:
+                self._queue("R7", signature, runs)
+        return True
+
+    def _hypotheses(self) -> list[str]:
+        """Likely causes of a poor answer, from what this run recorded. No model call."""
+        steps, elapsed, clarified, metas = 0, 0.0, False, []
+        for kind, payload in self._rows(
+            "SELECT kind, payload FROM events WHERE run_id = ? "
+            "AND kind IN ('llm_request', 'llm_response', 'outcome') ORDER BY id",
+            self.run_id,
+        ):
+            data = _load(payload) or {}
+            if kind == "llm_request":
+                metas += [m["meta"] for m in data.get("messages", []) if m.get("meta")]
+            elif kind == "llm_response":
+                steps, elapsed = steps + 1, elapsed + (data.get("elapsed_ms") or 0)
+            elif data.get("type") == "Clarification":
+                clarified = True
+        found = [meta for meta in metas if "decision" in meta]
+        checks = (
+            ("search_failed", any(meta["decision"] == "none" for meta in found)),
+            ("search_content_stage", any(meta["stage"] == "content" for meta in found)),
+            ("partial_read", any(meta.get("truncated") for meta in metas)),
+            ("tool_errors", any(meta.get("error") for meta in metas)),
+            ("many_calls", steps >= WASTE_CALLS),
+            ("slow", elapsed >= SLOW_MS),
+            ("clarified", clarified),
+        )
+        return [name for name, hit in checks if hit]
 
     # ---- detection -------------------------------------------------------------------
 

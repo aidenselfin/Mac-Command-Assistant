@@ -249,3 +249,79 @@ async def test_short_runs_are_not_flagged_as_wasteful(tmp_path):
     for _ in range(2):
         await model.generate([], [], allow_tools=True)
     assert not {"R8", "R9"} & {rule for rule, _ in loop.run_finished()}
+
+
+FIND_NONE = json.dumps({"stage": "none", "decision": "none", "total": 0, "truncated": False})
+
+
+async def rated_run(loop, score, tags=(), tool_content=FIND_NONE, text="찾아줘"):
+    model = loop.wrap(FakeModel([ModelTurn("답", [])]))
+    loop.user_input(text, new_run=True)
+    await model.generate([{"role": "tool", "content": tool_content}], [], allow_tools=True)
+    return loop.rating(score, tags)
+
+
+def stored_ratings(loop):
+    return [
+        (sig, json.loads(payload))
+        for sig, payload in loop.db.execute(
+            "SELECT signature, payload FROM events WHERE kind='rating'"
+        )
+    ]
+
+
+async def test_rating_records_score_tags_and_a_cause_guess_without_a_model(tmp_path):
+    analyzer = FakeAnalyzer(LESSON)
+    loop, _ = make_loop(tmp_path, analyzer)
+    assert await rated_run(loop, 2, ("wrong_file", "bogus"))
+    (sig, data), = stored_ratings(loop)
+    assert sig == "rating:search_failed:wrong_file"
+    assert data["score"] == 2 and data["tags"] == ["wrong_file"]
+    assert data["hypotheses"] == ["search_failed"]
+    await asyncio.sleep(0)
+    assert analyzer.calls == []  # one low rating is only recorded
+    assert loop.db.execute("SELECT COUNT(*) FROM incidents").fetchone() == (0,)
+
+
+async def test_same_low_rating_twice_queues_analysis_r7(tmp_path):
+    analyzer = FakeAnalyzer(LESSON)
+    loop, emitted = make_loop(tmp_path, analyzer)
+    await rated_run(loop, 1, ("wrong_file",))
+    loop.clock.now += 5
+    await rated_run(loop, 3, ("wrong_file",))
+    await loop.close()
+    assert [rule for rule, _ in analyzer.calls] == ["R7"]
+    assert any("R7" in line for line in emitted)
+    # The analyst reads causes, not file text: the stored tool result is only facts.
+    assert "search_failed" in analyzer.calls[0][1] and "decision" in analyzer.calls[0][1]
+
+
+async def test_high_or_replaced_ratings_do_not_count(tmp_path):
+    analyzer = FakeAnalyzer(LESSON)
+    loop, _ = make_loop(tmp_path, analyzer)
+    await rated_run(loop, 5)
+    loop.clock.now += 5
+    await rated_run(loop, 1)
+    assert loop.rating(5)  # changed mind: the latest rating of that run wins
+    loop.clock.now += 5
+    await rated_run(loop, 2)
+    await loop.close()
+    assert analyzer.calls == []
+
+
+async def test_rating_guesses_partial_read_and_rejects_bad_scores(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    assert await rated_run(loop, 2, tool_content="앞부분\n[TRUNCATED]")
+    assert stored_ratings(loop)[0][1]["hypotheses"] == ["partial_read"]
+    assert not any(loop.rating(score) for score in (0, 6, True, "5"))
+
+
+async def test_runtime_rates_only_the_latest_completed_answer(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    controller = RuntimeController(OutcomePlanner([Completed("답"), Error("실패")]), feedback=loop)
+    assert not await controller.rate(5)  # nothing answered yet
+    await controller.submit("질문")
+    assert controller.ratable and await controller.rate(4)
+    await controller.submit("다음 질문")  # an error is not a rateable answer
+    assert not controller.ratable and not await controller.rate(5)
+    assert [data["score"] for _, data in stored_ratings(loop)] == [4]

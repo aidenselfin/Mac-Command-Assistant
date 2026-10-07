@@ -714,3 +714,20 @@ def test_approval_output_and_repr_hide_unbounded_content(config, capsys):
     output = capsys.readouterr().out
     assert "SECRET-TAIL" not in output
     assert content not in repr(outcome)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("rate 5", (5, ())),
+        ("RATE 2 wrong_file", (2, ("wrong_file",))),
+        ("rate 1 wrong_file, too_slow", (1, ("wrong_file", "too_slow"))),
+        ("rate 0", None),
+        ("rate 6", None),
+        ("rate", None),
+        ("rate 5점이야", None),
+        ("rate it 5", None),
+    ],
+)
+def test_parse_rating(text, expected):
+    assert main.parse_rating(text) == expected

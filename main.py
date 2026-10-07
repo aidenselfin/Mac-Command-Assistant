@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -14,7 +15,7 @@ from openai import AsyncOpenAI
 from rich.console import Console
 
 from voice_action.config import ConfigError, load_config
-from voice_action.feedback import DEFAULT_DB_PATH, FeedbackLoop, build_feedback
+from voice_action.feedback import DEFAULT_DB_PATH, RATING_TAGS, FeedbackLoop, build_feedback
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient, MCPError
 from voice_action.mcp_manager import MCPManager
@@ -70,7 +71,7 @@ def print_outcome(console: Console, outcome: RuntimeResult) -> None:
         console.print(f"[ERROR] {outcome.message}", markup=False, highlight=False)
     elif isinstance(outcome, Clarification):
         console.print(f"[QUESTION] {outcome.question}", markup=False, highlight=False)
-        for index, option in enumerate(outcome.options, 1):
+        for index, option in enumerate(outcome.shown_options, 1):
             console.print(f"  {index}. {option}", markup=False, highlight=False)
     elif isinstance(outcome, ApprovalRequired):
         if outcome.operation == "delete":
@@ -274,11 +275,36 @@ async def _interactive_loop(config, console, undo_journal, manager, feedback) ->
                         except Exception as exc:
                             console.print(f"[ERROR] {error_message(exc)}", markup=False)
                         continue
+                    rating = parse_rating(text)
+                    if rating is not None and controller.state is RuntimeState.IDLE:
+                        saved = await controller.rate(*rating)
+                        console.print(
+                            "[RATE] 평가를 저장했습니다." if saved
+                            else "[RATE] 평가할 답변이 없습니다.",
+                            markup=False,
+                        )
+                        continue
                     if text:
                         try:
                             await run_command(controller, text, console)
+                            if controller.ratable:
+                                console.print(RATE_HINT, markup=False, highlight=False)
                         except Exception as exc:
                             console.print(f"[ERROR] {error_message(exc)}", markup=False)
+
+
+RATE_HINT = (
+    "[RATE] 답변 평가: rate 1~5 (5가 최고). 3점 이하면 원인을 덧붙일 수 있어요: "
+    + " ".join(sorted(RATING_TAGS))
+)
+
+
+def parse_rating(text: str) -> tuple[int, tuple[str, ...]] | None:
+    """`rate 2 wrong_file too_slow` -> (2, ("wrong_file", "too_slow")); other text -> None."""
+    match = re.fullmatch(r"rate\s+([1-5])((?:[\s,]+\w+)*)", text.strip(), re.IGNORECASE)
+    if match is None:
+        return None
+    return int(match.group(1)), tuple(re.findall(r"\w+", match.group(2)))
 
 
 def error_message(exc: BaseException) -> str:
