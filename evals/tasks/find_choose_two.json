@@ -1,0 +1,48 @@
+{
+  "id": "find_choose_two",
+  "family": "file.find.ask",
+  "files": {
+    "계획-초안.md": "초안: 일정 미정",
+    "계획-최종.md": "최종: 11월 1일 출시"
+  },
+  "request": "계획 문서 읽어줘",
+  "user": {
+    "clarify": [
+      "1"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__find_files",
+          "args": {
+            "keywords": [
+              "계획"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/계획-최종.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "최종 계획입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__find_files",
+      "filesystem__read_text_file"
+    ]
+  }
+}

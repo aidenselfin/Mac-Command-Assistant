@@ -1,0 +1,58 @@
+{
+  "id": "find_numbered_series",
+  "family": "file.find.ask",
+  "files": {
+    "임시-1.txt": "임시 메모 1",
+    "임시-2.txt": "임시 메모 2",
+    "임시-3.txt": "임시 메모 3",
+    "임시-4.txt": "임시 메모 4",
+    "임시-5.txt": "임시 메모 5",
+    "임시-6.txt": "임시 메모 6",
+    "임시-7.txt": "임시 메모 7",
+    "임시-8.txt": "임시 메모 8",
+    "임시-9.txt": "임시 메모 9",
+    "임시-10.txt": "임시 메모 10",
+    "임시-11.txt": "임시 메모 11",
+    "임시-12.txt": "임시 메모 12"
+  },
+  "request": "임시 파일 하나 읽어줘",
+  "user": {
+    "clarify": [
+      "1번"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__find_files",
+          "args": {
+            "keywords": [
+              "임시"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/임시-12.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "임시 메모 12입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__find_files",
+      "filesystem__read_text_file"
+    ]
+  }
+}

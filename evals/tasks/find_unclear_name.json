@@ -1,0 +1,44 @@
+{
+  "id": "find_unclear_name",
+  "family": "file.find",
+  "files": {
+    "기획/예산안-v2.md": "# 예산안\n총액 3천만원",
+    "기타/잡담.txt": "점심 메뉴"
+  },
+  "request": "예산안 내용 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__find_files",
+          "args": {
+            "keywords": [
+              "예산안",
+              "budget"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/기획/예산안-v2.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "예산안 총액은 3천만원입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__find_files",
+      "filesystem__read_text_file"
+    ]
+  }
+}
