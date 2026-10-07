@@ -218,7 +218,7 @@ class RuntimeController:
         try:
             if self._feedback is not None:
                 self._feedback.decision("reject", pending.tool_name)
-            return self._finish(self.planner.reject(pending.context))
+            return self._finish(self.planner.reject(pending.context), rateable=False)
         except BaseException as exc:
             if self._feedback is not None:
                 self._feedback.exception(exc)
@@ -238,7 +238,7 @@ class RuntimeController:
             if self._feedback is not None:
                 self._feedback.decision("undo")
             outcome = await self.planner.undo_last_write()
-            return self._finish(outcome)
+            return self._finish(outcome, rateable=False)
         except BaseException as exc:
             if self._feedback is not None:
                 self._feedback.exception(exc)
@@ -256,7 +256,9 @@ class RuntimeController:
 
         normalized = answer.strip()
         if normalized.casefold() in {"취소", "cancel", "c"}:
-            return self._finish(Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."))
+            return self._finish(
+                Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."), rateable=False
+            )
 
         narrowing = pending.context.kind == "narrow_search"
         # Narrowing takes free text, so there an option is picked only as "N번".
@@ -286,7 +288,8 @@ class RuntimeController:
         outcome = await self.planner.resume(pending.context, selection)
         return self._finish(outcome)
 
-    def _finish(self, outcome: PlannerOutcome) -> PlannerOutcome:
+    def _finish(self, outcome: PlannerOutcome, *, rateable: bool = True) -> PlannerOutcome:
+        """Settle an outcome. Only a real answer is rateable, not a cancel, a reject or an undo."""
         if self._feedback is not None:
             self._feedback.outcome(outcome)
         if isinstance(outcome, Clarification):
@@ -305,7 +308,7 @@ class RuntimeController:
         self._pending_approval = None
         if isinstance(outcome, Completed):
             if self._feedback is not None:
-                self._answered_run = self._feedback.run_id
+                self._answered_run = self._feedback.run_id if rateable else None
             self._transition(RuntimeState.DONE, "completed")
             self._transition(RuntimeState.IDLE, "result_observed")
             return outcome

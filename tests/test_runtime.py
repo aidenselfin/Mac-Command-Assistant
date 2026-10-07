@@ -474,3 +474,28 @@ async def test_narrow_search_takes_free_text_and_n_beon_picks_an_option():
     await controller.submit("임시 읽어줘")
     assert await controller.submit("1번") == Completed("B")
     assert planner.resume_inputs == [(context, "2"), (context, "/r/newest.txt")]
+
+
+async def test_a_cancelled_question_and_an_undo_are_not_rateable(tmp_path):
+    from voice_action.feedback import FeedbackLoop
+
+    options = ("/r/a.md", "/r/b.md")
+    context = ClarificationContext("요약", "file_candidate", options, 1)
+    question = Clarification("고르세요", options, context)
+    feedback = FeedbackLoop(tmp_path / "fb.sqlite3")
+    planner = ScriptedPlanner(
+        [question, Completed("답")], undo_actions=[Completed("되돌렸습니다.")]
+    )
+    controller = RuntimeController(planner, feedback=feedback)
+
+    await controller.submit("요약해줘")
+    assert not controller.ratable  # a question is not an answer
+    cancelled = await controller.submit("취소")
+    assert cancelled == Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다.")
+    assert not controller.ratable and not await controller.rate(5)
+
+    await controller.submit("다시 요약해줘")
+    assert controller.ratable
+    await controller.undo_last_write()
+    assert not controller.ratable and not await controller.rate(5)
+    feedback.db.close()

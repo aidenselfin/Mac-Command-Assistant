@@ -106,6 +106,8 @@ class UIAdapter(Protocol):
 
     def rate(self, score: int, tags: tuple[str, ...]) -> bool: ...
 
+    def can_rate(self) -> bool: ...
+
     def cancel_active(self) -> bool: ...
 
     def shutdown(self) -> None: ...
@@ -191,7 +193,7 @@ class UIPresenter:
                     self._choices = (
                         outcome.shown_options if isinstance(outcome, Clarification) else ()
                     )
-                    self._rating_open = isinstance(outcome, Completed)
+                    self._rating_open = isinstance(outcome, Completed) and self.adapter.can_rate()
                     self._score, self._tags = None, ()
                 self.view.show_outcome(outcome)
                 self._refresh_controls()
@@ -438,6 +440,10 @@ class AsyncRuntimeWorker:
     def undo_last_write(self) -> bool:
         controller = self._controller
         return controller is not None and self._schedule(self._dispatch(controller.undo_last_write))
+
+    def can_rate(self) -> bool:
+        controller = self._controller
+        return controller is not None and controller.ratable
 
     def rate(self, score: int, tags: tuple[str, ...]) -> bool:
         controller = self._controller

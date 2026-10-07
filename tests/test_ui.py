@@ -87,6 +87,10 @@ class FakeAdapter:
         self.cancellations = 0
         self.shutdowns = 0
         self.ratings = []
+        self.rateable = True
+
+    def can_rate(self):
+        return self.rateable
 
     def rate(self, score, tags):
         self.ratings.append((score, tags))
@@ -944,3 +948,10 @@ def test_worker_says_so_when_a_rating_could_not_be_stored(config):
     worker.shutdown()
 
     assert "평가를 저장하지 못했어요" in notice.value
+
+
+def test_a_cancel_or_undo_result_offers_no_rating_bar():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    adapter.rateable = False
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("요청을 취소했습니다.")))
+    assert view.rating[0] is False and not presenter.rate(5) and adapter.ratings == []

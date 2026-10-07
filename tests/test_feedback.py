@@ -380,3 +380,4 @@ async def test_incomplete_search_is_a_cause_and_content_stage_is_only_the_last_r
     assert data["hypotheses"] == ["search_incomplete", "search_content_stage"]
     assert sig == "rating:search_incomplete:none"
     assert data["measured"]["model_calls"] == 1
+
