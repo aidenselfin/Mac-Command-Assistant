@@ -129,29 +129,50 @@ private struct ChatPanel: View {
         }
     }
 
+    /// Title, symbol and button text per operation; path operations show source and destination.
+    private func approvalStyle(_ operation: String) -> (title: String, symbol: String, button: String) {
+        switch operation {
+        case "delete": return ("파일 삭제 승인", "trash", "승인하고 삭제")
+        case "move": return ("파일 이동 승인", "arrow.right.circle", "승인하고 이동")
+        case "copy": return ("파일 복사 승인", "doc.on.doc", "승인하고 복사")
+        case "mkdir": return ("폴더 생성 승인", "folder.badge.plus", "승인하고 생성")
+        default: return ("파일 변경 승인", "doc.badge.plus", "승인하고 실행")
+        }
+    }
+
     private func approvalView(_ approval: Approval) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(approval.operation == "delete" ? "파일 삭제 승인" : "파일 변경 승인",
-                  systemImage: approval.operation == "delete" ? "trash" : "doc.badge.plus")
-                .font(.headline)
-            Text(approval.target).font(.caption).textSelection(.enabled)
-            if !approval.targets.isEmpty {
-                Text("대상 \(approval.targets.count)개").font(.callout.weight(.medium))
-                ForEach(Array(approval.targets.enumerated()), id: \.offset) { index, path in
-                    Text("\(index + 1). \(path)").font(.caption).textSelection(.enabled)
+        let style = approvalStyle(approval.operation)
+        let isPathOperation = ["move", "copy", "mkdir"].contains(approval.operation)
+        return VStack(alignment: .leading, spacing: 10) {
+            Label(style.title, systemImage: style.symbol).font(.headline)
+            if isPathOperation {
+                if let source = approval.targets.first {
+                    Text("원본").font(.caption).foregroundStyle(.secondary)
+                    Text(source).font(.caption).textSelection(.enabled)
                 }
+                Text(approval.operation == "mkdir" ? "만들 폴더" : "목적지")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(approval.target).font(.caption).textSelection(.enabled)
+                Text("기존 경로를 덮어쓰지 않으며 Undo로 되돌릴 수 있습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text(approval.target).font(.caption).textSelection(.enabled)
+                if !approval.targets.isEmpty {
+                    Text("대상 \(approval.targets.count)개").font(.callout.weight(.medium))
+                    ForEach(Array(approval.targets.enumerated()), id: \.offset) { index, path in
+                        Text("\(index + 1). \(path)").font(.caption).textSelection(.enabled)
+                    }
+                }
+                if !approval.preview.isEmpty {
+                    Text(approval.preview).font(.callout).textSelection(.enabled)
+                    if approval.truncated { Text("미리보기 일부만 표시").font(.caption).foregroundStyle(.secondary) }
+                }
+                Text("\(approval.characters)자 · \(approval.operation)").font(.caption).foregroundStyle(.secondary)
             }
-            if !approval.preview.isEmpty {
-                Text(approval.preview).font(.callout).textSelection(.enabled)
-                if approval.truncated { Text("미리보기 일부만 표시").font(.caption).foregroundStyle(.secondary) }
-            }
-            Text("\(approval.characters)자 · \(approval.operation)").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("거절") { backend.decide(false) }.buttonStyle(.bordered)
-                Button(approval.operation == "delete" ? "승인하고 삭제" : "승인하고 실행") {
-                    backend.decide(true)
-                }.buttonStyle(.borderedProminent)
+                Button(style.button) { backend.decide(true) }.buttonStyle(.borderedProminent)
             }.disabled(backend.pending)
         }
         .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
