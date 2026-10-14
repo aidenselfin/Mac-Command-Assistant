@@ -271,7 +271,7 @@ VOICE_ACTION_LLM_TIMEOUT_SECONDS
 VOICE_ACTION_MCP_TIMEOUT_SECONDS
 VOICE_ACTION_MAX_TOOL_RESULT_CHARS
 VOICE_ACTION_FINDER_REVEAL         # on(기본) | off, 환경변수로만 설정
-VOICE_ACTION_FINDER_DOCK           # on(기본) | off, Finder 창을 앱 옆에 놓기
+VOICE_ACTION_FINDER_DOCK           # on(기본) | off, Finder 옆 패널 자동 배치
 ```
 
 provider별 기본 모델:
@@ -447,10 +447,23 @@ local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
 
 **Finder에서 결과 보기.** 파일을 만들거나 바꾸는 작업(텍스트 쓰기, 변환)이 **성공**하면 그 파일을 Finder에서 선택한 채로 보여 줍니다. 경로는 모델의 답변이 아니라 앱이 실제로 쓴 경로(`Completed.changed_paths`)이고, 표시 직전에 허용 폴더 안인지·링크가 아닌지·존재하는지 다시 확인합니다. 승인 대기·거절·실패·삭제·Undo에서는 열지 않습니다. Finder를 열지 못해도 작업 결과는 그대로입니다. `VOICE_ACTION_FINDER_REVEAL=off`로 끕니다(기본 on).
 
-**Finder 창을 앱 옆에 놓기.** Finder의 "보기"는 이미 열려 있는 같은 폴더 창을 그대로 쓰기 때문에 창이 앱 뒤나 엉뚱한 곳에 있을 수 있습니다. 그래서 표시한 뒤 `--ui`가 그 폴더 창(제목이 변경 파일의 폴더 이름과 같은 창)만 앱 창의 **오른쪽**에, 오른쪽에 폭 420pt 이상이 안 남으면 **왼쪽**에 맞춰 놓고 앱으로 포커스를 되돌립니다. 양쪽 다 자리가 없으면 옮기지 않고, 제목이 맞는 창이 없으면 다른 Finder 창은 건드리지 않습니다. Finder가 창을 띄울 때까지 Tk 루프에서 최대 2초(0.2초 간격) 다시 시도합니다.
+**Finder 옆의 작은 대화 패널.** `--ui`는 360×560pt 창(최소 360×480)으로 열립니다.
+macOS 기본 버튼과 밝은/어두운 시스템 색상을 사용합니다. 승인 목록은 작은 창에서도
+전체 내용을 스크롤로 확인하며, 파일 선택과 평가 원인 버튼은 세로로 배치됩니다.
 
-- 창 이동은 **손쉬운 사용(Accessibility)** 권한을 씁니다(앱이 이미 활성 앱 조회에 요구하는 것과 같음). 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 실행한 터미널(또는 Python)을 허용하세요. 권한이 없으면 안내를 한 번만 보여 주고 파일은 Finder에서 선택된 채로 둡니다. Finder를 AppleScript로 제어하지 않으므로 자동화 권한 창은 뜨지 않습니다.
-- `VOICE_ACTION_FINDER_DOCK=off`로 배치만 끕니다(기본 on). `VOICE_ACTION_FINDER_REVEAL=off`면 Finder 표시 전체가 꺼집니다.
+앱 실행 중 Finder가 활성화되면 0.5초 간격으로 현재 Finder 창을 확인하고 같은 화면의
+오른쪽(공간이 부족하면 왼쪽)에 패널을 놓습니다. Finder 창은 이동하지 않습니다.
+다른 앱으로 전환하면 대기 중이고 입력창이 빈 패널을 숨기고, Finder로 돌아오면 다시 표시합니다.
+실행·질문·승인 대기 중에는 숨기지 않습니다. 표시 과정에서 키보드 포커스를 강제로 가져오지 않습니다.
+공간 부족·권한 없음·창 정보 조회 실패 시에는 독립 창으로 사용할 수 있습니다.
+상단 `−`는 최소화이며 제목 막대 닫기는 앱을 종료합니다.
+
+- 자동 배치는 손쉬운 사용(Accessibility) 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 >
+  손쉬운 사용에서 실행한 터미널 또는 Python을 허용하세요. 권한이 없으면 안내를 한 번 표시합니다.
+- `VOICE_ACTION_FINDER_DOCK=off`로 자동 배치·숨김을 끕니다. Finder 결과 표시는
+  `VOICE_ACTION_FINDER_REVEAL=off`로 별도로 끕니다.
+- 현재 Finder 폴더에 따라 파일 접근 권한이 바뀌지는 않습니다. `allowed_directories`가 그대로 적용됩니다.
+- 앱이 실행되어 있어야 자동 표시됩니다. 로그인 자동 실행은 설정하지 않습니다.
 
 ## 처리 흐름
 

@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 
 from voice_action.attachment import AttachmentError
 from voice_action.feedback import LOW_RATING, build_feedback
-from voice_action.finder import Frame, arrange, reveal
+from voice_action.finder import panel_beside, panel_context, reveal
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
@@ -849,8 +849,8 @@ def fix_hangul_first_keystroke(widget) -> None:
     widget.bind("<KeyPress>", on_key, add="+")
 
 
-INK, MUTED, BORDER, CANVAS = "#20242C", "#596273", "#E5E7EB", "#FFFFFF"
-BLUE, BLUE_SOFT = "#3659D9", "#EEF1FC"
+INK, MUTED, BORDER, CANVAS = "#242424", "#6E6E73", "#D9D9DC", "#FFFFFF"
+BLUE, BLUE_SOFT = "#007AFF", "#EDF4FF"
 AMBER, AMBER_SOFT, AMBER_LINE = "#805B10", "#FBF5E8", "#E6D3A7"
 RED, RED_SOFT, RED_LINE = "#B42318", "#FDF0EF", "#EBB3AE"
 GRAY_SOFT, SUCCESS = "#F2F3F5", "#1F7A4D"
@@ -869,13 +869,12 @@ STATUS_STYLE = {
     "TRANSCRIBING": ("음성 변환 중", BLUE, BLUE_SOFT, BLUE),
 }
 DEFAULT_HINT = "명령을 입력하세요 · Enter로 실행"
-DOCK_ATTEMPTS = 10
-DOCK_RETRY_MS = 200
+DOCK_RETRY_MS = 500
 DOCK_PERMISSION_NOTICE = (
-    "Finder 창을 앱 옆에 놓으려면 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 "
-    "이 앱을 실행한 터미널(또는 Python)을 허용해 주세요. 파일은 Finder에서 선택해 두었어요."
+    "Finder 옆에 패널을 자동 배치하려면 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 "
+    "이 앱을 실행한 터미널(또는 Python)을 허용해 주세요. 권한 없이도 독립 창으로 사용할 수 있어요."
 )
-ATTACH_HINT = "📎  Finder에서 파일 하나를 여기로 끌어다 놓으면 다음 명령의 대상이 돼요"
+ATTACH_HINT = "파일을 끌어다 놓아 첨부"
 STATUS_HINT = {
     "WAITING_USER_INPUT": "버튼·숫자 키로 고르거나 직접 입력하세요 · 취소 입력 시 요청 취소",
     "WAITING_APPROVAL": "대상과 미리보기를 확인한 뒤 승인 또는 거절을 선택하세요",
@@ -899,8 +898,6 @@ APPROVAL_STYLE = {
     "convert": ("⇄  승인 필요 · 파일 변환", "승인하고 변환", "Primary.TButton", False),
 }
 APPROVAL_PREVIEW_CHARS = 200
-# Shown on the 1-5 rating buttons; the tags are what the feedback loop stores.
-RATING_CAPTIONS = {1: "별로", 5: "최고"}
 RATING_TAG_LABELS = (
     ("wrong_file", "엉뚱한 파일"),
     ("missing_content", "내용 부족"),
@@ -909,14 +906,14 @@ RATING_TAG_LABELS = (
     ("too_slow", "너무 느림"),
     ("other", "기타"),
 )
-CARD_SIDE_GAP = 96  # the empty side of a card, like a chat bubble
+CARD_SIDE_GAP = 24  # the empty side of a card, like a chat bubble
 
 
 class TkView:
     """Tk widgets; every method is called only by the Tk main thread.
 
     Layout follows the Voice Action redesign: header with a status pill, folder bar,
-    tinted conversation cards, tool line, approval panel, input bar and footer.
+    compact conversation, tool line, approval panel, input bar and footer.
     """
 
     def __init__(
@@ -943,8 +940,8 @@ class TkView:
         self._has_cards = False
         self._status = "STARTING"
         root.title("Voice Action")
-        root.geometry("880x680")
-        root.minsize(720, 520)
+        root.geometry("360x560")
+        root.minsize(360, 480)
         root.configure(bg=CANVAS)
         family = font.nametofont("TkDefaultFont").actual("family")
         mono = font.nametofont("TkFixedFont").actual("family")
@@ -952,7 +949,7 @@ class TkView:
         root.option_add("*Font", (family, 12))
 
         style = ttk.Style(root)
-        style.theme_use("clam")
+        style.theme_use("aqua" if sys.platform == "darwin" else "clam")
         style.configure(
             "TButton", padding=(12, 7), foreground=INK, background=CANVAS, bordercolor=BORDER,
             lightcolor=CANVAS, darkcolor=CANVAS, focuscolor=BLUE_SOFT,
@@ -1016,15 +1013,15 @@ class TkView:
             tk.Frame(root, bg=BORDER, height=1).grid(row=row, column=0, sticky="ew")
 
         # ---- header: logo, name, status pill, quit --------------------------------------
-        header = tk.Frame(root, bg=CANVAS, padx=20, pady=12)
+        header = tk.Frame(root, bg=CANVAS, padx=12, pady=8)
         header.grid(row=0, column=0, sticky="ew")
         tk.Label(
-            header, text="♪", bg=INK, fg="#FFFFFF", width=2, font=(family, 13, "bold")
+            header, text="✦", bg=INK, fg="#FFFFFF", width=2, font=(family, 13, "bold")
         ).pack(side="left")
         tk.Label(
-            header, text="Voice Action", bg=CANVAS, fg=INK, font=(family, 14, "bold")
-        ).pack(side="left", padx=(8, 12))
-        self.status_pill = tk.Frame(header, bg=BLUE_SOFT, padx=10, pady=3)
+            header, text="Voice Action", bg=CANVAS, fg=INK, font=(family, 13, "bold")
+        ).pack(side="left", padx=(8, 6))
+        self.status_pill = tk.Frame(header, bg=BLUE_SOFT, padx=5, pady=3)
         self.status_pill.pack(side="left")
         self.status_dot = tk.Label(
             self.status_pill, text="●", bg=BLUE_SOFT, fg=BLUE, font=(family, 9)
@@ -1036,7 +1033,7 @@ class TkView:
             font=(family, 11, "bold"),
         )
         self.status_label.pack(side="left")
-        ttk.Button(header, text="⏻  종료", style="Ghost.TButton", command=self._shutdown).pack(
+        ttk.Button(header, text="−", width=2, style="Ghost.TButton", command=root.iconify).pack(
             side="right"
         )
         rule(1)
@@ -1045,20 +1042,20 @@ class TkView:
         self.folder_text = "작업 폴더 · " + (
             ", ".join(str(folder) for folder in folders) or "설정되지 않음"
         )
-        bar = tk.Frame(root, bg=GRAY_SOFT, padx=20, pady=7)
+        bar = tk.Frame(root, bg=GRAY_SOFT, padx=12, pady=7)
         bar.grid(row=2, column=0, sticky="ew")
         tk.Label(bar, text="📂  작업 폴더", bg=GRAY_SOFT, fg=MUTED, font=(family, 11, "bold")).pack(
             side="left", anchor="n"
         )
         tk.Label(
             bar,
-            text=", ".join(str(folder) for folder in folders) or "설정되지 않음",
+            text=", ".join(folder.name for folder in folders) or "설정되지 않음",
             bg=GRAY_SOFT,
             fg=INK,
             font=(mono, 11),
             anchor="w",
             justify="left",
-            wraplength=640,
+            wraplength=260,
         ).pack(side="left", fill="x", expand=True, padx=(8, 0))
         rule(3)
 
@@ -1070,11 +1067,12 @@ class TkView:
             wrap="word",
             state="disabled",
             height=4,
+            width=1,
             bg=CANVAS,
             fg=INK,
             bd=0,
             highlightthickness=0,
-            padx=20,
+            padx=12,
             pady=14,
             selectbackground="#DCE5FF",
             cursor="arrow",
@@ -1103,14 +1101,14 @@ class TkView:
             self.output.tag_configure(kind + "_end", font=(family, 5), **margins)
         self.output.tag_configure("gap", font=(family, 6))
         self.output.tag_configure(
-            "empty", foreground=MUTED, justify="center", font=(family, 12), spacing1=160
+            "empty", foreground=MUTED, justify="center", font=(family, 12), spacing1=60
         )
         # Markdown styles, configured after the card tags so their fonts win.
         self.output.tag_configure("md_bold", font=(family, 12, "bold"))
         self.output.tag_configure("md_italic", font=(family, 12, "italic"))
         self.output.tag_configure("md_code", font=(mono, 11), background="#E8EAEE")
         self.output.tag_configure("md_table", font=(mono, 11))
-        self.output.tag_configure("md_heading", font=(family, 14, "bold"), spacing1=6)
+        self.output.tag_configure("md_heading", font=(family, 13, "bold"), spacing1=6)
         self._show_empty()
 
         # ---- current tool -------------------------------------------------------------------
@@ -1118,10 +1116,10 @@ class TkView:
         self.tool_line = tk.Frame(
             root, bg=CANVAS, padx=10, pady=4, highlightthickness=1, highlightbackground=BORDER
         )
-        tk.Label(self.tool_line, text="⟳  🔧  현재 도구", bg=CANVAS, fg=MUTED,
+        tk.Label(self.tool_line, text="⟳", bg=CANVAS, fg=MUTED,
                  font=(family, 11)).pack(side="left")
         tk.Label(self.tool_line, textvariable=self.tool_var, bg=CANVAS, fg=INK,
-                 font=(mono, 11)).pack(side="left", padx=(8, 0))
+                 font=(mono, 10), wraplength=260).pack(side="left", padx=(8, 0))
 
         # ---- approval panel -------------------------------------------------------------
         self.approval_frame = tk.Frame(
@@ -1130,7 +1128,7 @@ class TkView:
         self.approval_title = tk.StringVar()
         self._approval_title_label = tk.Label(
             self.approval_frame, textvariable=self.approval_title, bg=AMBER_SOFT, fg=AMBER,
-            font=(family, 12, "bold"), anchor="w",
+            font=(family, 12, "bold"), anchor="w", wraplength=300,
         )
         self._approval_title_label.pack(fill="x", padx=14, pady=(10, 6))
         details = tk.Frame(self.approval_frame, bg=CANVAS, highlightthickness=1,
@@ -1138,7 +1136,8 @@ class TkView:
         details.pack(fill="both", expand=True, padx=14)
         self.approval_output = tk.Text(
             details,
-            height=6,
+            height=4,
+            width=1,
             wrap="word",
             state="disabled",
             bg=CANVAS,
@@ -1177,48 +1176,61 @@ class TkView:
         self.reject_button.pack(side="right", padx=8)
 
         # ---- question buttons and answer rating (never visible together with approval) ----
-        self.choice_frame = tk.Frame(root, bg=CANVAS)
+        self.choice_container = tk.Frame(root, bg=CANVAS)
+        self.choice_canvas = tk.Canvas(
+            self.choice_container, height=120, width=1, bg=CANVAS, highlightthickness=0
+        )
+        self.choice_canvas.pack(side="left", fill="both", expand=True)
+        choice_scroll = ttk.Scrollbar(self.choice_container, command=self.choice_canvas.yview)
+        choice_scroll.pack(side="right", fill="y")
+        self.choice_canvas.configure(yscrollcommand=choice_scroll.set)
+        self.choice_frame = tk.Frame(self.choice_canvas, bg=CANVAS)
+        choice_window = self.choice_canvas.create_window(
+            0, 0, window=self.choice_frame, anchor="nw"
+        )
+        self.choice_frame.bind("<Configure>", lambda event: self.choice_canvas.configure(
+            scrollregion=self.choice_canvas.bbox("all")
+        ))
+        self.choice_canvas.bind("<Configure>", lambda event: self.choice_canvas.itemconfigure(
+            choice_window, width=event.width
+        ))
         self._choices_shown: tuple[str, ...] = ()
         self.rating_frame = tk.Frame(root, bg=CANVAS)
         rating_row = tk.Frame(self.rating_frame, bg=CANVAS)
         rating_row.pack(fill="x")
         tk.Label(
-            rating_row, text="이 답변은 어땠나요?", bg=CANVAS, fg=MUTED, font=(family, 11)
+            rating_row, text="답변 평가", bg=CANVAS, fg=MUTED, font=(family, 11)
         ).pack(side="left", padx=(0, 10))
         self.rating_buttons = {}
         for score in range(1, 6):
-            caption = RATING_CAPTIONS.get(score)
             button = ttk.Button(
-                rating_row, text=f"{score}" + (f" {caption}" if caption else ""),
-                style="Chip.TButton", takefocus=False, width=6 if caption else 3,
+                rating_row, text=str(score),
+                style="Chip.TButton", takefocus=False, width=3,
                 command=lambda score=score: self._rate(score),
             )
             button.pack(side="left", padx=2)
             self.rating_buttons[score] = button
-        tk.Label(
-            rating_row, text="숫자 키 1~5", bg=CANVAS, fg=MUTED, font=(family, 11)
-        ).pack(side="left", padx=(10, 0))
         self.tag_row = tk.Frame(self.rating_frame, bg=CANVAS)
         tk.Label(
             self.tag_row, text="아쉬운 점", bg=CANVAS, fg=MUTED, font=(family, 11)
-        ).pack(side="left", padx=(0, 10))
+        ).grid(row=0, column=0, columnspan=3, sticky="w")
         self.tag_buttons = {}
-        for tag, label in RATING_TAG_LABELS:
+        for index, (tag, label) in enumerate(RATING_TAG_LABELS):
             button = ttk.Button(
                 self.tag_row, text=label, style="Chip.TButton", takefocus=False,
                 command=lambda tag=tag: self._toggle_tag(tag),
             )
-            button.pack(side="left", padx=2)
+            button.grid(row=1 + index // 3, column=index % 3, sticky="ew", padx=2, pady=2)
             self.tag_buttons[tag] = button
         self._rating_visible = False
 
         # ---- attached file: where a file from Finder is dropped ------------------------
         rule(7)
-        self.attach_frame = tk.Frame(root, bg=GRAY_SOFT, padx=20, pady=6)
+        self.attach_frame = tk.Frame(root, bg=GRAY_SOFT, padx=12, pady=6)
         self.attach_frame.grid(row=8, column=0, sticky="ew")
         self.attach_label = tk.Label(
             self.attach_frame, text=ATTACH_HINT, bg=GRAY_SOFT, fg=MUTED, font=(family, 11),
-            anchor="w",
+            anchor="w", wraplength=245, justify="left",
         )
         self.attach_label.pack(side="left", fill="x", expand=True)
         self.attach_clear = ttk.Button(
@@ -1227,34 +1239,30 @@ class TkView:
         )
 
         # ---- input bar --------------------------------------------------------------------
-        command_row = tk.Frame(root, bg=CANVAS, padx=20, pady=10)
+        command_row = tk.Frame(root, bg=CANVAS, padx=12, pady=10)
         command_row.grid(row=9, column=0, sticky="ew")
-        ttk.Button(
-            command_row, text="🎙", style="Mic.TButton", state="disabled", takefocus=False,
-            width=3,
-        ).pack(side="left", padx=(0, 8))
         self.entry = ttk.Entry(command_row, font=(family, 12))
         self.entry.pack(side="left", fill="x", expand=True)
         self.run_button = ttk.Button(
-            command_row, text="↵  실행", style="Primary.TButton", command=self._execute
+            command_row, text="↑", width=3, style="Primary.TButton", command=self._execute
         )
         self.run_button.pack(side="right", padx=(8, 0))
         self.cancel_button = ttk.Button(
-            command_row, text="✕  취소", style="Cancel.TButton", command=self._cancel
+            command_row, text="취소", style="Cancel.TButton", command=self._cancel
         )
         self._command_row = command_row
 
         # ---- footer: hint and undo ----------------------------------------------------------
-        footer = tk.Frame(root, bg=CANVAS, padx=20)
+        footer = tk.Frame(root, bg=CANVAS, padx=12)
         footer.grid(row=10, column=0, sticky="ew", pady=(0, 10))
         self.input_hint = tk.StringVar(value=DEFAULT_HINT)
         self.hint_label = tk.Label(
-            footer, textvariable=self.input_hint, bg=CANVAS, fg=MUTED, font=(family, 11),
-            anchor="w",
+            footer, textvariable=self.input_hint, bg=CANVAS, fg=MUTED, font=(family, 10),
+            anchor="w", wraplength=240, justify="left",
         )
         self.hint_label.pack(side="left", fill="x", expand=True)
         self.undo_button = ttk.Button(
-            footer, text="↺  최근 변경 되돌리기", style="Ghost.TButton", command=self._undo
+            footer, text="↺ Undo", style="Ghost.TButton", command=self._undo
         )
         self.undo_button.pack(side="right")
 
@@ -1279,6 +1287,59 @@ class TkView:
         self.drop_enabled = False
         if drop:
             self._enable_drop()
+        self._dark = False
+        self._finder_seen = False
+        self._panel_hidden = False
+        if dock:
+            root.after(DOCK_RETRY_MS, self._follow_finder)
+
+    def sync_appearance(self) -> None:
+        """Match macOS appearance, including newly added choice buttons and status colors."""
+        if sys.platform != "darwin" or self.closed:
+            return
+        try:
+            from AppKit import NSApplication
+
+            appearance = NSApplication.sharedApplication().effectiveAppearance()
+            dark = appearance.bestMatchFromAppearancesWithNames_(
+                ["NSAppearanceNameAqua", "NSAppearanceNameDarkAqua"]
+            ) == "NSAppearanceNameDarkAqua"
+        except Exception:  # noqa: BLE001 - keep the light palette if AppKit is unavailable
+            return
+        palette = {
+            CANVAS: "#222224", INK: "#F5F5F7", MUTED: "#B0B0B5", BORDER: "#48484A",
+            GRAY_SOFT: "#303032", BLUE: "#64A5FF", BLUE_SOFT: "#26364C",
+            AMBER: "#E5C074", AMBER_SOFT: "#393329", AMBER_LINE: "#66543A",
+            RED: "#FF8C85", RED_SOFT: "#422B2C", RED_LINE: "#7B4243",
+            "#E8EAEE": "#3C3C3E",
+        }
+        if not dark and not self._dark:
+            return
+        colors = palette if dark else {value: key for key, value in palette.items()}
+
+        def recolor(widget):
+            for option in ("background", "foreground", "highlightbackground"):
+                try:
+                    color = str(widget.cget(option)).upper()
+                    if color in colors:
+                        widget.configure(**{option: colors[color]})
+                except self._tk.TclError:
+                    pass  # native ttk widgets inherit the system appearance
+            for child in widget.winfo_children():
+                recolor(child)
+
+        recolor(self.root)
+        for text in (self.output, self.approval_output):
+            for tag in text.tag_names():
+                for option in ("background", "foreground", "lmargincolor", "rmargincolor"):
+                    color = str(text.tag_cget(tag, option)).upper()
+                    if color in colors:
+                        text.tag_configure(tag, **{option: colors[color]})
+        style = self._ttk.Style(self.root)
+        for name in ("TButton", "Ghost.TButton", "Choice.TButton", "Chip.TButton"):
+            style.configure(name, foreground=palette[INK] if dark else INK,
+                            background=palette[CANVAS] if dark else CANVAS)
+        self._dark = dark
 
     def bind_presenter(self, presenter: UIPresenter) -> None:
         self.presenter = presenter
@@ -1308,7 +1369,7 @@ class TkView:
             self.tool_line.grid_remove()
         else:
             self.tool_var.set(value)
-            self.tool_line.grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 8))
+            self.tool_line.grid(row=5, column=0, sticky="ew", padx=12, pady=(0, 8))
 
     def set_controls(
         self,
@@ -1326,7 +1387,7 @@ class TkView:
         else:
             self.cancel_button.pack_forget()
         if approval_visible:
-            self.approval_frame.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 10))
+            self.approval_frame.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 10))
         else:
             self.approval_frame.grid_remove()
             self._approval_ready = False
@@ -1375,39 +1436,38 @@ class TkView:
 
     def reveal_files(self, paths: tuple[str, ...]) -> None:
         """Show what a command changed in Finder. Runs on the Tk thread, where AppKit belongs."""
-        if self._reveal and reveal(paths, self._folders) and self._dock and paths:
-            self._dock_finder(unicodedata.normalize("NFC", Path(paths[0]).parent.name), 0)
+        if self._reveal:
+            reveal(paths, self._folders)
 
-    def _dock_finder(self, folder: str, attempt: int) -> None:
-        """Put Finder's window for the folder beside this one. Finder takes a moment to show
-        it, so a few short retries run on the Tk loop instead of blocking it."""
+    def _follow_finder(self) -> None:
+        """Follow Finder without taking focus; keep running commands and approvals visible."""
         if self.closed:
             return
-        self.root.update_idletasks()
-        app = Frame(
-            self.root.winfo_rootx(), self.root.winfo_rooty(),
-            self.root.winfo_width(), self.root.winfo_height(),
-        )
-        screen = (self.root.winfo_screenwidth(), self.root.winfo_screenheight())
-        result = arrange(folder, app, screen)
-        if result == "moved":
-            self._to_front()
-        elif result == "waiting" and attempt < DOCK_ATTEMPTS:
-            self.root.after(DOCK_RETRY_MS, lambda: self._dock_finder(folder, attempt + 1))
-        elif result == "untrusted" and not self._dock_warned:
-            self._dock_warned = True
-            self.show_output(DOCK_PERMISSION_NOTICE)
-
-    def _to_front(self) -> None:
-        """Finder was activated to show the file; give the focus back to this window."""
-        self.root.lift()
-        self.root.focus_force()
         try:
-            from AppKit import NSApplication
-
-            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-        except Exception:  # noqa: BLE001, S110 - the lift above is enough without AppKit
-            pass
+            kind, frame, screen = panel_context()
+            if kind == "untrusted" and not self._dock_warned:
+                self._dock_warned = True
+                self.show_output(DOCK_PERMISSION_NOTICE)
+            if kind == "finder" and frame is not None and screen is not None:
+                self._finder_seen = True
+                target = panel_beside(frame, screen)
+                if target is not None:
+                    # Signed virtual-screen coordinates are absolute, unlike Tk's -x offset.
+                    position = f"+{target.x}+{target.y}"
+                    geometry = f"{target.w}x{target.h}{position}"
+                    if self.root.winfo_geometry() != geometry:
+                        self.root.geometry(geometry)
+                if self._panel_hidden:
+                    self.root.deiconify()
+                    self._panel_hidden = False
+            elif (kind == "other" and self._finder_seen
+                  and self._status in {"READY", "DONE", "ERROR"}
+                  and not self.entry.get().strip()):
+                self.root.withdraw()
+                self._panel_hidden = True
+        finally:
+            if not self.closed:
+                self.root.after(DOCK_RETRY_MS, self._follow_finder)
 
     def set_choices(self, labels: tuple[str, ...]) -> None:
         if labels == self._choices_shown:
@@ -1416,14 +1476,18 @@ class TkView:
         for child in self.choice_frame.winfo_children():
             child.destroy()
         if not labels:
-            self.choice_frame.grid_remove()
+            self.choice_container.grid_remove()
             return
         for number, label in enumerate(labels, 1):
-            self._ttk.Button(
-                self.choice_frame, text=f"{number}   {label}", style="Choice.TButton",
+            self._tk.Button(
+                self.choice_frame, text=f"{number}   {label}", wraplength=285,
+                anchor="w", justify="left", bg=GRAY_SOFT, fg=INK, relief="flat", padx=8, pady=6,
                 takefocus=False, command=lambda number=number: self._choose(number),
             ).pack(fill="x", pady=2)
-        self.choice_frame.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 10))
+        self.choice_container.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 10))
+        self.root.update_idletasks()
+        self.choice_canvas.configure(height=min(140, self.choice_frame.winfo_reqheight()))
+        self.choice_canvas.yview_moveto(0)
 
     def set_rating(
         self, visible: bool, score: int | None = None, tags: tuple[str, ...] = ()
@@ -1432,7 +1496,7 @@ class TkView:
         if not visible:
             self.rating_frame.grid_remove()
             return
-        self.rating_frame.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 10))
+        self.rating_frame.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 10))
         for number, button in self.rating_buttons.items():
             button.configure(style="Primary.TButton" if number == score else "Chip.TButton")
         if score is not None and score <= LOW_RATING:
@@ -1674,7 +1738,8 @@ def run_ui(config) -> None:
             except queue.Empty:
                 break
         if not view.closed:
-            root.after(50, poll_messages)
+            view.sync_appearance()
+            root.after(250, poll_messages)
 
     worker.start()
     root.after(0, poll_messages)
