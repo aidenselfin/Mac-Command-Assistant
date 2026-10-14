@@ -2,10 +2,15 @@
 - (없음)
 
 # 현재 목표
-Finder 옆 작은 대화 패널 UI를 별도 worktree에서 시험한다. 원본에는 병합하지 않았다.
+SwiftUI 외형 전용 앱과 기존 Tk 패널을 별도 worktree에서 비교한다. 원본에는 병합하지 않았다.
 브랜치: `codex/finder-chat-panel`, 제품 기준: `e250f48`.
 
 # 최근 검증
+- 2026-10-14 SwiftUI 시제품: Swift 6.3.3 빌드 성공, Info.plist 검사·zsh 구문·diff check 통과.
+  실제 네이티브 앱을 열고 시스템 다크 모드의 대화 화면·툴바·입력창을 시각 확인했다.
+  최종 창의 대화·파일 선택·승인 전환 컨트롤은 접근성 트리에서 확인했다.
+  컴퓨터 제어 서비스 시작 오류로 최종 클릭·전송 검증은 완료하지 못했다.
+  Python 코드는 변경하지 않아 pytest·live 평가를 재실행하지 않았다.
 - 2026-10-14 최종 코드 전체 pytest **657 passed**(실제 MCP·Tk 포함), ruff 전체·diff check 통과.
   기존 프로젝트의 `.venv` Python과 Node 의존성을 읽어 검증했고 테스트 DB는 격리했다.
 - UI·Finder·CLI·Runtime 관련 회귀 131 passed. 최소 높이의 삭제 승인 100개 전체 목록,
@@ -15,6 +20,7 @@ Finder 옆 작은 대화 패널 UI를 별도 worktree에서 시험한다. 원본
   유료 live 평가와 실제 모델을 연결한 `--interactive`·`--ui` 명령 실행은 하지 않았다.
 
 # 다음 작업
+- `native-preview/run.sh`로 SwiftUI 앱을 열어 세 예시 화면과 버튼 반응·한글 입력을 비교한다.
 - 사람이 worktree의 `--ui`에서 Finder 이동·창 전환·다중 화면·손쉬운 사용 권한을 확인한다.
 - 실제 한글 입력·드래그·승인 흐름을 확인하고 디자인 피드백을 반영한다.
 
