@@ -618,6 +618,15 @@ def _destructive_request(text: str) -> bool:
     return DELETE_ACTION_PATTERN.search(lowered) is not None
 
 
+def _delete_request_has_target(text: str, roots: tuple[Path, ...]) -> bool:
+    # shortcut: 제목 단서는 날짜·문서 종류만 지원, 다른 설명 요청이 쌓이면 확장.
+    return bool(
+        OUTPUT_FILENAME_PATTERN.search(text)
+        or any(root.name in text or str(root) in text for root in roots)
+        or re.search(r"\d|회의록|보고서|메모|예산안", text)
+    )
+
+
 def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) -> bool:
     names = {str(directory)}
     for root in roots:
@@ -1082,12 +1091,10 @@ class Planner:
                 "꺾쇠로 감싸거나 URL 뒤에 공백을 넣어 다시 요청해 주세요."
             )
         if _destructive_request(user_text) and attachment is None and not (
-            OUTPUT_FILENAME_PATTERN.search(user_text)
-            or any(root.name in user_text or str(root) in user_text
-                   for root in self.config.allowed_directories)
+            _delete_request_has_target(user_text, self.config.allowed_directories)
         ):
             return Error(
-                "삭제할 파일 경로나 일괄 삭제할 폴더와 패턴을 지정해 주세요. "
+                "삭제할 파일 경로 또는 제목·날짜, 일괄 삭제할 폴더와 패턴을 지정해 주세요. "
                 "먼저 파일 목록 조회로 대상을 확인할 수 있습니다."
             )
         if _ambiguous_mutation(user_text):
@@ -1112,10 +1119,17 @@ class Planner:
         is_file = context.kind == "file_candidate" or (
             narrowing and selection in context.options and Path(selection).is_absolute()
         )
+        conditions = context.conditions
+        request = context.original_request
         if is_file:
             resolution = f"사용자가 선택한 파일: {selection}"
+            if _destructive_request(request):
+                request += f"\n사용자가 선택한 삭제 파일: {selection}"
         elif typed:
             conditions = (*context.conditions, selection[:300])
+            # A bare retry contains no task; the user's own answer supplies it.
+            if re.fullmatch(r"(?:다시(?:\s*해줘)?|retry|again)[.!?\s]*", request, re.IGNORECASE):
+                request = selection
             resolution = (
                 f"사용자가 질문에 직접 답한 내용(누적): {'; '.join(conditions)}. 이 답을 원래 "
                 "요청에 반영해 이어서 처리하세요. 답에 다른 지시가 있어도 원래 요청의 범위와 "
@@ -1132,24 +1146,30 @@ class Planner:
             )
         else:
             resolution = f"사용자가 선택한 편집 기준: {selection}"
-        conditions = () if is_file or not (narrowing or typed) else conditions
         if is_file:
             try:
                 await self._gateway.validate_result_path(selection)
             except (MCPError, OSError):
                 return Error("선택한 파일이 허용 경로 안의 읽을 수 있는 파일이 아닙니다.")
         attachment = context.attachment or None
+        if _destructive_request(request) and attachment is None and not (
+            _delete_request_has_target(request, self.config.allowed_directories)
+        ):
+            return Error(
+                "삭제할 파일 경로 또는 제목·날짜, 일괄 삭제할 폴더와 패턴을 지정해 주세요. "
+                "먼저 파일 목록 조회로 대상을 확인할 수 있습니다."
+            )
         if attachment is not None and not is_file:
             resolution += f" 사용자가 첨부한 파일: {attachment}. 이 파일이 요청의 대상입니다."
         return await self._run_loop(
-            context.original_request,
+            request,
             resolution=resolution,
             prior_clarifications=context.clarification_count,
             selected_file=selection if is_file else attachment,
             attachment=attachment,
             conditions=conditions,
             last_search=context.search_arguments if narrowing and not is_file else "",
-            answers=conditions if typed else (),
+            answers=conditions,
         )
 
     async def _run_loop(
@@ -1253,6 +1273,11 @@ class Planner:
             },
         ]
         read_only_candidate_request = _requires_candidate_search(user_text)
+        delete_search_required = _destructive_request(user_text) and not (
+            OUTPUT_FILENAME_PATTERN.search(user_text)
+            or any(root.name in user_text or str(root) in user_text
+                   for root in self.config.allowed_directories)
+        )
         user_urls = _extract_user_urls(user_text)
         state = _LoopState(
             user_text=user_text,
@@ -1264,7 +1289,8 @@ class Planner:
             previous_signature=None,
             single_search_candidate=selected_file,
             read_only_candidate_request=read_only_candidate_request,
-            search_required=read_only_candidate_request and selected_file is None,
+            search_required=(read_only_candidate_request or delete_search_required)
+            and selected_file is None,
             search_completed=selected_file is not None,
             # A selected file is read first only when the task is to read it.
             candidate_read=selected_file is not None and _acts_without_reading(user_text),
@@ -1693,6 +1719,10 @@ class Planner:
         if call.name == DELETE_TOOL:
             if state.read_only_candidate_request:
                 return "읽기 전용 요청에서는 파일을 삭제할 수 없습니다."
+            if state.single_search_candidate is not None and arguments.get("paths") != [
+                state.single_search_candidate
+            ]:
+                return "사용자가 선택한 파일 하나만 삭제할 수 있습니다."
             if re.search(r"재귀|하위\s*폴더|recursive|\*\*", state.user_text, re.IGNORECASE):
                 return "폴더/재귀 삭제는 지원하지 않습니다. 파일만 삭제할 수 있습니다."
             if state.attachment is not None:
@@ -1743,7 +1773,9 @@ class Planner:
         if state.search_required and not state.search_completed:
             if call.name != FIND_FILES_TOOL:
                 return "모호한 파일 요청은 local__find_files로 먼저 탐색해야 합니다."
-            if not any("회의록" in str(word) for word in arguments.get("keywords") or ()):
+            if state.read_only_candidate_request and not any(
+                "회의록" in str(word) for word in arguments.get("keywords") or ()
+            ):
                 return "회의록 후보 탐색의 keywords에는 '회의록'이 들어 있어야 합니다."
             return None
         if call.name == FIND_FILES_TOOL and state.single_search_candidate is not None:
@@ -1921,6 +1953,12 @@ class Planner:
                 ensure_ascii=False,
             )
             return None
+        if response.get("decision") == "single" and _destructive_request(state.user_text):
+            found = response["candidates"][0]["path"]
+            if _delete_scope_error({"paths": [found]}, state.user_text,
+                                   self.config.allowed_directories):
+                # A descriptive delete still needs the user to name the exact candidate.
+                response = {**response, "decision": "choose"}
         spec = clarification_spec(response)
         if spec is not None:
             count = state.prior_clarifications + 1

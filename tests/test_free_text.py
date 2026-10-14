@@ -170,6 +170,32 @@ async def test_typed_answers_accumulate_and_the_budget_is_two_questions(config):
     assert "메모.md; 비워 둬" in system
 
 
+async def test_typed_answer_survives_a_later_file_choice(config):
+    root = config.allowed_directories[0]
+    for name in ("회의록-초안.md", "회의록-최종.md"):
+        (root / name).write_text("회의 내용")
+    find = ModelTurn(None, [ToolCall("f", "local__find_files",
+                                    json.dumps({"keywords": ["회의록"]}))])
+    planner, model = make(config, [ask("어떤 내용을 추출할까요?"), find])
+    planner._gateway.list_tools.return_value.append(
+        ToolDefinition("filesystem__read_text_file", "읽기", {"type": "object"})
+    )
+    runtime = RuntimeController(planner)
+    assert isinstance(await runtime.submit("회의록에서 필요한 항목을 추출해줘"), Clarification)
+    choices = await runtime.submit("담당자별 할 일만")
+    assert isinstance(choices, Clarification) and choices.context.kind == "file_candidate"
+    chosen = choices.options[0]
+    model.generate.side_effect = [
+        ModelTurn(None, [ToolCall("r", "filesystem__read_text_file",
+                                 json.dumps({"path": chosen}))]),
+        ModelTurn("담당자별 할 일입니다.", []),
+    ]
+    assert isinstance(await runtime.submit("1번"), Completed)
+    messages = model.generate.await_args_list[-2].args[0]
+    assert "담당자별 할 일만" in messages[1]["content"]
+    assert chosen in messages[0]["content"]
+
+
 async def test_a_blank_typed_answer_is_refused_and_options_are_not_required(config):
     planner, _ = make(config, [])
     context = ClarificationContext("파일 만들어줘", "free_text", (), 1)

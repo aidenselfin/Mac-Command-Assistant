@@ -6,6 +6,11 @@
 협업 도구: 현재 폴더 전용 자동 보존·수정 세션 조정 설치 완료.
 
 # 최근 검증
+- 2026-10-14 dev_report 후속 수정: 전체 pytest **649 passed**(실제 MCP·Tk UI 포함),
+  대화형 CLI·Planner·Runtime 관련 회귀 292 passed, ruff 전체·diff check 통과.
+  질문 답변을 파일 선택 뒤에도 보존하고, 설명으로 지정한 삭제는 검색·선택·승인으로 이어진다.
+  [10건 분석·수정 범위](reviews/2026-10-14-dev-report-analysis.md).
+  유료 live 평가·사람 GUI 수동 확인은 생략. 운영 피드백 DB·lesson·사용자 파일은 수정하지 않았다.
 - 2026-10-14 파일 삭제 기능 확인(제품 코드 `9370fab`): 기존 `local__delete_files`의 모델 노출,
   승인 전 변경 없음·거절·재승인·백업·Undo·허용 경계 회귀와 대화형 CLI/RiskGuard 71 passed,
   실제 Tk 삭제 승인 패널 1 passed. 제품 코드 변경 없음. 유료 live 평가·사람 GUI 수동 확인은 생략.
