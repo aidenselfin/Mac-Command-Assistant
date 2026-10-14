@@ -2,32 +2,25 @@
 - (없음)
 
 # 현재 목표
-SwiftUI 외형 전용 앱과 기존 Tk 패널을 별도 worktree에서 비교한다. 원본에는 병합하지 않았다.
-브랜치: `codex/finder-chat-panel`, 제품 기준: `e250f48`.
+SwiftUI + 기존 Python 백엔드를 codex/finder-chat-panel worktree에서 시험한다. main 미병합.
 
 # 최근 검증
-- 2026-10-14 실행 오류 162 수정: 앱 전체 ad-hoc 서명·strict 검사 통과, 실제 연속 두 번 실행 성공·프로세스 1개 확인. launcher 회귀 1 passed, ruff·zsh 통과.
-- 2026-10-14 SwiftUI 시제품: Swift 6.3.3 빌드 성공, Info.plist 검사·zsh 구문·diff check 통과.
-  실제 네이티브 앱을 열고 시스템 다크 모드의 대화 화면·툴바·입력창을 시각 확인했다.
-  최종 창의 대화·파일 선택·승인 전환 컨트롤은 접근성 트리에서 확인했다.
-  컴퓨터 제어 서비스 시작 오류로 최종 클릭·전송 검증은 완료하지 못했다.
-  Python 코드는 변경하지 않아 pytest·live 평가를 재실행하지 않았다.
-- 2026-10-14 최종 코드 전체 pytest **657 passed**(실제 MCP·Tk 포함), ruff 전체·diff check 통과.
-  기존 프로젝트의 `.venv` Python과 Node 의존성을 읽어 검증했고 테스트 DB는 격리했다.
-- UI·Finder·CLI·Runtime 관련 회귀 131 passed. 최소 높이의 삭제 승인 100개 전체 목록,
-  긴 후보 목록 스크롤, 질문·승인 대기 표시 유지, 작성 중 입력 보존, 테마 전환을 확인했다.
-- 실제 Tk 패널의 다크 모드 화면을 캡처해 시각 확인했다(샘플 응답, 모델 호출 없음).
-- 전면 앱 조회가 이 실행 환경에서 None이라 실제 Finder 추적·자동 표시·여러 화면은 수동 확인하지 못했다.
-  유료 live 평가와 실제 모델을 연결한 `--interactive`·`--ui` 명령 실행은 하지 않았다.
+- 최종 전체 pytest 668 passed, ruff 전체·Swift 빌드·plist·zsh·diff check 통과.
+- 네이티브 통신/launcher 회귀 11 passed, CLI/UI/Runtime 회귀 115 passed.
+- 실제 --interactive 연결/exit, 네이티브 앱 연결/창 닫기/백엔드 종료/재실행 확인.
+- 실제 모델로 native-ui-smoke.txt 승인 대기→거절→재요청→승인→내용 확인→Undo 제거 확인.
+  유료 메인 모델·자동 피드백 분석을 포함한 소규모 smoke이며 전체 live 평가는 아니다.
+- 승인 ID 재사용·잘못된 입력·허용 밖 첨부 차단, 질문 답변→실제 MCP 쓰기→Undo 회귀 확인.
+- 실행 오류 162는 앱 전체 ad-hoc 서명으로 수정했다. strict 검사·반복 실행 통과.
 
 # 다음 작업
-- `native-preview/run.sh`로 SwiftUI 앱을 열어 세 예시 화면과 버튼 반응·한글 입력을 비교한다.
-- 사람이 worktree의 `--ui`에서 Finder 이동·창 전환·다중 화면·손쉬운 사용 권한을 확인한다.
-- 실제 한글 입력·드래그·승인 흐름을 확인하고 디자인 피드백을 반영한다.
+- 사람이 검색/요약/선택/첨부/평가/한글 입력을 시험하고 main 병합 여부를 결정한다.
+- 네이티브 Finder 자동 배치·독립 배포 패키징은 아직 구현하지 않았다.
 
 # 인수인계
-- 패널 360×560pt, 최소 360×480. 기본 macOS 버튼·시스템 밝기 테마.
-- Finder는 이동하지 않는다. 오른쪽/왼쪽 공간에 패널을 놓고 빈 입력의 유휴 상태만 숨긴다.
-- `VOICE_ACTION_FINDER_DOCK=off`로 배치·숨김을 끈다. 파일 접근은 허용 경로 설정을 그대로 따른다.
-- 로컬 git 제외 설정은 worktree의 `voice-action-test`만 허용한다. 기존 키 파일은 읽기 참조만 한다.
-- 원본의 미커밋 코드·사용자 자료는 가져오거나 수정하지 않았다. 로그인 자동 실행은 추가하지 않았다.
+- native-preview/run.sh로 실행한다. 기존 Runtime/Planner/RiskGuard/Undo/피드백을 재사용한다.
+- 승인 context는 Python에만 보관하고 UI 승인 ID는 한 번만 사용한다.
+- 창 닫기와 코드 갱신은 기존 백엔드 정리를 기다린다. 실행 취소 후 메뉴에서 재연결한다.
+- worktree 로컬 설정은 voice-action-test만 허용한다. 원본 코드/자료는 변경하지 않았다.
+- 실제 앱 smoke DB는 worktree .voice-action에 기록했고 회귀 테스트 DB는 격리했다.
+- 실제 드래그·한글 IME·네이티브 100개 삭제 목록은 사람이 확인하지 않았다.

@@ -2,6 +2,12 @@
 
 오래 유지할 결정만 날짜와 함께 적는다 (최신이 위). 작업 규칙은 `AGENTS.md`, 진행 상황은 `status.md`.
 
+- 2026-10-14 네이티브 백엔드(외형 시제품의 Python 미연결 결정을 대체):
+  SwiftUI가 전용 Python 프로세스의 JSON-lines로 기존 AsyncRuntimeWorker를 사용한다.
+  승인 context는 Python에만 두고 UI 승인 ID는 일회용으로 검증한다.
+  기존 Runtime·Planner·RiskGuard·Undo·피드백을 유지한다. 창 닫기와 갱신은 정리를 기다린다.
+  main 병합·네이티브 Finder 자동 배치·독립 배포는 아직 진행하지 않는다.
+
 - 2026-10-14 네이티브 앱 실행: SwiftPM 실행 파일만 복사한 패키지는 서명 리소스 불일치로 오류 162를 낸다. 앱 전체를 로컬 ad-hoc 서명하며 소스 hash가 같으면 갱신하지 않고 기존 인스턴스를 연다.
 
 - 2026-10-14 네이티브 외형 시제품: `native-preview/`에 SwiftUI 독립 앱을 추가한다.

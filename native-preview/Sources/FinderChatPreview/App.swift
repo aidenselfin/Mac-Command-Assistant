@@ -3,66 +3,64 @@ import SwiftUI
 
 @main
 struct FinderChatPreviewApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
-        WindowGroup("파일 도우미") {
-            ChatPanel()
-                .frame(minWidth: 360, minHeight: 480)
+        Window("파일 도우미", id: "assistant") {
+            ChatPanel().frame(minWidth: 360, minHeight: 480)
         }
         .defaultSize(width: 360, height: 560)
         .windowToolbarStyle(.unifiedCompact)
-        .commands {
-            CommandGroup(replacing: .newItem) {}
-        }
     }
 }
 
-private enum Example: String, CaseIterable, Identifiable {
-    case conversation = "대화"
-    case selection = "파일 선택"
-    case approval = "저장 승인"
-
-    var id: String { rawValue }
-}
-
 private struct ChatPanel: View {
-    @State private var example: Example = .conversation
+    @StateObject private var backend = Backend.shared
     @State private var input = ""
-    @State private var notice: String?
-    @State private var sent: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            folderBar
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(spacing: 5) {
-                        Circle().fill(.green).frame(width: 5, height: 5)
-                        Text("무엇을 도와드릴까요?")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    requestBubble
-                    answer
-                    if let sent {
-                        HStack {
-                            Spacer(minLength: 32)
-                            Text(sent)
-                                .padding(10)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        Text("외형 미리보기입니다. 실제 작업은 실행하지 않아요.")
-                            .font(.callout).foregroundStyle(.secondary)
-                    }
-                    if let notice {
-                        Label(notice, systemImage: "info.circle")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill").foregroundStyle(.secondary)
+                Text(backend.folders.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))
+                    .font(.callout).lineLimit(2)
+                Spacer(minLength: 0)
             }
-            .textSelection(.enabled)
+            .padding(.horizontal, 16).padding(.vertical, 10).background(.bar)
+            .help(backend.folders.joined(separator: "\n"))
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        status
+                        if backend.messages.isEmpty {
+                            Text("파일을 찾거나 요약해 보세요.")
+                                .foregroundStyle(.secondary).font(.callout)
+                        }
+                        ForEach(backend.messages) { message in
+                            messageView(message)
+                        }
+                        ForEach(Array(backend.choices.enumerated()), id: \.offset) { index, label in
+                            Button { backend.submit("\(index + 1)번") } label: {
+                                HStack {
+                                    Text("\(index + 1)").foregroundStyle(.secondary)
+                                    Text(label).font(.callout).multilineTextAlignment(.leading)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain).disabled(!backend.canSubmit)
+                        }
+                        if let approval = backend.approval { approvalView(approval) }
+                        if backend.ratable { rating }
+                        Color.clear.frame(height: 1).id("bottom")
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .textSelection(.enabled)
+                .onChange(of: backend.messages.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                .onChange(of: backend.approval?.approval_id) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+            }
             Divider()
             composer
         }
@@ -70,181 +68,159 @@ private struct ChatPanel: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("되돌리기 미리보기", systemImage: "arrow.uturn.backward") {
-                        notice = "되돌리기 버튼 미리보기"
-                    }
-                    Divider()
-                    Picker("화면 예시", selection: $example) {
-                        ForEach(Example.allCases) { item in
-                            Text(item.rawValue).tag(item)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .help("화면 예시 선택")
+                    Button("최근 작업 되돌리기", systemImage: "arrow.uturn.backward") {
+                        if backend.send("undo") { backend.pending = true }
+                    }.disabled(!backend.idle)
+                    Button("연결 다시 시작", systemImage: "arrow.clockwise") { backend.start() }
+                        .disabled(backend.online)
+                } label: { Image(systemName: "ellipsis") }
             }
         }
-        .onChange(of: example) { _, _ in
-            notice = nil
-            sent = nil
+        .task { backend.start() }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard backend.idle, providers.count == 1 else { return false }
+            _ = providers[0].loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in _ = backend.send("attach", fields: ["path": url.path]) }
+            }
+            return true
         }
-        .accessibilityIdentifier("chat-panel")
     }
 
-    private var folderBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "folder.fill").foregroundStyle(.secondary)
-            Text("작업 폴더").font(.callout)
-            Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.tertiary)
-            Text("회의 자료").font(.callout).foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+    private var status: some View {
+        HStack(spacing: 6) {
+            Circle().fill(backend.online ? .green : .orange).frame(width: 5, height: 5)
+            Text(statusText).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if backend.pending || ["PLANNING", "EXECUTING_TOOL"].contains(backend.state) {
+                ProgressView().controlSize(.small)
+                Button("취소") { _ = backend.send("cancel") }.controlSize(.small)
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
     }
 
-    private var requestBubble: some View {
-        HStack {
-            Spacer(minLength: 32)
-            Text(example == .approval ? "요약을 summary.md에 저장해줘" : "지난 회의록을 요약해줘")
-                .font(.callout)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+    private var statusText: String {
+        if !backend.tool.isEmpty { return "작업 중 · \(backend.tool)" }
+        switch backend.state {
+        case "IDLE": return "준비됨"
+        case "WAITING_APPROVAL": return "승인이 필요해요"
+        case "WAITING_USER_INPUT": return "답변이 필요해요"
+        case "PLANNING", "RESUMING_PLAN": return "요청을 처리하고 있어요"
+        case "STOPPED": return "연결 종료 · 메뉴에서 다시 시작하세요"
+        default: return "연결 준비 중"
         }
     }
 
     @ViewBuilder
-    private var answer: some View {
-        switch example {
-        case .conversation:
-            VStack(alignment: .leading, spacing: 12) {
-                Text("회의의 핵심을 정리했어요.")
-                    .font(.system(size: 14, weight: .medium))
-                Text("출시 일정은 다음 주 금요일로 정했습니다. 김민수님이 테스트 결과를 확인하고, 이지은님이 안내 문서를 준비합니다.")
-                    .font(.callout).lineSpacing(4)
-                Text("남은 확인 사항")
-                    .font(.callout.weight(.medium))
-                Text("최종 테스트 결과에 따라 출시 여부를 확정하기로 했어요.")
-                    .font(.callout).lineSpacing(4)
-                Label("회의록-10월.md", systemImage: "doc.text")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 6) {
-                    Text("답변 평가").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    ForEach(1...5, id: \.self) { score in
-                        Button(String(score)) { notice = "\(score)점 선택 · 미리보기" }
-                            .controlSize(.mini)
-                            .buttonStyle(.bordered)
-                            .help("\(score)점")
-                    }
-                }
-                .padding(.top, 4)
+    private func messageView(_ message: ChatMessage) -> some View {
+        if message.role == "user" {
+            HStack {
+                Spacer(minLength: 32)
+                Text(message.text).font(.callout).padding(12)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
             }
-        case .selection:
-            VStack(alignment: .leading, spacing: 12) {
-                Text("어떤 회의록을 읽을까요?").font(.system(size: 14, weight: .medium))
-                Text("두 개의 파일을 찾았어요.").font(.callout).foregroundStyle(.secondary)
-                candidate("회의록-10월.md", detail: "회의 자료 · 10월 12일 · 4 KB")
-                candidate("회의록-9월.md", detail: "보관 자료 · 9월 28일 · 3 KB")
-            }
-        case .approval:
-            VStack(alignment: .leading, spacing: 12) {
-                Label("새 파일 저장", systemImage: "doc.badge.plus")
-                    .font(.system(size: 14, weight: .medium))
-                Text("내용과 저장 위치를 확인해 주세요.")
-                    .font(.callout).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("summary.md").font(.callout.weight(.medium))
-                    Text("회의 자료 / summary.md").font(.caption).foregroundStyle(.secondary)
-                    Divider()
-                    Text("회의 요약\n\n출시 일정: 다음 주 금요일\n테스트 결과 확인: 김민수\n안내 문서 준비: 이지은")
-                        .font(.callout).lineSpacing(3)
-                }
-                .padding(12)
+        } else {
+            Text((try? AttributedString(markdown: message.text,
+                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                ?? AttributedString(message.text))
+                .font(.callout).lineSpacing(4)
+                .foregroundStyle(message.role == "error" ? Color.red : Color.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-                HStack {
-                    Text("외형 미리보기").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("거절") { notice = "거절 화면 미리보기 · 파일 변경 없음" }
-                        .buttonStyle(.bordered)
-                    Button("승인하고 저장") { notice = "승인 화면 미리보기 · 파일 변경 없음" }
-                        .buttonStyle(.borderedProminent)
-                }
-            }
         }
     }
 
-    private func candidate(_ name: String, detail: String) -> some View {
-        Button {
-            notice = "\(name) 선택 · 미리보기"
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "doc.text").font(.title3).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(name).font(.callout.weight(.medium))
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+    private func approvalView(_ approval: Approval) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(approval.operation == "delete" ? "파일 삭제 승인" : "파일 변경 승인",
+                  systemImage: approval.operation == "delete" ? "trash" : "doc.badge.plus")
+                .font(.headline)
+            Text(approval.target).font(.caption).textSelection(.enabled)
+            if !approval.targets.isEmpty {
+                Text("대상 \(approval.targets.count)개").font(.callout.weight(.medium))
+                ForEach(Array(approval.targets.enumerated()), id: \.offset) { index, path in
+                    Text("\(index + 1). \(path)").font(.caption).textSelection(.enabled)
                 }
-                Spacer()
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            if !approval.preview.isEmpty {
+                Text(approval.preview).font(.callout).textSelection(.enabled)
+                if approval.truncated { Text("미리보기 일부만 표시").font(.caption).foregroundStyle(.secondary) }
+            }
+            Text("\(approval.characters)자 · \(approval.operation)").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("거절") { backend.decide(false) }.buttonStyle(.bordered)
+                Button(approval.operation == "delete" ? "승인하고 삭제" : "승인하고 실행") {
+                    backend.decide(true)
+                }.buttonStyle(.borderedProminent)
+            }.disabled(backend.pending)
         }
-        .buttonStyle(.plain)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var rating: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("답변 평가").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                ForEach(1...5, id: \.self) { score in
+                    Button(String(score)) { _ = backend.send("rate", fields: ["score": score]) }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                }
+            }
+            if let score = backend.lowScore {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
+                    ForEach([("wrong_file", "엉뚱한 파일"), ("missing_content", "내용 부족"),
+                             ("wrong_content", "틀린 내용"), ("too_long", "너무 김"),
+                             ("too_slow", "너무 느림"), ("other", "기타")], id: \.0) { tag, title in
+                        Button(title) { _ = backend.send("rate", fields: ["score": score, "tags": [tag]]) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }.disabled(!backend.idle)
     }
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let path = backend.attachment {
+                HStack {
+                    Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: "paperclip")
+                        .font(.caption).lineLimit(2).help(path)
+                    Spacer()
+                    Button { _ = backend.send("detach") } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless).disabled(!backend.idle)
+                }
+            }
             HStack(alignment: .bottom, spacing: 8) {
-                Button { notice = "첨부 버튼 미리보기" } label: {
-                    Image(systemName: "paperclip")
-                }
-                .buttonStyle(.borderless)
-                .help("파일 첨부 · 미리보기")
-                TextField("명령을 입력하세요", text: $input, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...3)
-                    .onSubmit(send)
-                Button(action: send) {
-                    Image(systemName: "arrow.up")
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("전송 · 미리보기")
+                Button(action: attach) { Image(systemName: "paperclip") }
+                    .buttonStyle(.borderless).disabled(!backend.idle).help("파일 첨부")
+                TextField(backend.state == "WAITING_USER_INPUT" ? "답변을 입력하세요" : "명령을 입력하세요",
+                          text: $input, axis: .vertical)
+                    .textFieldStyle(.plain).lineLimit(1...3).onSubmit(submit)
+                Button(action: submit) { Image(systemName: "arrow.up") }
+                    .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
+                    .disabled(!backend.canSubmit || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(10)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14).strokeBorder(.separator, lineWidth: 0.5)
-            }
-            Picker("화면 예시", selection: $example) {
-                ForEach(Example.allCases) { item in
-                    Text(item.rawValue).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            HStack(spacing: 4) {
-                Image(systemName: "eye")
-                Text("디자인 미리보기 · 실제 작업은 실행하지 않습니다")
-            }
-            .font(.system(size: 10)).foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .background(.bar)
+            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(.separator, lineWidth: 0.5) }
+            Text("파일 변경은 승인 후 실행됩니다").font(.system(size: 10)).foregroundStyle(.secondary)
+        }.padding(12).background(.bar)
     }
 
-    private func send() {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        sent = text
+    private func submit() {
+        guard backend.canSubmit else { return }
+        backend.submit(input)
         input = ""
+    }
+
+    private func attach() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            _ = backend.send("attach", fields: ["path": url.path])
+        }
     }
 }

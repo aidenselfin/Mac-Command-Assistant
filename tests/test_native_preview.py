@@ -63,6 +63,7 @@ elif name == 'ps':
         "FAKE_BIN": str(binary),
         "FAKE_LOG": str(log),
         "FAKE_VALID": str(valid),
+        "VOICE_ACTION_PYTHON": sys.executable,
     }
 
     def launch():
