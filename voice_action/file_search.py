@@ -75,14 +75,18 @@ FIND_FILES_DEFINITION = ToolDefinition(
 FIND_FILES_SEMANTIC_DEFINITION = ToolDefinition(
     FIND_FILES_TOOL,
     FIND_FILES_DEFINITION.description
-    + " query는 파일이 어떤 것인지 사용자가 말한 설명(예: 고양이 사진, 가계부 지출)을 그대로 "
-    "적은 한 문장이다. 이름·폴더·내용으로 하나도 못 찾을 때만 앱이 의미가 비슷한 파일을 "
-    "찾으며, 그 결과는 항상 사용자에게 확인한다. 설명 없이 파일명만 말했으면 생략한다.",
+    + " query에는 찾는 파일이 어떤 것인지 설명하는 구절만 적는다(예: 고양이 사진, 가계부 지출, "
+    "이탈리아 음식 사진). 이동·삭제·요약 같은 동작이나 목적지 폴더는 넣지 않는다. "
+    "이름·폴더·내용으로 하나도 못 찾을 때만 앱이 의미가 비슷한 파일을 찾으며, 그 결과는 "
+    "항상 사용자에게 확인한다. 파일명을 정확히 말했으면 생략한다.",
     {
         **FIND_FILES_DEFINITION.schema,
         "properties": {
             **FIND_FILES_DEFINITION.schema["properties"],
-            "query": {"type": ["string", "null"]},
+            "query": {
+                "type": ["string", "null"],
+                "description": "찾는 파일을 설명하는 구절만. 동작·목적지는 넣지 않는다.",
+            },
         },
     },
 )

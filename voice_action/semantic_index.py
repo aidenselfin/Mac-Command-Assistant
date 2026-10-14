@@ -30,11 +30,12 @@ MAX_FILES = 2000
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 TEXT_CHARS = 2000
 # ponytail: fixed cut-offs from a 20-file trial (256d); recalibrate on real folders if they misfire.
-# Text asked for text scored 0.71-0.82, but text asked for a photo only 0.65-0.67 (still the best
-# match); unrelated files and a request about nothing in the folder reach 0.66. So the floor cannot
-# tell a weak right answer from a wrong one: it only drops hopeless matches and the user confirms.
-MIN_SCORE = 0.62  # below this nothing is similar enough to offer
-MARGIN = 0.05  # nor is a file this far under the best match
+# Text asked for text scored 0.71-0.82 (unrelated 0.60-0.66), but text asked for a photo only
+# 0.65-0.67 for the right one and ~0.60 for the rest. One floor cannot serve both, so each kind
+# of file has its own floor and is compared only with files of its own kind.
+MIN_SCORE_TEXT = 0.69
+MIN_SCORE_IMAGE = 0.62
+MARGIN = 0.05  # a file this far under the best of its kind is not offered either
 REFRESH_SECONDS = 60
 
 
@@ -238,10 +239,12 @@ class SemanticIndex:
             return SemanticResult(state, (), self._done, self._total)
         vector = self._embedder.query(query)
         scored = sorted(((e, _dot(_unpack(b), vector)) for e, b in stored), key=lambda x: -x[1])
-        best = scored[0][1]
-        hits = tuple(
-            (e, s) for e, s in scored[:limit] if s >= MIN_SCORE and s >= best - MARGIN
-        )
+        hits = []
+        for images in (False, True):
+            group = [(e, sc) for e, sc in scored if (e.extension in IMAGE_EXTENSIONS) == images]
+            floor = MIN_SCORE_IMAGE if images else MIN_SCORE_TEXT
+            hits += [(e, sc) for e, sc in group if sc >= floor and sc >= group[0][1] - MARGIN]
+        hits = tuple(sorted(hits, key=lambda hit: -hit[1])[:limit])
         return SemanticResult(state, hits, self._done, self._total)
 
 

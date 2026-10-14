@@ -134,3 +134,21 @@ def test_semantic_flag_defaults_off_and_is_validated(tmp_path):
     assert load("on").semantic_search is True
     with pytest.raises(ConfigError):
         load("x")
+
+
+def test_a_photo_and_a_text_file_each_need_their_own_score(tmp_path, root):
+    class Weak(FakeEmbedder):
+        """Every file scores 0.65 against the query: enough for a photo, too little for text."""
+
+        def query(self, text):
+            return [1.0, 0.0]
+
+        def document(self, text):
+            return [0.65, math.sqrt(1 - 0.65**2)]
+
+        def image(self, data):
+            return [0.65, math.sqrt(1 - 0.65**2)]
+
+    index = make_index(tmp_path, root, Weak())
+    response = find_files({"keywords": ["qqq"], "query": "음식 사진"}, (root,), index).structured
+    assert names(response) == ["IMG_001.jpg", "IMG_002.png"]  # no csv or txt among them
