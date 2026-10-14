@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, AuthenticationError
 
+from voice_action import semantic_index
 from voice_action.attachment import AttachmentError, check_attachment
 from voice_action.config import Config
 from voice_action.conversion import (
@@ -27,6 +28,7 @@ from voice_action.deletion import DELETE_DEFINITION, DELETE_TOOL
 from voice_action.file_operations import COPY_TOOL, DEFINITIONS, MKDIR_TOOL, MOVE_TOOL, OPERATIONS
 from voice_action.file_search import (
     FIND_FILES_DEFINITION,
+    FIND_FILES_SEMANTIC_DEFINITION,
     FIND_FILES_TOOL,
     clarification_spec,
 )
@@ -593,7 +595,7 @@ LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")
 FIND_ARGUMENT_KEYS = (
     "keywords", "extensions", "folder_hint", "modified_after", "modified_before",
-    "content_keywords",
+    "content_keywords", "query",
 )
 # Added by code, not the model, so a big file is never summarized as if it were fully read.
 MEMORY_REPLY_CHARS = 300
@@ -1053,7 +1055,11 @@ class Planner:
         self.config, self._gateway, self.model, self.emit = config, gateway, model, emit
         self._undo_journal = undo_journal
         self._risk_guard = RiskGuard(
-            gateway, undo_journal, config.allowed_directories, config.max_tool_result_chars
+            gateway,
+            undo_journal,
+            config.allowed_directories,
+            config.max_tool_result_chars,
+            semantic_index.shared(config.allowed_directories) if config.semantic_search else None,
         )
         self._tools = tools
         self.timing = timing or PlannerTiming.empty()
@@ -1217,7 +1223,11 @@ class Planner:
                     tools.append(definition)
             tools.append(READ_DOCUMENT_DEFINITION)
             if self.config.allowed_directories:
-                tools.append(FIND_FILES_DEFINITION)
+                tools.append(
+                    FIND_FILES_SEMANTIC_DEFINITION
+                    if self.config.semantic_search
+                    else FIND_FILES_DEFINITION
+                )
                 # The raw search lists every match to the model, which then reads them all
                 # instead of asking; every file lookup goes through find_files.
                 tools = [tool for tool in tools if tool.name != FILESYSTEM_SEARCH_TOOL]
@@ -1931,6 +1941,10 @@ class Planner:
         self.emit(f"[TOOL] iteration={state.iteration} name={call.name}")
         self._notify(PlannerEvent(PlannerEventType.TOOL_STARTED, state.iteration, call.name))
         started = time.perf_counter_ns()
+        wants_query = call.name == FIND_FILES_TOOL and self.config.semantic_search
+        if wants_query and not arguments.get("query"):
+            # The model rarely fills `query`; the user's own words are the better description.
+            arguments = {**arguments, "query": state.user_text[:200]}
         try:
             return await self._risk_guard.execute_read_only(call.name, arguments)
         except (ForbiddenToolError, ToolRejectedError, MCPError) as exc:
