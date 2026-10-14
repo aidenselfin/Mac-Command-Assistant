@@ -30,10 +30,11 @@ MAX_FILES = 2000
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 TEXT_CHARS = 2000
 # ponytail: fixed cut-offs from a 20-file trial (256d); recalibrate on real folders if they misfire.
-# Right answers scored 0.71-0.82 there, unrelated files 0.60-0.66, and a request about nothing in
-# the folder topped out at 0.66.
-MIN_SCORE = 0.69  # below this nothing is similar enough to offer
-MARGIN = 0.07  # nor is a file this far under the best match
+# Text asked for text scored 0.71-0.82, but text asked for a photo only 0.65-0.67 (still the best
+# match); unrelated files and a request about nothing in the folder reach 0.66. So the floor cannot
+# tell a weak right answer from a wrong one: it only drops hopeless matches and the user confirms.
+MIN_SCORE = 0.62  # below this nothing is similar enough to offer
+MARGIN = 0.05  # nor is a file this far under the best match
 REFRESH_SECONDS = 60
 
 
