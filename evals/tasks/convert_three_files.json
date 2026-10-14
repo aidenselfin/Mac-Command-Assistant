@@ -1,0 +1,63 @@
+{
+  "id": "convert_three_files",
+  "family": "file.convert.many",
+  "files": {
+    "a.csv": "x,y\n1,2\n",
+    "b.csv": "x,y\n3,4\n",
+    "c.csv": "x,y\n5,6\n",
+    "메모.txt": "무관"
+  },
+  "request": "a.csv, b.csv, c.csv를 모두 json으로 바꿔줘",
+  "user": {
+    "approve": [
+      true,
+      true,
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/a.csv",
+            "target_format": "json"
+          }
+        },
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/b.csv",
+            "target_format": "json"
+          }
+        },
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/c.csv",
+            "target_format": "json"
+          }
+        }
+      ]
+    },
+    {
+      "text": "세 파일을 변환했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "a.json": "*",
+      "b.json": "*",
+      "c.json": "*"
+    },
+    "must_run": [
+      "local__convert_file"
+    ],
+    "changed_paths": [
+      "a.json",
+      "b.json",
+      "c.json"
+    ]
+  }
+}

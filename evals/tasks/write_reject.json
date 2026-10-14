@@ -1,0 +1,10 @@
+{
+  "id": "write_reject", "family": "file.write.create",
+  "files": {"notes.txt": "회의 결론: 금요일 배포"},
+  "request": "summary.txt에 '금요일 배포'라고 저장해줘",
+  "user": {"approve": [false]},
+  "script": [
+    {"calls": [{"name": "filesystem__write_file", "args": {"path": "{root}/summary.txt", "content": "금요일 배포"}}]}
+  ],
+  "expect": {"files": {}}
+}

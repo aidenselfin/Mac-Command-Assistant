@@ -1,0 +1,29 @@
+{
+  "id": "convert_reject",
+  "family": "file.convert",
+  "files": {
+    "table.csv": "name,amount\nlunch,12000\n"
+  },
+  "request": "table.csv를 json으로 변환해줘",
+  "user": {
+    "approve": [
+      false
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/table.csv",
+            "target_format": "json"
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "files": {}
+  }
+}

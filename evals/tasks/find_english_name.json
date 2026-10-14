@@ -1,0 +1,45 @@
+{
+  "id": "find_english_name",
+  "family": "file.find",
+  "files": {
+    "Team_Meeting_Notes.md": "# Notes\nShip on Friday",
+    "other.txt": "x"
+  },
+  "request": "팀 미팅 노트 읽어줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__find_files",
+          "args": {
+            "keywords": [
+              "미팅 노트",
+              "meeting notes",
+              "meeting"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/Team_Meeting_Notes.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "금요일에 배포합니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__find_files",
+      "filesystem__read_text_file"
+    ]
+  }
+}

@@ -46,7 +46,7 @@ class ScriptedPlanner:
     def set_event_observer(self, observer: PlannerEventObserver | None) -> None:
         self.observer = observer
 
-    async def run(self, text: str) -> PlannerOutcome:
+    async def run(self, text: str, **_options) -> PlannerOutcome:
         self.run_inputs.append(text)
         action = self.run_actions.pop(0)
         if isinstance(action, BaseException):
@@ -460,3 +460,99 @@ def test_voice_compatibility_states_are_declared():
         "DONE",
         "ERROR",
     }
+
+
+async def test_narrow_search_takes_free_text_and_n_beon_picks_an_option():
+    options = ("/r/newest.txt", "폴더: 자료")
+    context = ClarificationContext("임시 읽어줘", "narrow_search", options, 1)
+    question = Clarification("범위를 좁혀 주세요.", context.options, context, ("최신", "자료"))
+    planner = ScriptedPlanner([question, question], [Completed("A"), Completed("B")])
+    controller = RuntimeController(planner)
+
+    await controller.submit("임시 읽어줘")
+    assert await controller.submit("2") == Completed("A")  # a bare number is free text here
+    await controller.submit("임시 읽어줘")
+    assert await controller.submit("1번") == Completed("B")
+    assert planner.resume_inputs == [(context, "2"), (context, "/r/newest.txt")]
+
+
+async def test_a_cancelled_question_and_an_undo_are_not_rateable(tmp_path):
+    from voice_action.feedback import FeedbackLoop
+
+    options = ("/r/a.md", "/r/b.md")
+    context = ClarificationContext("요약", "file_candidate", options, 1)
+    question = Clarification("고르세요", options, context)
+    feedback = FeedbackLoop(tmp_path / "fb.sqlite3")
+    planner = ScriptedPlanner(
+        [question, Completed("답")], undo_actions=[Completed("되돌렸습니다.")]
+    )
+    controller = RuntimeController(planner, feedback=feedback)
+
+    await controller.submit("요약해줘")
+    assert not controller.ratable  # a question is not an answer
+    cancelled = await controller.submit("취소")
+    assert cancelled == Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다.")
+    assert not controller.ratable and not await controller.rate(5)
+
+    await controller.submit("다시 요약해줘")
+    assert controller.ratable
+    await controller.undo_last_write()
+    assert not controller.ratable and not await controller.rate(5)
+    feedback.db.close()
+
+
+class AttachingPlanner(ScriptedPlanner):
+    def __init__(self, config, actions):
+        super().__init__(actions)
+        self.config, self.attachments = config, []
+
+    async def run(self, text, *, attachment=None, **_options):
+        self.attachments.append(attachment)
+        return await super().run(text)
+
+
+async def test_an_attachment_belongs_to_the_next_command_only(config):
+    from voice_action.attachment import AttachmentError
+
+    root = config.allowed_directories[0]
+    target = root / "a b.md"
+    target.write_text("x")
+    planner = AttachingPlanner(config, [Completed("1"), Completed("2")])
+    controller = RuntimeController(planner)
+
+    assert controller.attach(str(target)) == str(target) and controller.attachment == str(target)
+    await controller.submit("이 파일 요약해줘")
+    await controller.submit("그냥 질문")
+
+    assert planner.attachments == [str(target), None]
+    assert controller.attachment is None
+    with pytest.raises(AttachmentError):
+        controller.attach(str(root.parent / "밖.txt"))
+    assert controller.attachment is None
+
+
+async def test_a_refused_drop_keeps_the_earlier_attachment_and_detach_clears_it(config):
+    from voice_action.attachment import AttachmentError
+
+    root = config.allowed_directories[0]
+    (root / "a.md").write_text("x")
+    controller = RuntimeController(AttachingPlanner(config, []))
+    controller.attach(str(root / "a.md"))
+    with pytest.raises(AttachmentError):
+        controller.attach(str(root))  # a folder
+    assert controller.attachment == str(root / "a.md")
+    controller.detach()
+    assert controller.attachment is None
+
+
+async def test_attaching_is_refused_while_a_command_is_running_or_waiting(config):
+    from voice_action.attachment import AttachmentError
+
+    root = config.allowed_directories[0]
+    (root / "a.md").write_text("x")
+    options = ("1",)
+    context = ClarificationContext("요약", "file_candidate", options, 1)
+    controller = RuntimeController(AttachingPlanner(config, [Clarification("?", options, context)]))
+    await controller.submit("요약해줘")  # now waiting for an answer
+    with pytest.raises(AttachmentError):
+        controller.attach(str(root / "a.md"))

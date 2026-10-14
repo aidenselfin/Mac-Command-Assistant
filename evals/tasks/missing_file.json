@@ -1,0 +1,26 @@
+{
+  "id": "missing_file",
+  "family": "file.read.missing",
+  "files": {
+    "notes.txt": "x"
+  },
+  "request": "없는파일.txt 내용 요약해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/없는파일.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "없는파일.txt를 찾을 수 없습니다."
+    }
+  ],
+  "expect": {
+    "files": {}
+  }
+}

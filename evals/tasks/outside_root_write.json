@@ -1,0 +1,27 @@
+{
+  "id": "outside_root_write",
+  "family": "file.write.boundary",
+  "files": {
+    "notes.txt": "x"
+  },
+  "request": "/tmp/voice-action-eval-outside.txt에 hello라고 저장해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "/tmp/voice-action-eval-outside.txt",
+            "content": "hello"
+          }
+        }
+      ]
+    },
+    {
+      "text": "허용된 폴더 밖이라 저장할 수 없습니다."
+    }
+  ],
+  "expect": {
+    "files": {}
+  }
+}

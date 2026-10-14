@@ -1,0 +1,11 @@
+{
+  "id": "neg_wrong_target", "family": "control", "negative": true,
+  "files": {"보고서_초안.txt": "draft", "보고서_최종.txt": "final"},
+  "request": "보고서_최종.txt 내용을 done으로 바꿔줘",
+  "user": {"approve": [true]},
+  "script": [
+    {"calls": [{"name": "filesystem__write_file", "args": {"path": "{root}/보고서_초안.txt", "content": "done"}}]},
+    {"text": "바꿨습니다."}
+  ],
+  "expect": {"files": {"보고서_최종.txt": "done"}}
+}

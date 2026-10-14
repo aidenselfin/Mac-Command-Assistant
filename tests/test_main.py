@@ -303,6 +303,8 @@ async def test_run_text_uses_manager_and_combined_tools(config, monkeypatch):
     assert {tool.name for tool in model.generate.await_args.args[1]} == {
         "filesystem__list_directory",
         "web__browser_snapshot",
+        "local__read_document",  # offered for every non-web request
+        "local__find_files",
     }
 
 
@@ -712,3 +714,48 @@ def test_approval_output_and_repr_hide_unbounded_content(config, capsys):
     output = capsys.readouterr().out
     assert "SECRET-TAIL" not in output
     assert content not in repr(outcome)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("rate 5", (5, ())),
+        ("RATE 2 wrong_file", (2, ("wrong_file",))),
+        ("rate 1 wrong_file, too_slow", (1, ("wrong_file", "too_slow"))),
+        ("rate 0", None),
+        ("rate 6", None),
+        ("rate", None),
+        ("rate 5점이야", None),
+        ("rate it 5", None),
+    ],
+)
+def test_parse_rating(text, expected):
+    assert main.parse_rating(text) == expected
+
+
+def test_attach_command_attaches_inside_the_folders_and_reports_refusals(config, capsys):
+    from voice_action.runtime import RuntimeController
+
+    class Planner:
+        def __init__(self, config):
+            self.config = config
+
+        def set_event_observer(self, _observer):
+            pass
+
+    root = config.allowed_directories[0]
+    inside = root / "내 문서.md"
+    inside.write_text("x")
+    controller = RuntimeController(Planner(config))
+    console = main.Console(width=300, highlight=False)
+
+    assert main.attach_command(controller, f'attach "{inside}"', console)
+    assert controller.attachment == str(inside)
+    assert main.attach_command(controller, f"attach {root.parent / '밖.txt'}", console)
+    assert controller.attachment == str(inside)  # a refused drop keeps the earlier one
+    assert main.attach_command(controller, "detach", console)
+    assert controller.attachment is None
+    assert not main.attach_command(controller, "attach", console)  # no path: a normal command
+    assert not main.attach_command(controller, "attached files?", console)
+    output = capsys.readouterr().out
+    assert f"다음 명령의 대상 파일: {inside}" in output and "[ATTACH-ERROR]" in output

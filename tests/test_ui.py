@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import queue
 import threading
 from contextlib import asynccontextmanager
@@ -11,6 +12,8 @@ from voice_action.planner import (
     Clarification,
     ClarificationContext,
     Completed,
+    Error,
+    PlannerError,
     PlannerEvent,
     PlannerEventType,
 )
@@ -24,6 +27,14 @@ from voice_action.ui import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _collect_tk_on_main_thread():
+    """A destroyed Tk root can sit in a reference cycle. If the cycle is collected on a worker
+    thread, Tcl aborts the whole process; collect it here, on the thread that made it."""
+    yield
+    gc.collect()
+
+
 class FakeView:
     def __init__(self):
         self.statuses = []
@@ -33,6 +44,22 @@ class FakeView:
         self.close_count = 0
         self.requests = []
         self.approval_enabled = []
+        self.choices = ()
+        self.rating = (False, None, ())
+        self.revealed = []
+        self.attachment = None
+
+    def reveal_files(self, paths):
+        self.revealed.append(paths)
+
+    def set_attachment(self, path):
+        self.attachment = path
+
+    def set_choices(self, labels):
+        self.choices = labels
+
+    def set_rating(self, visible, score=None, tags=()):
+        self.rating = (visible, score, tags)
 
     def set_status(self, value):
         self.statuses.append(value)
@@ -67,6 +94,23 @@ class FakeAdapter:
         self.undos = 0
         self.cancellations = 0
         self.shutdowns = 0
+        self.ratings = []
+        self.rateable = True
+        self.attached, self.detached = [], 0
+
+    def attach(self, path):
+        self.attached.append(path)
+        return True
+
+    def detach(self):
+        self.detached += 1
+
+    def can_rate(self):
+        return self.rateable
+
+    def rate(self, score, tags):
+        self.ratings.append((score, tags))
+        return True
 
     def submit(self, text):
         self.submissions.append(text)
@@ -146,6 +190,7 @@ def test_tk_entry_pastes_from_shortcut_and_context_menu():
             assert view.entry.bind("<Button-2>")
             assert view.entry.bind("<Control-Button-1>")
     finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
         root.destroy()
 
 
@@ -454,6 +499,33 @@ def test_worker_exception_is_redacted_and_closes_owned_resources(config):
     assert worker.thread is not None and not worker.thread.is_alive()
 
 
+class PlannerFailingModel:
+    async def generate(self, *_args, **_kwargs):
+        raise PlannerError("LLM API 요청 실패 (HTTP 404)")
+
+
+def test_worker_planner_error_is_reported_and_keeps_window_open(config):
+    messages = queue.Queue()
+    manager, client = FakeManager(), FakeClient()
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: manager,
+        client_factory=lambda _config: client,
+        model_factory=lambda _client, _model_name: PlannerFailingModel(),
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+
+    for _ in range(2):  # still accepts commands after the first failure
+        assert worker.submit("실패 요청")
+        outcome, seen = wait_for_message(messages, UIMessageType.OUTCOME)
+        assert outcome.value == Error("LLM API 요청 실패 (HTTP 404)")
+        assert not [m for m in seen if m.type in {UIMessageType.FAILURE, UIMessageType.STOPPED}]
+    assert not manager.closed.is_set()
+    worker.shutdown()
+
+
 def test_outcome_rendering_keeps_clarification_contract():
     presenter, _adapter, view = presenter_at(RuntimeState.WAITING_USER_INPUT)
     context = ClarificationContext("요약", "file_candidate", ("a", "b"), 1)
@@ -484,8 +556,8 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
         presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
         root.update()
         assert root.minsize() == (720, 520)
-        view.example_buttons[0].invoke()
-        assert view.entry.get() and adapter.submissions == []
+        view.entry.insert(0, "파일 목록 보여줘")
+        assert adapter.submissions == []
         view._execute()
         assert len(adapter.submissions) == 1
         assert view.entry.get() == ""
@@ -547,4 +619,529 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
         root.update()
         assert view.output.yview()[0] < 0.1
     finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
+        root.destroy()
+
+
+def test_lost_hangul_keystroke_detection():
+    real_g = (5 << 24) | ord("ㅎ")  # TkAqua: virtual key 5 ('g') typed with the Korean IME
+    commit = (0x80 << 24) | ord("ㅎ")
+    assert ui_module.is_lost_hangul_keystroke("ㅎ", real_g, composing=False)
+    assert not ui_module.is_lost_hangul_keystroke("ㅎ", real_g, composing=True)
+    assert not ui_module.is_lost_hangul_keystroke("ㅎ", commit, composing=False)
+    assert not ui_module.is_lost_hangul_keystroke("한", real_g, composing=False)
+    assert not ui_module.is_lost_hangul_keystroke("g", (5 << 24) | ord("g"), composing=False)
+
+
+def test_render_markdown_turns_symbols_into_styles():
+    def text(segments):
+        return "".join(t for t, _ in segments)
+
+    def tags_of(segments, needle):
+        return next(tags for t, tags in segments if needle in t)
+
+    rendered = ui_module.render_markdown(
+        "## 요약\n"
+        "**굵게**와 *기울임*, `code.py`\n"
+        "- 첫째\n"
+        "  - 둘째\n"
+        "1. 번호 유지\n"
+        "[문서](https://example.com)\n"
+        "> 인용\n"
+        "---\n"
+        "```\n**그대로** `둠`\n```\n"
+        "| 파일 | 크기 |\n|---|---|\n| **a.md** | 10 |"
+    )
+    plain = text(rendered)
+    assert "요약\n굵게와 기울임, code.py\n• 첫째\n  • 둘째\n1. 번호 유지\n" in plain
+    assert "문서 (https://example.com)\n인용\n────────\n" in plain
+    assert "**그대로** `둠`\n" in plain  # code blocks are shown as written
+    assert "파일  크기\na.md  10" in plain and "|" not in plain and "---" not in plain
+    assert "md_heading" in tags_of(rendered, "요약")
+    assert "md_bold" in tags_of(rendered, "굵게")
+    assert "md_italic" in tags_of(rendered, "기울임")
+    assert "md_code" in tags_of(rendered, "code.py")
+    assert "md_table" in tags_of(rendered, "a.md")
+
+
+def test_render_markdown_leaves_non_markdown_text_alone():
+    for text in ("2 * 3 * 4", "**닫히지 않음", "file_name_v2.txt", "a*b", "평범한 문장"):
+        assert "".join(t for t, _ in ui_module.render_markdown(text)) == text
+
+
+def test_tk_view_shows_folder_and_renders_only_model_text():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root, (Path("/tmp/작업 폴더"),))
+        assert view.folder_text == "작업 폴더 · /tmp/작업 폴더"
+        view.show_request("**요청**은 그대로")
+        view.show_outcome(Completed("## 결과\n**굵게** `코드`"))
+        shown = view.output.get("1.0", "end")
+        assert "**요청**은 그대로" in shown
+        assert "결과\n굵게 코드" in shown and "## " not in shown and "`" not in shown
+
+        context = ClarificationContext("요약", "file_candidate", ("a", "b"), 1)
+        view.show_outcome(
+            ApprovalRequired(
+                "filesystem__write_file", "/tmp/a.md", "create", 9, "**원문**", False, context
+            )
+        )
+        assert "**원문**" in view.approval_output.get("1.0", "end")  # what will be written
+    finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
+        root.destroy()
+
+
+def test_redesigned_view_status_tool_cards_and_delete_panel():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root, (Path("/tmp/work"),))
+        presenter = UIPresenter(FakeAdapter(), view)
+        view.bind_presenter(presenter)
+        assert "아직 대화 기록이 없어요" in view.output.get("1.0", "end")
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+        assert view.status_var.get() == "요청 분석 중"
+        assert str(view.hint_label.cget("fg")).upper() == ui_module.RED
+        presenter.handle(
+            UIMessage(
+                UIMessageType.PLANNER_EVENT,
+                PlannerEvent(PlannerEventType.TOOL_STARTED, 1, "filesystem__read_text_file"),
+            )
+        )
+        root.update()
+        assert view.tool_line.winfo_ismapped()
+        assert view.tool_var.get() == "filesystem__read_text_file"
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        root.update()
+        assert view.status_var.get() == "준비됨" and not view.tool_line.winfo_ismapped()
+        assert str(view.hint_label.cget("fg")).upper() == ui_module.MUTED
+
+        view.show_request("목록 보여줘")
+        shown = view.output.get("1.0", "end")
+        assert "아직 대화 기록이 없어요" not in shown and "내 요청\n목록 보여줘" in shown
+        assert int(view.output.tag_cget("request", "lmargin1")) > int(
+            view.output.tag_cget("result", "lmargin1")
+        )
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_APPROVAL))
+        targets = ("/tmp/work/a.log", "/tmp/work/b.log")
+        presenter.handle(
+            UIMessage(
+                UIMessageType.OUTCOME,
+                ApprovalRequired("local__delete_files", targets[0], "delete", 0, "", False,
+                                 {}, targets),
+            )
+        )
+        details = view.approval_output.get("1.0", "end")
+        assert "삭제 대상 2개" in details and "1  /tmp/work/a.log" in details
+        assert view.approve_button.cget("style") == "Danger.TButton"
+        assert str(view.approval_frame.cget("bg")).upper() == ui_module.RED_SOFT
+    finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
+        root.destroy()
+
+
+def test_convert_approval_panel_shows_source_output_and_preview():
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        view = ui_module.TkView(root)
+        presenter = UIPresenter(FakeAdapter(), view)
+        view.bind_presenter(presenter)
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_APPROVAL))
+        pending = ApprovalRequired(
+            "local__convert_file", "/w/사진.jpg", "convert", 2048, "", False, {}, ("/w/사진.heic",)
+        )
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, pending))
+        details = view.approval_output.get("1.0", "end")
+        assert "원본  /w/사진.heic" in details and "출력  /w/사진.jpg" in details
+        assert "2,048 bytes" in details and "미리보기가 없습니다" in details
+        assert view.approve_button.cget("text") == "승인하고 변환"
+    finally:
+        root.update()  # flush pending Tk events before destroy (macOS Tk)
+        root.destroy()
+
+
+def pick_question(presenter, kind="file_candidate"):
+    options = ("/r/a.md", "/r/b.md")
+    context = ClarificationContext("요약", kind, options, 1)
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_USER_INPUT))
+    presenter.handle(
+        UIMessage(
+            UIMessageType.OUTCOME,
+            Clarification("고르세요", options, context, ("a.md · 자료", "b.md · 자료")),
+        )
+    )
+
+
+def test_question_shows_labelled_buttons_and_a_click_answers_with_n_beon():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    pick_question(presenter)
+    assert view.choices == ("a.md · 자료", "b.md · 자료")
+    assert not presenter.choose(3) and not presenter.choose(0)
+    assert presenter.choose(2)
+    assert adapter.submissions == ["2번"]
+    assert view.requests == ["2. b.md · 자료"]
+    assert view.choices == ()  # gone as soon as the answer is on its way
+
+
+def test_choices_hide_when_the_question_is_no_longer_open():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    pick_question(presenter, "narrow_search")
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+    assert view.choices == ()
+    assert not presenter.choose(1) and adapter.submissions == []
+
+
+def test_free_text_still_answers_a_question_with_buttons():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    pick_question(presenter, "narrow_search")
+    assert presenter.execute("임시-12번")
+    assert adapter.submissions == ["임시-12번"] and view.choices == ()
+
+
+def test_completed_answer_opens_rating_and_next_command_closes_it():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    assert view.rating[0] is False
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    assert view.rating == (True, None, ())
+    assert presenter.rate(5) and adapter.ratings == [(5, ())]
+    assert view.rating == (True, 5, ())
+    assert not presenter.rate(0) and not presenter.rate(6)
+    assert presenter.execute("다음")
+    assert view.rating[0] is False and not presenter.rate(4)
+
+
+def test_errors_and_questions_cannot_be_rated():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Error("실패")))
+    assert not presenter.rate(5) and adapter.ratings == [] and view.rating[0] is False
+
+
+def test_low_score_collects_causes_and_a_better_score_drops_them():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    assert not presenter.toggle_tag("wrong_file")  # nothing rated yet
+    presenter.rate(2)
+    assert presenter.toggle_tag("wrong_file") and presenter.toggle_tag("too_slow")
+    assert presenter.toggle_tag("wrong_file")  # toggled off
+    assert adapter.ratings[-1] == (2, ("too_slow",))
+    assert view.rating == (True, 2, ("too_slow",))
+    presenter.rate(4)
+    assert adapter.ratings[-1] == (4, ()) and not presenter.toggle_tag("other")
+    presenter.rate(1)  # a new low score starts without the old causes
+    assert adapter.ratings[-1] == (1, ())
+
+
+def test_rating_hides_outside_idle():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+    assert view.rating[0] is False and not presenter.rate(5)
+
+
+def test_tk_choice_and_rating_buttons_and_digit_shortcuts():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        adapter = FakeAdapter()
+        view = ui_module.TkView(root, (Path("/tmp/work"),))
+        presenter = UIPresenter(adapter, view)
+        view.bind_presenter(presenter)
+
+        class Key:
+            def __init__(self, char):
+                self.char = char
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        assert view._on_digit(Key("3")) is None  # nothing to pick or rate yet
+
+        pick_question(presenter)
+        root.update()
+        buttons = view.choice_frame.winfo_children()
+        assert [b.cget("text") for b in buttons] == ["1   a.md · 자료", "2   b.md · 자료"]
+        view.entry.insert(0, "12")
+        assert view._on_digit(Key("1")) is None  # typing a number into a command
+        view.entry.delete(0, "end")
+        assert view._on_digit(Key("9")) is None and view._on_digit(Key("a")) is None
+        assert view._on_digit(Key("2")) == "break" and adapter.submissions == ["2번"]
+        root.update()
+        assert not view.choice_frame.winfo_ismapped()
+
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+        root.update()
+        assert view.rating_frame.winfo_ismapped() and not view.tag_row.winfo_ismapped()
+        assert view._on_digit(Key("2")) == "break" and adapter.ratings[-1] == (2, ())
+        root.update()
+        assert view.tag_row.winfo_ismapped()
+        view.tag_buttons["wrong_file"].invoke()
+        assert adapter.ratings[-1] == (2, ("wrong_file",))
+        view.rating_buttons[5].invoke()
+        root.update()
+        assert adapter.ratings[-1] == (5, ()) and not view.tag_row.winfo_ismapped()
+    finally:
+        root.update()
+        root.destroy()
+
+
+class AnsweringModel:
+    async def generate(self, *_args, **_kwargs):
+        from voice_action.planner import ModelTurn
+
+        return ModelTurn("답", [])
+
+
+def test_worker_records_a_rating_for_the_answered_run(config, tmp_path):
+    import sqlite3
+
+    from voice_action.feedback import FeedbackLoop
+
+    messages = queue.Queue()
+    manager, client = FakeManager(), FakeClient()
+    store = tmp_path / "ui-rating.sqlite3"
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: manager,
+        client_factory=lambda _config: client,
+        model_factory=lambda _client, _model_name: AnsweringModel(),
+        feedback_factory=lambda _config, _emit: FeedbackLoop(store),  # built on the worker thread
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+    assert worker.submit("질문")
+    done, _ = wait_for_message(messages, UIMessageType.OUTCOME)
+    assert done.value == Completed("답")
+
+    assert worker.rate(2, ("wrong_file",))
+    worker.shutdown()
+
+    rows = sqlite3.connect(store).execute(
+        "SELECT json_extract(payload, '$.score'), json_extract(payload, '$.tags') "
+        "FROM events WHERE kind = 'rating'"
+    ).fetchall()
+    assert rows == [(2, '["wrong_file"]')]
+
+
+def test_worker_says_so_when_a_rating_could_not_be_stored(config):
+    messages = queue.Queue()
+    manager, client = FakeManager(), FakeClient()
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: manager,
+        client_factory=lambda _config: client,
+        model_factory=lambda _client, _model_name: object(),
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+
+    assert worker.rate(3, ())  # scheduled, but nothing was answered yet
+    notice, _ = wait_for_message(messages, UIMessageType.NOTICE)
+    worker.shutdown()
+
+    assert "평가를 저장하지 못했어요" in notice.value
+
+
+def test_a_cancel_or_undo_result_offers_no_rating_bar():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    adapter.rateable = False
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("요청을 취소했습니다.")))
+    assert view.rating[0] is False and not presenter.rate(5) and adapter.ratings == []
+
+
+def test_only_a_completed_result_with_changed_files_reveals_them():
+    presenter, _, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Error("실패")))
+    assert view.revealed == []  # nothing changed, or it failed
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("저장", ("/r/한글 파일.txt",))))
+    assert view.revealed == [("/r/한글 파일.txt",)]
+
+
+def test_presenter_takes_one_file_only_while_idle_and_shows_refusals():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    assert not presenter.attach(("/r/a.md", "/r/b.md"))
+    assert "하나만" in view.outputs[-1] and adapter.attached == []
+    assert not presenter.attach(())
+    assert presenter.attach(("/r/한글 이름.md",)) and adapter.attached == ["/r/한글 이름.md"]
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+    assert not presenter.attach(("/r/c.md",)) and "끝난 뒤" in view.outputs[-1]
+
+
+def test_attachment_chip_follows_the_worker_and_goes_away_with_the_command():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, ("/r/a.md", None)))
+    assert view.attachment == "/r/a.md"
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, (None, "허용 폴더 밖이에요.")))
+    assert view.attachment == "/r/a.md" and view.outputs[-1] == "허용 폴더 밖이에요."
+    assert presenter.execute("이 파일 요약해줘")
+    assert view.attachment is None  # consumed by that one command
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, ("/r/b.md", None)))
+    presenter.detach()
+    assert view.attachment is None and adapter.detached == 1
+
+
+def test_an_answer_to_a_question_keeps_the_attachment():
+    presenter, _, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.ATTACHMENT, ("/r/a.md", None)))
+    pick_question(presenter)
+    assert presenter.execute("1번")
+    assert view.attachment == "/r/a.md"  # only a new command takes it
+
+
+def test_worker_attach_checks_the_path_on_the_worker_and_reports_back(config):
+    root = config.allowed_directories[0]
+    (root / "내 파일.md").write_text("x")
+    messages = queue.Queue()
+    worker = AsyncRuntimeWorker(
+        config,
+        messages,
+        manager_factory=lambda _config: FakeManager(),
+        client_factory=lambda _config: FakeClient(),
+        model_factory=lambda _client, _model_name: object(),
+    )
+    worker.start()
+    wait_for_message(messages, UIMessageType.STATE)
+
+    assert worker.attach(str(root / "내 파일.md"))
+    accepted, _ = wait_for_message(messages, UIMessageType.ATTACHMENT)
+    assert accepted.value == (str(root / "내 파일.md"), None)
+
+    assert worker.attach(str(root.parent / "밖.txt"))
+    refused, _ = wait_for_message(messages, UIMessageType.ATTACHMENT)
+    worker.shutdown()
+    assert refused.value[0] is None and "요청을 거부" in refused.value[1]
+
+
+def test_tk_drop_parses_finder_paths_and_the_chip_shows_the_name():
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        from tkinterdnd2 import TkinterDnD
+
+        root = TkinterDnD.Tk()
+    except (ImportError, tk.TclError) as exc:
+        pytest.skip(f"drag and drop unavailable: {exc}")
+    try:
+        adapter = FakeAdapter()
+        view = ui_module.TkView(root, (Path("/tmp/work"),), drop=True)
+        presenter = UIPresenter(adapter, view)
+        view.bind_presenter(presenter)
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+        assert view.drop_enabled
+
+        class Drop:
+            action = "copy"
+
+            def __init__(self, data):
+                self.data = data
+
+        # Tk hands a drop over as a Tcl list: braces around a name with spaces.
+        assert view._dropped(Drop("{/tmp/work/한글 파일 (1).md}")) == "copy"
+        assert adapter.attached == ["/tmp/work/한글 파일 (1).md"]
+        view._dropped(Drop("{/tmp/work/a b.md} /tmp/work/c.md"))
+        assert len(adapter.attached) == 1  # two files: refused before the app is asked
+        assert "하나만" in view.output.get("1.0", "end")
+
+        view.set_attachment("/tmp/work/한글 파일 (1).md")
+        root.update()
+        assert "한글 파일 (1).md" in view.attach_label.cget("text")
+        assert view.attach_clear.winfo_ismapped()
+        view.set_attachment(None)
+        root.update()
+        assert not view.attach_clear.winfo_ismapped()
+    finally:
+        root.update()
+        root.destroy()
+
+
+def test_tk_view_docks_finder_beside_the_window_after_a_reveal_and_gives_focus_back(monkeypatch):
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        revealed, attempts, fronted = [], [], []
+        monkeypatch.setattr(
+            ui_module, "reveal", lambda paths, folders: revealed.append(paths) or True
+        )
+        results = iter(["waiting", "waiting", "moved"])
+
+        def fake_arrange(folder, app, screen):
+            attempts.append((folder, app, screen))
+            return next(results)
+
+        monkeypatch.setattr(ui_module, "arrange", fake_arrange)
+        monkeypatch.setattr(ui_module, "DOCK_RETRY_MS", 1)
+        view = ui_module.TkView(root, (Path("/tmp/work"),), reveal=True, dock=True)
+        monkeypatch.setattr(view, "_to_front", lambda: fronted.append(True))
+
+        view.reveal_files(("/tmp/work/하위/한글 파일.md",))
+        for _ in range(50):
+            root.update()
+            if fronted:
+                break
+        assert revealed == [("/tmp/work/하위/한글 파일.md",)]
+        assert [folder for folder, _, _ in attempts] == ["하위"] * 3  # retried until Finder had it
+        app, screen = attempts[0][1], attempts[0][2]
+        assert app.w == root.winfo_width() and screen == (
+            root.winfo_screenwidth(), root.winfo_screenheight()
+        )
+        assert fronted == [True]
+    finally:
+        root.update()
+        root.destroy()
+
+
+def test_tk_view_explains_a_missing_permission_once_and_never_docks_when_off(monkeypatch):
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        calls = []
+        monkeypatch.setattr(ui_module, "reveal", lambda paths, folders: True)
+        monkeypatch.setattr(ui_module, "arrange", lambda *a: calls.append(a) or "untrusted")
+        view = ui_module.TkView(root, (Path("/tmp/work"),), reveal=True, dock=True)
+        for _ in range(2):
+            view.reveal_files(("/tmp/work/a.md",))
+        assert view.output.get("1.0", "end").count("손쉬운 사용") == 1  # one notice, not two
+        assert len(calls) == 2
+
+        off = ui_module.TkView(tk.Toplevel(root), (Path("/tmp/work"),), reveal=True, dock=False)
+        off.reveal_files(("/tmp/work/a.md",))
+        assert len(calls) == 2  # docking is off: the reveal alone happened
+    finally:
+        root.update()
         root.destroy()

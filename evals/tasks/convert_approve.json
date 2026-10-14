@@ -1,0 +1,34 @@
+{
+  "id": "convert_approve",
+  "family": "file.convert",
+  "files": {
+    "table.csv": "name,amount\nlunch,12000\n"
+  },
+  "request": "table.csv를 json으로 변환해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/table.csv",
+            "target_format": "json"
+          }
+        }
+      ]
+    },
+    {
+      "text": "table.json을 만들었습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "table.json": "[\n  {\n    \"name\": \"lunch\",\n    \"amount\": \"12000\"\n  }\n]"
+    }
+  }
+}

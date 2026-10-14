@@ -1,13 +1,16 @@
 from copy import deepcopy
+from unittest.mock import AsyncMock
 
 import pytest
 
 from voice_action.mcp_client import ToolResult
 from voice_action.risk_guard import (
     READ_ONLY_TOOLS,
+    ApprovalChangedError,
     ApprovalInvalidError,
     ForbiddenToolError,
     RiskGuard,
+    RiskGuardError,
     ToolRisk,
     classify_tool,
 )
@@ -86,3 +89,98 @@ async def test_forbidden_tool_has_no_approval_or_gateway_call():
     with pytest.raises(ForbiddenToolError):
         await guard.prepare_write("filesystem__delete_file", {"path": "/tmp/x"})
     assert gateway.calls == []
+
+
+def _replace_same_content(target):
+    text = target.read_text()
+    target.unlink()
+    target.write_text(text)  # same bytes, new inode
+
+
+def _swap_for_symlink(target):
+    real = target.with_name("real.txt")
+    real.write_text(target.read_text())
+    target.unlink()
+    target.symlink_to(real)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda t: t.write_text("external new version"),
+        _replace_same_content,
+        _swap_for_symlink,
+    ],
+    ids=["content", "same-path-new-inode", "symlink"],
+)
+async def test_overwrite_approval_is_bound_to_the_reviewed_file(tmp_path, change):
+    gateway = Gateway()
+    guard = RiskGuard(gateway, UndoJournal(tmp_path / "undo.sqlite3", (tmp_path,)))
+    target = tmp_path / "changed.txt"
+    target.write_text("approved old version")
+    arguments = {"path": str(target), "content": "planned output"}
+    prepared = await guard.prepare_write("filesystem__write_file", arguments)
+    assert prepared.operation == "overwrite"
+    assert "approved old version" not in repr(prepared)
+
+    change(target)
+
+    with pytest.raises((ApprovalChangedError, RiskGuardError)) as caught:
+        await guard.execute_approved(prepared)
+    assert gateway.calls == []  # the stale approval wrote nothing
+    if isinstance(caught.value, ApprovalChangedError):
+        await guard.execute_approved(caught.value.prepared)  # a fresh approval works
+        assert gateway.calls == [("filesystem__write_file", arguments)]
+
+
+async def test_unchanged_overwrite_still_executes(tmp_path):
+    gateway = Gateway()
+    guard = RiskGuard(gateway, UndoJournal(tmp_path / "undo.sqlite3", (tmp_path,)))
+    target = tmp_path / "same.txt"
+    target.write_text("before")
+    arguments = {"path": str(target), "content": "after"}
+    await guard.execute_approved(await guard.prepare_write("filesystem__write_file", arguments))
+    assert gateway.calls == [("filesystem__write_file", arguments)]
+
+
+
+async def test_huge_file_is_read_from_its_start_without_the_filesystem_server(tmp_path):
+    from voice_action.mcp_client import TRUNCATION_MARKER
+
+    root = tmp_path.resolve()
+    huge = root / "huge.txt"
+    huge.write_text("가" * 1000 + "끝")
+    gateway = AsyncMock()
+    guard = RiskGuard(gateway, None, (root,), read_limit=100)
+
+    result = await guard.execute_read_only("filesystem__read_text_file", {"path": str(huge)})
+
+    assert result.truncated is True and result.text.endswith(TRUNCATION_MARKER)
+    assert result.text.startswith("가" * 100) and "끝" not in result.text
+    gateway.call_tool.assert_not_awaited()
+
+
+async def test_small_head_tail_and_odd_paths_still_go_through_the_server(tmp_path):
+    root = tmp_path.resolve()
+    small = root / "small.txt"
+    small.write_text("작은 글")
+    huge = root / "huge.txt"
+    huge.write_text("x" * 5000)
+    link = root / "link.txt"
+    link.symlink_to(huge)
+    gateway = AsyncMock()
+    gateway.call_tool.return_value = ToolResult(True, "server")
+    guard = RiskGuard(gateway, None, (root,), read_limit=100)
+
+    for arguments in (
+        {"path": str(small)},
+        {"path": str(huge), "head": 5},
+        {"path": str(huge), "tail": 5},
+        {"path": str(link)},  # a link is not read here; the server decides
+        {"path": str(root / "missing.txt")},
+        {"path": str(tmp_path.parent / "elsewhere.txt")},
+    ):
+        gateway.call_tool.reset_mock()
+        result = await guard.execute_read_only("filesystem__read_text_file", arguments)
+        assert result.text == "server", arguments
+        gateway.call_tool.assert_awaited_once()

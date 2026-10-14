@@ -1,0 +1,11 @@
+{
+  "id": "delete_approve", "family": "file.delete",
+  "files": {"old.log": "x", "keep.txt": "keep"},
+  "request": "old.log 파일 삭제해줘",
+  "user": {"approve": [true]},
+  "script": [
+    {"calls": [{"name": "local__delete_files", "args": {"paths": ["{root}/old.log"]}}]},
+    {"text": "삭제했습니다."}
+  ],
+  "expect": {"files": {"old.log": null}}
+}

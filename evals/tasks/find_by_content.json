@@ -1,0 +1,44 @@
+{
+  "id": "find_by_content",
+  "family": "file.find",
+  "files": {
+    "memo1.txt": "분기 예산은 3천만원으로 확정",
+    "memo2.txt": "점심 메뉴는 김밥",
+    "memo3.txt": "회식 장소 후보"
+  },
+  "request": "분기 예산 얘기가 적힌 메모를 읽어줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__find_files",
+          "args": {
+            "keywords": [
+              "분기 예산"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/memo1.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "분기 예산은 3천만원으로 확정되었습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__find_files",
+      "filesystem__read_text_file"
+    ]
+  }
+}

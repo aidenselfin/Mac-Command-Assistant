@@ -38,6 +38,36 @@ def test_local_groq_env(tmp_path):
     assert config.api_key == "local-secret"
 
 
+def test_openrouter_provider(tmp_path):
+    (tmp_path / "voice-action-test").mkdir()
+    config = load_config(
+        {"provider": "openrouter"},
+        cwd=tmp_path,
+        home=tmp_path / "home",
+        environ={"OPENROUTER_API_KEY": "router-secret", "GROQ_API_KEY": "unused"},
+    )
+    assert config.model == "anthropic/claude-sonnet-5.5"
+    assert config.base_url == "https://openrouter.ai/api/v1"
+    assert config.api_key == "router-secret"
+
+
+def test_switching_provider_keeps_json_model_unless_given(tmp_path):
+    """--provider alone keeps config.json's model/base_url; pass them together (README)."""
+    (tmp_path / "voice-action-test").mkdir()
+    (tmp_path / "config.json").write_text('{"provider": "groq", "model": "openai/gpt-oss-20b"}')
+    env = {"OPENROUTER_API_KEY": "k", "GROQ_API_KEY": "g"}
+    kept = load_config({"provider": "openrouter"}, cwd=tmp_path, home=tmp_path / "h", environ=env)
+    assert kept.model == "openai/gpt-oss-20b"
+    switched = load_config(
+        {"provider": "openrouter", "model": "anthropic/claude-sonnet-5.5",
+         "base_url": "https://openrouter.ai/api/v1"},
+        cwd=tmp_path, home=tmp_path / "h", environ=env,
+    )
+    assert (switched.model, switched.base_url, switched.api_key) == (
+        "anthropic/claude-sonnet-5.5", "https://openrouter.ai/api/v1", "k"
+    )
+
+
 @pytest.mark.parametrize(
     "override",
     [
@@ -85,3 +115,19 @@ def test_legacy_global_secrets_are_ignored(tmp_path):
     assert legacy.read_text() == original
     with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
         load_config(cwd=tmp_path, home=home, environ={})
+
+
+def test_finder_switches_default_on_and_accept_off(tmp_path):
+    base = {"OPENAI_API_KEY": "k"}
+    (tmp_path / "voice-action-test").mkdir()
+    config = load_config(cwd=tmp_path, home=tmp_path, environ=base)
+    assert config.finder_reveal and config.finder_dock
+    off = load_config(
+        cwd=tmp_path, home=tmp_path,
+        environ={**base, "VOICE_ACTION_FINDER_REVEAL": "off", "VOICE_ACTION_FINDER_DOCK": "off"},
+    )
+    assert not off.finder_reveal and not off.finder_dock
+    with pytest.raises(ConfigError):
+        load_config(
+            cwd=tmp_path, home=tmp_path, environ={**base, "VOICE_ACTION_FINDER_DOCK": "maybe"}
+        )

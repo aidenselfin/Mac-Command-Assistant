@@ -1,0 +1,10 @@
+{
+  "id": "clarify_cancel", "family": "file.write.ambiguous",
+  "files": {"report.txt": "draft  text"},
+  "request": "report.txt 깔끔하게 정리해줘",
+  "user": {"clarify": ["취소"]},
+  "script": [
+    {"ask": {"question": "어떻게 정리할까요?", "options": ["맞춤법만", "문단 재구성"], "kind": "edit_criteria"}}
+  ],
+  "expect": {"files": {}}
+}

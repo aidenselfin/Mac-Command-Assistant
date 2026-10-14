@@ -1,16 +1,20 @@
 """Single-flight runtime state machine for text and future voice commands."""
 
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 
+from voice_action.attachment import AttachmentError, check_attachment
 from voice_action.planner import (
     MAX_CLARIFICATIONS,
+    MEMORY_MAX_FILES,
     ApprovalRequired,
     Clarification,
     Completed,
     Error,
+    Exchange,
     Planner,
     PlannerEvent,
     PlannerEventObserver,
@@ -98,6 +102,9 @@ RuntimeLog = Callable[[str], None]
 StateObserver = Callable[[StateTransition], None]
 
 
+MEMORY_SECONDS = 600  # a follow-up counts only for this long after the answer it follows
+
+
 class RuntimeTransitionError(RuntimeError):
     pass
 
@@ -112,16 +119,24 @@ class RuntimeController:
         *,
         state_observer: StateObserver | None = None,
         planner_event_observer: PlannerEventObserver | None = None,
+        feedback=None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.planner = planner
         self.emit = emit or (lambda _: None)
         self._state_observer = state_observer
         self._planner_event_observer = planner_event_observer
+        self._feedback = feedback
         self.state = RuntimeState.IDLE
         self._history: list[StateTransition] = []
         self._pending: Clarification | None = None
         self._pending_approval: ApprovalRequired | None = None
         self._in_flight = False
+        self._attachment: str | None = None  # one dropped file, for the next command only
+        self._clock = clock
+        self._previous: tuple[Exchange, float] | None = None
+        self._request: str | None = None  # the command now being worked on
+        self._answered_run: str | None = None  # the run whose Completed answer can be rated
         self.planner.set_event_observer(self._on_planner_event)
 
     @property
@@ -136,6 +151,38 @@ class RuntimeController:
     def pending_approval(self) -> ApprovalRequired | None:
         return self._pending_approval
 
+    @property
+    def attachment(self) -> str | None:
+        return self._attachment
+
+    def attach(self, path: str) -> str:
+        """Make one file inside the allowed folders the target of the next command.
+
+        Raises AttachmentError (and keeps any earlier attachment) when it is refused.
+        """
+        if self._in_flight or self.state is not RuntimeState.IDLE:
+            raise AttachmentError("작업이 끝난 뒤에 파일을 놓아 주세요.")
+        self._attachment = check_attachment(path, self.planner.config.allowed_directories)
+        return self._attachment
+
+    def detach(self) -> None:
+        self._attachment = None
+
+    @property
+    def ratable(self) -> bool:
+        """True while the last answer is still the current run, i.e. before the next command."""
+        return (
+            self._feedback is not None
+            and self._answered_run is not None
+            and self._feedback.run_id == self._answered_run
+        )
+
+    async def rate(self, score: int, tags: tuple[str, ...] = ()) -> bool:
+        """Record a 1-5 rating for the last answer. False if there is nothing to rate."""
+        if not self.ratable or self.state is not RuntimeState.IDLE:
+            return False
+        return bool(self._feedback.rating(score, tags))
+
     async def submit(self, text: str) -> RuntimeResult:
         if self._in_flight or self.state not in {
             RuntimeState.IDLE,
@@ -145,12 +192,25 @@ class RuntimeController:
 
         self._in_flight = True
         try:
+            if self._feedback is not None:
+                self._feedback.user_input(
+                    text, new_run=self.state is not RuntimeState.WAITING_USER_INPUT
+                )
             if self.state is RuntimeState.WAITING_USER_INPUT:
                 return await self._submit_clarification_answer(text)
             self._transition(RuntimeState.PLANNING, "command_started")
-            outcome = await self.planner.run(text)
+            attachment, self._attachment = self._attachment, None  # one command, then gone
+            self._request = text
+            options = {}
+            if attachment is not None:
+                options["attachment"] = attachment
+            if (previous := self._recent_exchange()) is not None:
+                options["previous"] = previous
+            outcome = await self.planner.run(text, **options)
             return self._finish(outcome)
-        except BaseException:
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             self._pending = None
             self._pending_approval = None
             if self.state is not RuntimeState.ERROR:
@@ -168,10 +228,14 @@ class RuntimeController:
             raise RuntimeTransitionError("대기 중인 승인이 없습니다.")
         self._in_flight = True
         try:
+            if self._feedback is not None:
+                self._feedback.decision("approve", pending.tool_name)
             self._transition(RuntimeState.RESUMING_PLAN, "approval_granted")
             outcome = await self.planner.approve(pending.context)
             return self._finish(outcome)
-        except BaseException:
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             self._pending_approval = None
             if self.state is not RuntimeState.ERROR:
                 self._transition(RuntimeState.ERROR, "exception")
@@ -188,8 +252,12 @@ class RuntimeController:
             raise RuntimeTransitionError("대기 중인 승인이 없습니다.")
         self._in_flight = True
         try:
-            return self._finish(self.planner.reject(pending.context))
-        except BaseException:
+            if self._feedback is not None:
+                self._feedback.decision("reject", pending.tool_name)
+            return self._finish(self.planner.reject(pending.context), rateable=False)
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             self._pending_approval = None
             if self.state is not RuntimeState.ERROR:
                 self._transition(RuntimeState.ERROR, "exception")
@@ -203,9 +271,13 @@ class RuntimeController:
             return Busy("다른 명령을 처리 중입니다.", self.state)
         self._in_flight = True
         try:
+            if self._feedback is not None:
+                self._feedback.decision("undo")
             outcome = await self.planner.undo_last_write()
-            return self._finish(outcome)
-        except BaseException:
+            return self._finish(outcome, rateable=False)
+        except BaseException as exc:
+            if self._feedback is not None:
+                self._feedback.exception(exc)
             if self.state is not RuntimeState.ERROR:
                 self._transition(RuntimeState.ERROR, "exception")
             self._transition(RuntimeState.IDLE, "error_observed")
@@ -220,10 +292,19 @@ class RuntimeController:
 
         normalized = answer.strip()
         if normalized.casefold() in {"취소", "cancel", "c"}:
-            return self._finish(Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."))
+            return self._finish(
+                Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."), rateable=False
+            )
 
-        match = re.fullmatch(r"(\d+)\s*번?", normalized)
-        index = int(match.group(1)) - 1 if match else -1
+        typed = pending.context.kind == "free_text"
+        narrowing = pending.context.kind == "narrow_search"
+        # Narrowing takes free text, so there an option is picked only as "N번"; a typed
+        # question has no options at all and every non-empty answer is the answer.
+        match = re.fullmatch(r"(\d+)\s*번" if narrowing else r"(\d+)\s*번?", normalized)
+        index = int(match.group(1)) - 1 if match and not typed else -1
+        if (narrowing or typed) and not 0 <= index < len(pending.options) and normalized:
+            self._transition(RuntimeState.RESUMING_PLAN, "clarification_narrowed")
+            return self._finish(await self.planner.resume(pending.context, normalized))
         if not 0 <= index < len(pending.options):
             count = pending.context.clarification_count + 1
             if count > MAX_CLARIFICATIONS:
@@ -235,6 +316,7 @@ class RuntimeController:
                 "올바른 선택지 번호를 입력하거나 취소를 입력해 주세요.",
                 pending.options,
                 context,
+                pending.labels,
             )
             self._pending = retry
             return retry
@@ -244,7 +326,17 @@ class RuntimeController:
         outcome = await self.planner.resume(pending.context, selection)
         return self._finish(outcome)
 
-    def _finish(self, outcome: PlannerOutcome) -> PlannerOutcome:
+    def _recent_exchange(self) -> Exchange | None:
+        """The previous answered command, if it was a moment ago."""
+        if self._previous is None:
+            return None
+        exchange, at = self._previous
+        return exchange if self._clock() - at <= MEMORY_SECONDS else None
+
+    def _finish(self, outcome: PlannerOutcome, *, rateable: bool = True) -> PlannerOutcome:
+        """Settle an outcome. Only a real answer is rateable, not a cancel, a reject or an undo."""
+        if self._feedback is not None:
+            self._feedback.outcome(outcome)
         if isinstance(outcome, Clarification):
             self._pending = outcome
             self._pending_approval = None
@@ -260,6 +352,14 @@ class RuntimeController:
         self._pending = None
         self._pending_approval = None
         if isinstance(outcome, Completed):
+            if rateable and self._request:
+                files = tuple(dict.fromkeys((*outcome.changed_paths, *outcome.read_paths)))
+                self._previous = (
+                    Exchange(self._request, outcome.text, files[:MEMORY_MAX_FILES]),
+                    self._clock(),
+                )
+            if self._feedback is not None:
+                self._answered_run = self._feedback.run_id if rateable else None
             self._transition(RuntimeState.DONE, "completed")
             self._transition(RuntimeState.IDLE, "result_observed")
             return outcome
@@ -301,3 +401,7 @@ class RuntimeController:
         )
         if self._state_observer is not None:
             self._state_observer(transition)
+        if self._feedback is not None:
+            self._feedback.state(transition.previous.name, target.name, reason)
+            if target is RuntimeState.IDLE:
+                self._feedback.run_finished()

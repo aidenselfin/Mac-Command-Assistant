@@ -1,0 +1,48 @@
+{
+  "id": "free_text_create_file",
+  "family": "file.write.ask",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "빈 md 파일 하나 만들어줘",
+  "user": {
+    "clarify": [
+      "메모.md"
+    ],
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "ask": {
+        "question": "새 파일의 이름을 알려 주세요.",
+        "options": [],
+        "kind": "free_text"
+      }
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/메모.md",
+            "content": ""
+          }
+        }
+      ]
+    },
+    {
+      "text": "메모.md를 만들었습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "메모.md": ""
+    },
+    "changed_paths": [
+      "메모.md"
+    ]
+  },
+  "live": false
+}

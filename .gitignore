@@ -23,3 +23,7 @@ Final/.venv/
 *.bak
 *.swp
 .vscode/
+.claude/settings.local.json
+.claude/worktrees/
+*.mov
+evals/results/

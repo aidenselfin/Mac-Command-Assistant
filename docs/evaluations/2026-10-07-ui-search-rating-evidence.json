@@ -1,0 +1,34 @@
+{
+  "recorded_at": "2026-10-07 18:13 KST",
+  "artifact_commit": "162707b",
+  "source_version_note": "촬영 중 다른 에이전트가 코드를 수정했으므로 단일 소스 커밋의 인수검증으로 간주하지 않음",
+  "search_observations": [
+    {
+      "run_id": "045488c2574c4b95a4b2d2bb3d32ca4c",
+      "stage": "path",
+      "decision": "single",
+      "total": 1
+    },
+    {
+      "run_id": "e39f1fd9c30340479b3888c4a4a7f3c6",
+      "stage": "content",
+      "decision": "single",
+      "total": 1
+    }
+  ],
+  "rating_observations": [
+    {
+      "run_id": "3f55bb3a17714597a983253833bfb4b0",
+      "score": 2,
+      "tags": [],
+      "hypotheses": [
+        "partial_read"
+      ],
+      "measured": {
+        "model_calls": 2,
+        "llm_ms": 5934
+      }
+    }
+  ],
+  "raw_payloads_included": false
+}

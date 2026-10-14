@@ -1,0 +1,10 @@
+{
+  "id": "read_summary", "family": "file.read",
+  "files": {"notes.txt": "회의 결론: 금요일 배포"},
+  "request": "notes.txt 내용 요약해줘",
+  "script": [
+    {"calls": [{"name": "filesystem__read_text_file", "args": {"path": "{root}/notes.txt"}}]},
+    {"text": "금요일 배포로 결론이 났습니다."}
+  ],
+  "expect": {"files": {}, "must_run": ["filesystem__read_text_file"]}
+}
