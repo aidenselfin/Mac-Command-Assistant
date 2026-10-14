@@ -137,7 +137,9 @@ class RiskGuard:
         undo_journal: UndoJournal | None = None,
         roots: tuple[Path, ...] = (),
         read_limit: int = 50000,
+        semantic=None,
     ):
+        self._semantic = semantic
         self._gateway = gateway
         self._undo_journal = undo_journal
         self._roots = tuple(root.resolve() for root in roots)
@@ -155,7 +157,9 @@ class RiskGuard:
                 conversion.read_document, arguments, self._roots, self._read_limit
             )
         if name == FIND_FILES_TOOL:
-            return await asyncio.to_thread(file_search.find_files, arguments, self._roots)
+            return await asyncio.to_thread(
+                file_search.find_files, arguments, self._roots, self._semantic
+            )
         if name == "filesystem__read_text_file" and not (
             arguments.get("head") or arguments.get("tail")
         ):

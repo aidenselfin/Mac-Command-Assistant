@@ -71,6 +71,22 @@ FIND_FILES_DEFINITION = ToolDefinition(
     },
 )
 
+# Offered to the model only when the meaning search is on; validation always accepts `query`.
+FIND_FILES_SEMANTIC_DEFINITION = ToolDefinition(
+    FIND_FILES_TOOL,
+    FIND_FILES_DEFINITION.description
+    + " query는 파일이 어떤 것인지 사용자가 말한 설명(예: 고양이 사진, 가계부 지출)을 그대로 "
+    "적은 한 문장이다. 이름·폴더·내용으로 하나도 못 찾을 때만 앱이 의미가 비슷한 파일을 "
+    "찾으며, 그 결과는 항상 사용자에게 확인한다. 설명 없이 파일명만 말했으면 생략한다.",
+    {
+        **FIND_FILES_DEFINITION.schema,
+        "properties": {
+            **FIND_FILES_DEFINITION.schema["properties"],
+            "query": {"type": ["string", "null"]},
+        },
+    },
+)
+
 
 @dataclass(frozen=True)
 class Entry:
@@ -104,7 +120,7 @@ def _keyword_pattern(keyword: str) -> re.Pattern:
 
 def _validate(arguments: dict) -> None:
     try:
-        Draft202012Validator(FIND_FILES_DEFINITION.schema).validate(arguments)
+        Draft202012Validator(FIND_FILES_SEMANTIC_DEFINITION.schema).validate(arguments)
     except ValidationError as exc:
         raise ToolRejectedError(f"잘못된 {FIND_FILES_TOOL} 인자입니다.") from exc
 
@@ -411,7 +427,21 @@ def _narrow_by_content(
     return [entry for entry, _ in kept], coverage
 
 
-def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
+def _by_meaning(semantic, query: str, scope: list[Entry]) -> tuple[str, list[Entry], list[str]]:
+    """(stage, ranked, limits): files whose meaning is close to the request, best first."""
+    result = semantic.search(query, scope, MAX_SHOW)
+    if result.state == "loading":
+        return "none", [], ["의미 검색 모델을 불러오는 중이라 사용하지 못했습니다"]
+    if result.state == "error":
+        return "none", [], ["의미 검색을 사용할 수 없습니다"]
+    reasons = []
+    if result.state == "partial":
+        reasons.append(f"의미 검색 색인이 {result.done}/{result.total}개만 준비되었습니다")
+    hits = [entry for entry, _ in result.hits]
+    return ("meaning" if hits else "none"), hits, reasons
+
+
+def find_files(arguments: dict, roots: tuple[Path, ...], semantic=None) -> ToolResult:
     _validate(arguments)
     keywords = list(
         dict.fromkeys(_fold(item[:100]) for item in arguments["keywords"] if _fold(item[:100]))
@@ -421,7 +451,8 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     patterns = [_keyword_pattern(item) for item in keywords]
     # Roots come canonical from the config; resolving here would follow a link swapped in later.
     entries, walk_cut = _walk(roots)
-    stage, matches, coverage = _search(_filter(entries, arguments, roots), patterns)
+    scope = _filter(entries, arguments, roots)
+    stage, matches, coverage = _search(scope, patterns)
     filtered = any(arguments.get(key) for key in FILTER_KEYS)
     # Best match first; newer files break ties.
     ranked = [entry for entry, _ in sorted(matches, key=lambda m: (-m[1], -m[0].mtime, m[0].name))]
@@ -435,14 +466,19 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     if content_words and ranked:
         ranked, coverage = _narrow_by_content(ranked, content_words, coverage)
         stage = f"{stage}+content"
+    meaning_reasons: list[str] = []
+    query = (arguments.get("query") or "").strip()[:200]
+    if not ranked and semantic is not None and query:  # also when the content step emptied it
+        stage, ranked, meaning_reasons = _by_meaning(semantic, query, scope)
     count = len(ranked)
-    reasons = _limits(walk_cut, coverage)
+    reasons = _limits(walk_cut, coverage) + meaning_reasons
     decision = (
         "none" if count == 0 else "single" if count == 1
         else "choose" if count <= MAX_SHOW else "narrow"
     )
-    if decision == "single" and reasons:
-        # One hit among files that were not fully looked at is not "the only one": confirm it.
+    if decision == "single" and (reasons or stage == "meaning"):
+        # One hit among files that were not fully looked at, or a guess by similarity, is not
+        # "the only one": confirm it.
         decision = "choose"
     response: dict = {
         "stage": stage, "decision": decision, "total": count,
@@ -455,6 +491,8 @@ def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
         notes.append("검사 범위의 한계: " + "; ".join(reasons) + ".")
         if decision == "none":
             notes.append("없다고 단정하지 말고, 파일명·폴더 같은 단서를 사용자에게 물으세요.")
+    if stage == "meaning":
+        notes.append("의미가 비슷한 순서의 추정이라 틀릴 수 있습니다. 앱이 사용자에게 확인합니다.")
     if filtered and decision == "none":
         # Never widen on our own: a condition the user named must not be dropped silently.
         notes.append(

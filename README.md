@@ -8,6 +8,24 @@ Voice Action AI는 자연어 명령을 제한된 MCP(Model Context Protocol) 도
 
 LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케이션이 노출하는 도구를 고정하고, 모든 파일 경로와 웹 작업을 코드에서 다시 검증하며, 파일 쓰기는 사용자 승인과 Undo journal이 모두 준비된 경우에만 실행합니다.
 
+## 의미 검색 (선택, 기본 꺼짐)
+
+파일명·폴더·내용 검색(`local__find_files`)이 아무것도 못 찾았을 때만, 로컬 임베딩 모델
+(EmbeddingGemma 2)이 뜻이 비슷한 파일을 후보로 올려 준다(예: `고양이 사진` → `Cat_001.jpg`).
+텍스트·csv·이미지(jpg, png, heic 등)는 내용으로, pdf·docx는 파일 경로로만 비교한다.
+결과는 추정이라 항상 후보로 보여 주고 사용자가 고른다. 파일 내용과 벡터는 채팅 모델에 보내지 않고
+외부로 나가지 않는다(첫 실행 때 모델 약 1.5GB를 Hugging Face에서 받는다).
+
+```sh
+uv sync --locked --extra semantic
+VOICE_ACTION_SEMANTIC_SEARCH=on uv run --extra semantic python main.py --ui   # 또는 .voice-action/config.env에 적는다
+```
+
+- 앱이 시작되면 백그라운드에서 모델을 불러오고(약 20초) 허용 폴더를 색인한다. 파일 20개 기준 약 30초이고,
+  바뀐 파일만 다시 계산한다. 준비 전에는 일반 검색만 하고, 아직 못 본 범위는 결과에 한계로 알린다.
+- 벡터는 `.voice-action/semantic.sqlite3`(소유자 전용)에 저장된다. 파일 내용에서 파생된 데이터이므로
+  지우려면 이 파일을 삭제하면 된다. 끄려면 환경변수를 지우면 된다(코드 경로가 완전히 빠진다).
+
 ## 현재 구현 상태
 
 2026-10-07 기준 검증 결과 (`uv run --locked pytest -q`, UI 테스트 포함):
