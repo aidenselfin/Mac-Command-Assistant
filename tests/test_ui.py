@@ -556,7 +556,7 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
         view.bind_presenter(presenter)
         presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
         root.update()
-        assert root.minsize() == (720, 520)
+        assert root.minsize() == (360, 480)
         view.entry.insert(0, "파일 목록 보여줘")
         assert adapter.submissions == []
         view._execute()
@@ -571,7 +571,7 @@ def test_redesigned_tk_view_preserves_approval_and_input_contract():
             "local__delete_files", targets[0], "delete", 0, "", False, {"nonce": "PRIVATE"}, targets
         )
         presenter.handle(UIMessage(UIMessageType.OUTCOME, pending))
-        root.geometry("720x520")
+        root.geometry("360x480")
         root.update()
         text = view.approval_output.get("1.0", "end")
         assert all(path in text for path in targets)
@@ -1159,68 +1159,110 @@ def test_tk_drop_parses_finder_paths_and_the_chip_shows_the_name():
         root.destroy()
 
 
-def test_tk_view_docks_finder_beside_the_window_after_a_reveal_and_gives_focus_back(monkeypatch):
+def test_panel_follows_finder_without_focus_and_keeps_approval_visible(monkeypatch):
     import tkinter as tk
-    from pathlib import Path
 
+    from voice_action.finder import Frame
+
+    root = tk.Tk()
     try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    try:
-        revealed, attempts, fronted = [], [], []
-        monkeypatch.setattr(
-            ui_module, "reveal", lambda paths, folders: revealed.append(paths) or True
-        )
-        results = iter(["waiting", "waiting", "moved"])
-
-        def fake_arrange(folder, app, screen):
-            attempts.append((folder, app, screen))
-            return next(results)
-
-        monkeypatch.setattr(ui_module, "arrange", fake_arrange)
-        monkeypatch.setattr(ui_module, "DOCK_RETRY_MS", 1)
-        view = ui_module.TkView(root, (Path("/tmp/work"),), reveal=True, dock=True)
-        monkeypatch.setattr(view, "_to_front", lambda: fronted.append(True))
-
-        view.reveal_files(("/tmp/work/하위/한글 파일.md",))
-        for _ in range(50):
-            root.update()
-            if fronted:
-                break
-        assert revealed == [("/tmp/work/하위/한글 파일.md",)]
-        assert [folder for folder, _, _ in attempts] == ["하위"] * 3  # retried until Finder had it
-        app, screen = attempts[0][1], attempts[0][2]
-        assert app.w == root.winfo_width() and screen == (
-            root.winfo_screenwidth(), root.winfo_screenheight()
-        )
-        assert fronted == [True]
-    finally:
+        monkeypatch.setattr(ui_module, "DOCK_RETRY_MS", 100000)
+        view = ui_module.TkView(root, dock=True)
+        view.set_status("READY")
+        monkeypatch.setattr(ui_module, "panel_context", lambda: (
+            "finder", Frame(50, 40, 600, 600), Frame(0, 25, 1400, 875)
+        ))
+        view._follow_finder()
         root.update()
-        root.destroy()
+        assert root.winfo_width() == 360
+        assert root.winfo_x() == 658
+        assert not view._panel_hidden
+        monkeypatch.setattr(ui_module, "panel_context", lambda: ("other", None, None))
+        view.set_status("WAITING_APPROVAL")
+        view._follow_finder()
+        assert not view._panel_hidden
+        view.set_status("READY")
+        view.entry.insert(0, "작성 중")
+        view._follow_finder()
+        assert not view._panel_hidden
+        view.entry.delete(0, "end")
+        view._follow_finder()
+        assert view._panel_hidden and root.state() == "withdrawn"
+        monkeypatch.setattr(ui_module, "panel_context", lambda: (
+            "finder", Frame(50, 40, 600, 600), Frame(0, 25, 1400, 875)
+        ))
+        view._follow_finder()
+        assert not view._panel_hidden and root.state() == "normal"
+    finally:
+        view.close()
 
 
-def test_tk_view_explains_a_missing_permission_once_and_never_docks_when_off(monkeypatch):
+def test_panel_permission_notice_once_and_off_has_no_monitor(monkeypatch):
     import tkinter as tk
-    from pathlib import Path
 
+    root = tk.Tk()
     try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    try:
-        calls = []
-        monkeypatch.setattr(ui_module, "reveal", lambda paths, folders: True)
-        monkeypatch.setattr(ui_module, "arrange", lambda *a: calls.append(a) or "untrusted")
-        view = ui_module.TkView(root, (Path("/tmp/work"),), reveal=True, dock=True)
-        for _ in range(2):
-            view.reveal_files(("/tmp/work/a.md",))
-        assert view.output.get("1.0", "end").count("손쉬운 사용") == 1  # one notice, not two
-        assert len(calls) == 2
-
-        off = ui_module.TkView(tk.Toplevel(root), (Path("/tmp/work"),), reveal=True, dock=False)
-        off.reveal_files(("/tmp/work/a.md",))
-        assert len(calls) == 2  # docking is off: the reveal alone happened
+        monkeypatch.setattr(ui_module, "DOCK_RETRY_MS", 100000)
+        monkeypatch.setattr(ui_module, "panel_context", lambda: ("untrusted", None, None))
+        view = ui_module.TkView(root, dock=True)
+        view._follow_finder()
+        view._follow_finder()
+        assert view.output.get("1.0", "end").count("손쉬운 사용") == 1
+        before = root.tk.call("after", "info")
+        off = ui_module.TkView(tk.Toplevel(root), dock=False)
+        assert root.tk.call("after", "info") == before
+        off.close()
     finally:
+        view.close()
+
+
+def test_dark_appearance_is_stable_and_restores_light_colors(monkeypatch):
+    import sys
+    import tkinter as tk
+    from types import SimpleNamespace
+
+    mode = ["NSAppearanceNameDarkAqua"]
+    appearance = SimpleNamespace(bestMatchFromAppearancesWithNames_=lambda names: mode[0])
+    app = SimpleNamespace(effectiveAppearance=lambda: appearance)
+    monkeypatch.setitem(sys.modules, "AppKit", SimpleNamespace(
+        NSApplication=SimpleNamespace(sharedApplication=lambda: app)
+    ))
+    monkeypatch.setattr(ui_module.sys, "platform", "darwin")
+    root = tk.Tk()
+    try:
+        view = ui_module.TkView(root)
+        for _ in range(3):
+            view.sync_appearance()
+            assert view.output.cget("bg") == "#222224"
+            assert view.output.cget("fg") == "#F5F5F7"
+        view.set_status("WAITING_APPROVAL")
+        view.sync_appearance()
+        assert view.status_label.cget("fg") == "#E5C074"
+        mode[0] = "NSAppearanceNameAqua"
+        view.sync_appearance()
+        assert view.output.cget("bg") == ui_module.CANVAS
+        assert view.output.cget("fg") == ui_module.INK
+    finally:
+        view.close()
+
+
+def test_long_file_choices_scroll_without_pushing_input_off_the_panel():
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        view = ui_module.TkView(root)
+        root.geometry("360x480")
+        view.set_choices(tuple(f"{i} · " + "긴 파일명과 폴더 설명 " * 8 for i in range(5)))
         root.update()
-        root.destroy()
+        assert view.choice_canvas.winfo_height() <= 140
+        assert view.choice_frame.winfo_reqheight() > view.choice_canvas.winfo_height()
+        assert view.entry.winfo_rooty() + view.entry.winfo_height() <= (
+            root.winfo_rooty() + root.winfo_height()
+        )
+        view.choice_canvas.yview_moveto(1)
+        root.update()
+        assert view.choice_canvas.yview()[1] == 1
+        assert len(view.choice_frame.winfo_children()) == 5
+    finally:
+        view.close()

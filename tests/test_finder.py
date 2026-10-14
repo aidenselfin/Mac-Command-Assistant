@@ -274,3 +274,16 @@ def test_no_room_and_a_failing_accessibility_call_never_raise():
 
     app = Frame(100, 80, 700, 800)
     assert arrange("voice-action-test", app, SCREEN, windows=Broken([])) == "waiting"
+
+
+@pytest.mark.parametrize(("window", "screen", "expected"), [
+    (Frame(100, 80, 600, 700), Frame(0, 25, 1470, 900), Frame(708, 80, 360, 560)),
+    (Frame(780, 80, 600, 700), Frame(0, 25, 1470, 900), Frame(412, 80, 360, 560)),
+    (Frame(300, 80, 860, 700), Frame(0, 25, 1470, 900), None),
+    (Frame(-1300, -100, 600, 700), Frame(-1440, -200, 1440, 900),
+     Frame(-692, -100, 360, 560)),
+    (Frame(100, 800, 600, 700), Frame(0, 25, 1470, 900), Frame(708, 337, 360, 560)),
+    (Frame(100, 80, 600, 700), Frame(0, 25, 1470, 400), None),
+])
+def test_panel_placement_uses_visible_screen_and_leaves_finder_unchanged(window, screen, expected):
+    assert finder.panel_beside(window, screen) == expected

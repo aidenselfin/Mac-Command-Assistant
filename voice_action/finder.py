@@ -177,3 +177,82 @@ def arrange(
     except Exception:  # noqa: BLE001 - placing a window is a nicety, never a failure
         return "waiting"
     return "waiting"
+
+
+PANEL_WIDTH = 360
+PANEL_HEIGHT = 560
+PANEL_MIN_HEIGHT = 480
+PANEL_TITLE_HEIGHT = 28
+
+
+def panel_beside(finder: Frame, screen: Frame) -> Frame | None:
+    """Place the chat panel in the visible area of Finder's screen without moving Finder."""
+    if screen.h < PANEL_MIN_HEIGHT + PANEL_TITLE_HEIGHT or finder.w <= 0 or finder.h <= 0:
+        return None
+    right = finder.x + finder.w + GAP
+    left = finder.x - GAP - PANEL_WIDTH
+    if right + PANEL_WIDTH <= screen.x + screen.w and right >= screen.x:
+        x = right
+    elif left >= screen.x and left + PANEL_WIDTH <= screen.x + screen.w:
+        x = left
+    else:
+        return None
+    height = min(PANEL_HEIGHT, screen.h - PANEL_TITLE_HEIGHT)
+    y = max(screen.y, min(finder.y, screen.y + screen.h - height - PANEL_TITLE_HEIGHT))
+    return Frame(x, y, PANEL_WIDTH, height)
+
+
+def panel_context() -> tuple[str, Frame | None, Frame | None]:
+    """Read front application and focused Finder window; never activate or move anything."""
+    if sys.platform != "darwin":
+        return "unavailable", None, None
+    try:
+        import os
+
+        from AppKit import NSScreen
+        from ApplicationServices import (
+            AXUIElementCopyAttributeValue,
+            AXValueGetValue,
+            kAXValueCGPointType,
+            kAXValueCGSizeType,
+        )
+
+        front = _workspace().frontmostApplication()
+        if front is None:
+            return "unavailable", None, None
+        if front.processIdentifier() == os.getpid():
+            return "self", None, None
+        if front.bundleIdentifier() != FINDER_BUNDLE:
+            return "other", None, None
+        windows = AXFinderWindows()
+        if not windows.is_trusted():
+            return "untrusted", None, None
+        app = windows._application()
+        error, handle = AXUIElementCopyAttributeValue(app, "AXFocusedWindow", None)
+        if error or handle is None:
+            return "finder", None, None
+        values = []
+        for attr, kind in (("AXPosition", kAXValueCGPointType), ("AXSize", kAXValueCGSizeType)):
+            error, value = AXUIElementCopyAttributeValue(handle, attr, None)
+            if error:
+                return "finder", None, None
+            ok, decoded = AXValueGetValue(value, kind, None)
+            if not ok:
+                return "finder", None, None
+            values.append(decoded)
+        point, size = values
+        frame = Frame(round(point.x), round(point.y), round(size.width), round(size.height))
+        screens = NSScreen.screens()
+        top = screens[0].frame().size.height
+        for display in screens:
+            full, visible = display.frame(), display.visibleFrame()
+            if (full.origin.x <= frame.x + frame.w / 2 < full.origin.x + full.size.width
+                    and top - full.origin.y - full.size.height <= frame.y + frame.h / 2
+                    < top - full.origin.y):
+                area = Frame(round(visible.origin.x),
+                             round(top - visible.origin.y - visible.size.height),
+                             round(visible.size.width), round(visible.size.height))
+                return "finder", frame, area
+        return "finder", None, None
+    except Exception:  # noqa: BLE001 - optional window integration must not interrupt commands
+        return "unavailable", None, None

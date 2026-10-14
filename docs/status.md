@@ -2,8 +2,7 @@
 - (없음)
 
 # 현재 목표
-제품: 자가 개선루프의 기준선과 lesson 후보 비교·채택. 지침은 `docs/self-improvement-guide.md`.
-협업 도구: 현재 폴더 전용 자동 보존·수정 세션 조정 설치 완료.
+`work/integration` worktree에서 파일 정리·의미 검색·네이티브 UI 세 갈래를 통합 중이다(main 미반영).
 
 # 최근 검증
 - 2026-10-14 파일 정리 도구: 전체 pytest **687 passed**(실제 MCP·Tk UI 포함),
@@ -34,6 +33,14 @@
   시작 전 상태·새 파일·삭제 복구·무관한 자료 제외·HEAD/index 불변·경로 검사 포함).
   ruff 전체·shell 구문·plist 구문·diff check 통과. 제품 전체 테스트·live 평가는 재실행하지 않았다.
   테스트 전용 LaunchAgent 영구 설치, 첫 실행 exit 0·별도 ref 생성 확인. 재로그인은 직접 확인하지 않았다.
+- 2026-10-14 네이티브 SwiftUI 앱(`codex/finder-chat-panel` 단독 검증, 통합 전):
+  - 최종 전체 pytest 668 passed, ruff 전체·Swift 빌드·plist·zsh·diff check 통과.
+  - 네이티브 통신/launcher 회귀 11 passed, CLI/UI/Runtime 회귀 115 passed.
+  - 실제 --interactive 연결/exit, 네이티브 앱 연결/창 닫기/백엔드 종료/재실행 확인.
+  - 실제 모델로 native-ui-smoke.txt 승인 대기→거절→재요청→승인→내용 확인→Undo 제거 확인.
+    유료 메인 모델·자동 피드백 분석을 포함한 소규모 smoke이며 전체 live 평가는 아니다.
+  - 승인 ID 재사용·잘못된 입력·허용 밖 첨부 차단, 질문 답변→실제 MCP 쓰기→Undo 회귀 확인.
+  - 실행 오류 162는 앱 전체 ad-hoc 서명으로 수정했다. strict 검사·반복 실행 통과.
 
 # 다음 작업
 1. (완료) 확인 질문 넛지·공급자 스키마 정리 후 기준선 측정 → 90/90.
@@ -44,22 +51,13 @@
    새 이동·복사·폴더 생성 승인과 Undo. 실행 중인 앱은 재시작해야 새 도구를 제공한다.
 4. 보류: [Claude Code 조사·개선 설계](reviews/2026-10-07-claude-code-research.md) 구현(재개 시 현재 코드와 대조, 계측 P0 먼저),
    의미 검색·한/영 대체어·pdf/docx 본문 검색, HTML 반복 읽기, 변환 쓰기의 fd 기준 경합 방어.
+- 사람이 검색/요약/선택/첨부/평가/한글 입력을 시험하고 main 병합 여부를 결정한다.
+- 네이티브 Finder 자동 배치·독립 배포 패키징은 아직 구현하지 않았다.
 
 # 인수인계
-- 이번 작업의 핵심 원인: 반복된 HTTP 400은 공급자가 도구 호출을 스키마로 먼저 검사해 거부한 것이었다. 새 400은 이제 메시지에
-  `HTTP 400: tool_use_failed — <도구>: <위반>`으로 보이므로, 보이면 해당 도구 스키마에서 상한·`oneOf`를 빼고 코드에서 적용한다.
-- 모델이 질문을 남발하면 평가가 INVALID가 된다. free_text는 확인 질문·검색 전 질문을 앱이 돌려보내는 규칙(`_free_text_refusal`)이 있어야 한다.
-- 피드백 DB의 lesson 후보 #2~#4는 미채택이다. 운영 `.voice-action/` DB는 수정하지 않았다.
-- 알려진 불안정: `tests/test_ui.py`의 붙여넣기 테스트는 테스트 중 사람이 키보드를 치면 가끔 실패한다(`d` 같은 글자가 섞임). 코드 결함 아님.
-- 이번 세션 커밋은 `2a74527`~`2959471`(+ 이 문서 커밋). README에 free_text·기억·400 진단·content_keywords 설명을 반영했다.
-- Claude Code 조사 보고서 보관은 문서만 변경했다. 코드·설정·live 평가·GUI 실행은 하지 않았다.
-  보고서의 과거 평가·재현을 현재 제품 검증으로 해석하지 않는다.
-- Finder 창 배치는 `finder.arrange`(Accessibility)로 제목이 폴더 이름과 같은 Finder 창만 옮긴다. 권한이 없으면 안내 한 번 후 표시만 한다.
-  기본 on, `VOICE_ACTION_FINDER_DOCK=off`로 끈다. 이전 "배치 보류" 결정은 decisions.md 항목으로 대체했다.
-- 모든 세션은 AGENTS.md·이 문서·decisions.md를 재독한다. 수정 소유권의 원본은 `vibe.py status`다.
-- 협업 도구 설치·복구·지시 예시는 [바이브 코딩 사용법](vibe-coding.md).
-- 과거 결과는 위 보존 문서의 측정 시점 기준이다. 수정 전 결함을 단언하는 reproduce 스크립트의
-  성공/실패를 현재 제품 상태의 판정으로 사용하지 않는다. 정식 회귀 테스트를 따른다.
-- 원래 미추적 사용자 자료 및 다른 세션이 만든 voice-action-test 자료는 커밋하거나 지우지 않는다.
-- `.voice-action/` DB와 `evals/results/` 원본은 git 제외다. 피드백 lesson은 후보로 남긴다.
-- 메인 모델 Groq gpt-oss-120b, 분석 모델 OpenRouter Claude Sonnet 5.5. 세부 결정은 decisions.md.
+- native-preview/run.sh로 실행한다. 기존 Runtime/Planner/RiskGuard/Undo/피드백을 재사용한다.
+- 승인 context는 Python에만 보관하고 UI 승인 ID는 한 번만 사용한다.
+- 창 닫기와 코드 갱신은 기존 백엔드 정리를 기다린다. 실행 취소 후 메뉴에서 재연결한다.
+- worktree 로컬 설정은 voice-action-test만 허용한다. 원본 코드/자료는 변경하지 않았다.
+- 실제 앱 smoke DB는 worktree .voice-action에 기록했고 회귀 테스트 DB는 격리했다.
+- 실제 드래그·한글 IME·네이티브 100개 삭제 목록은 사람이 확인하지 않았다.
