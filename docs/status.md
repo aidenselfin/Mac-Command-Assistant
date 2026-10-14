@@ -6,6 +6,7 @@ SwiftUI 외형 전용 앱과 기존 Tk 패널을 별도 worktree에서 비교한
 브랜치: `codex/finder-chat-panel`, 제품 기준: `e250f48`.
 
 # 최근 검증
+- 2026-10-14 실행 오류 162 수정: 앱 전체 ad-hoc 서명·strict 검사 통과, 실제 연속 두 번 실행 성공·프로세스 1개 확인. launcher 회귀 1 passed, ruff·zsh 통과.
 - 2026-10-14 SwiftUI 시제품: Swift 6.3.3 빌드 성공, Info.plist 검사·zsh 구문·diff check 통과.
   실제 네이티브 앱을 열고 시스템 다크 모드의 대화 화면·툴바·입력창을 시각 확인했다.
   최종 창의 대화·파일 선택·승인 전환 컨트롤은 접근성 트리에서 확인했다.
