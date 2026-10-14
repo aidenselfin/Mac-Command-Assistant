@@ -6,12 +6,40 @@ import fcntl
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 REF = "refs/vibe/snapshots"
+SESSION = "vibe-session.json"
+
+
+def ref_for(git_dir):
+    """Each linked worktree keeps its own snapshots so parallel sessions never race on one ref."""
+    return f"{REF}-{git_dir.name}" if git_dir.parent.name == "worktrees" else REF
+
+
+def common_repo(repo):
+    """The main checkout, also when called from a linked worktree."""
+    return Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
+
+
+def other_sessions(repo, git_dir):
+    """(worktree path, session) of every other checkout that has an open session."""
+    found = []
+    for line in git(repo, "worktree", "list", "--porcelain").splitlines():
+        if not line.startswith("worktree "):
+            continue
+        path = Path(line[len("worktree "):])
+        try:
+            other = Path(git(path, "rev-parse", "--absolute-git-dir"))
+            if other != git_dir and (other / SESSION).exists():
+                found.append((path, json.loads((other / SESSION).read_text())))
+        except (subprocess.CalledProcessError, OSError, ValueError):
+            continue  # a removed or broken worktree has no session to report
+    return found
 
 
 def git(repo, *args, env=None):
@@ -19,6 +47,7 @@ def git(repo, *args, env=None):
 
 
 def snapshot(repo, git_dir, session):
+    ref = ref_for(git_dir)
     # ponytail: periodic snapshots can span an edit; use begin/end for task boundaries.
     with tempfile.TemporaryDirectory(dir=git_dir) as temporary:
         env = dict(
@@ -32,7 +61,7 @@ def snapshot(repo, git_dir, session):
                 git(repo, "add", "--", name, env=env)
         tree = git(repo, "write-tree", env=env)
         previous = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--verify", REF],
+            ["git", "-C", str(repo), "rev-parse", "--verify", ref],
             capture_output=True,
             text=True,
         )
@@ -43,28 +72,49 @@ def snapshot(repo, git_dir, session):
             return parent
         label = session.get("token", "idle")
         commit = git(repo, "commit-tree", tree, "-p", parent, "-m", f"vibe snapshot: {label}")
-        git(repo, "update-ref", REF, commit, previous.stdout.strip() or "0" * 40)
+        git(repo, "update-ref", ref, commit, previous.stdout.strip() or "0" * 40)
         return commit
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["begin", "end", "status", "snapshot"])
+    parser.add_argument(
+        "command", choices=["begin", "end", "status", "snapshot", "sessions", "worktree"]
+    )
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--agent", default="")
     parser.add_argument("--goal", default="")
     parser.add_argument("--files", nargs="+", default=[])
     parser.add_argument("--token", default="")
+    parser.add_argument("--name", default="", help="worktree 이름")
+    parser.add_argument("--base", default="main", help="worktree를 만들 기준 브랜치")
     args = parser.parse_args()
     repo = Path(git(args.repo, "rev-parse", "--show-toplevel"))
     git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
-    session_path = git_dir / "vibe-session.json"
+    session_path = git_dir / SESSION
+    if args.command == "worktree":
+        if not args.name or "/" in args.name or args.name.startswith("."):
+            parser.error("worktree에는 --name(경로 구분자 없는 이름)이 필요합니다")
+        main = common_repo(repo)
+        path = main.parent / f"{main.name}-worktrees" / args.name
+        git(main, "worktree", "add", "-b", f"work/{args.name}", str(path), args.base)
+        # Untracked local files a session needs; linked, so keys and the big tool tree stay single.
+        for name in ("config.json", ".voice-action/config.env", "node_modules"):
+            if (main / name).exists() and not (path / name).exists():
+                (path / name).parent.mkdir(parents=True, exist_ok=True)
+                (path / name).symlink_to(main / name)
+        print(path)
+        print("다음: cd 위 경로 && uv sync --locked  (.venv는 worktree마다 따로 만든다)")
+        return
     # All participating sessions and the scheduler serialize metadata/snapshot updates.
     with (git_dir / "vibe.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         session = json.loads(session_path.read_text()) if session_path.exists() else {}
         if args.command == "status":
             print(json.dumps(session, ensure_ascii=False, indent=2))
+        elif args.command == "sessions":
+            for path, other in other_sessions(repo, git_dir):
+                print(f"{path}\t{other['agent']}\t{other['goal']}")
         elif args.command == "begin":
             if session:
                 parser.exit(1, "다른 수정 세션이 있습니다. vibe.py status로 확인하세요.\n")
@@ -101,6 +151,14 @@ def main():
                 files=args.files,
             )
             snapshot(repo, git_dir, session)
+            for path, other in other_sessions(repo, git_dir):
+                shared = sorted(set(args.files) & set(other["files"]))
+                if shared:
+                    print(
+                        f"경고: {path}의 {other['agent']} 세션도 {', '.join(shared)}을(를) "
+                        "수정합니다. 통합 때 충돌하니 먼저 조율하세요.",
+                        file=sys.stderr,
+                    )
             session_path.write_text(json.dumps(session, ensure_ascii=False, indent=2) + "\n")
             print(session["token"])
         elif args.command == "end":

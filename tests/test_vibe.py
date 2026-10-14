@@ -83,3 +83,49 @@ def test_vibe_ownership_and_snapshots(tmp_path):
     assert vibe("end", "--token", token).returncode == 0
     assert json.loads(vibe("status").stdout) == {}
     assert vibe("end", "--token", token).returncode == 1
+
+
+def test_linked_worktrees_have_independent_sessions(tmp_path):
+    main = tmp_path / "app"
+    main.mkdir()
+
+    def git(*args, cwd=main):
+        return subprocess.check_output(["git", "-C", str(cwd), *args]).decode().strip()
+
+    def vibe(command, *args, cwd=main):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), command, "--repo", str(cwd), *args],
+            capture_output=True,
+            text=True,
+        )
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    (main / "code.txt").write_text("original")
+    (main / "config.json").write_text("{}")  # untracked local file a worktree must see
+    (main / ".gitignore").write_text("config.json\n")
+    git("add", "code.txt", ".gitignore")
+    git("commit", "-qm", "initial")
+
+    made = vibe("worktree", "--name", "feature", "--base", "HEAD")
+    assert made.returncode == 0, made.stderr
+    other = tmp_path / "app-worktrees" / "feature"
+    assert (other / "config.json").is_symlink()
+
+    first = vibe("begin", "--agent", "A", "--goal", "one", "--files", "code.txt")
+    assert first.returncode == 0, first.stderr
+    # A session in the main checkout does not block one in the worktree ...
+    second = vibe("begin", "--agent", "B", "--goal", "two", "--files", "code.txt", cwd=other)
+    assert second.returncode == 0, second.stderr
+    # ... but the shared file is reported, and each checkout keeps its own snapshot ref.
+    assert "경고" in second.stderr
+    assert "\tA\tone" in vibe("sessions", cwd=other).stdout
+    third = vibe("begin", "--agent", "C", "--goal", "three", "--files", "code.txt", cwd=other)
+    assert third.returncode == 1  # one writer per checkout
+    (other / "code.txt").write_text("changed in worktree")
+    assert vibe("snapshot", cwd=other).returncode == 0
+    assert git("show", "refs/vibe/snapshots-feature:code.txt") == "changed in worktree"
+    assert git("show", "refs/vibe/snapshots:code.txt") == "original"
+    assert vibe("end", "--token", second.stdout.strip(), cwd=other).returncode == 0
+    assert vibe("end", "--token", first.stdout.strip()).returncode == 0
