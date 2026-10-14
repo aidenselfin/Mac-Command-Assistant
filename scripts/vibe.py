@@ -103,6 +103,13 @@ def main():
             if (main / name).exists() and not (path / name).exists():
                 (path / name).parent.mkdir(parents=True, exist_ok=True)
                 (path / name).symlink_to(main / name)
+        # .gitignore's `node_modules/` does not match a link, so exclude it for this worktree.
+        exclude = Path(
+            git(path, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+        )
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("a") as handle:
+            handle.write("/node_modules\n")
         print(path)
         print("다음: cd 위 경로 && uv sync --locked  (.venv는 worktree마다 따로 만든다)")
         return

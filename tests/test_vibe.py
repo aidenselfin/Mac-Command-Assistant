@@ -103,6 +103,7 @@ def test_linked_worktrees_have_independent_sessions(tmp_path):
     git("config", "user.email", "test@example.invalid")
     git("config", "user.name", "Test")
     (main / "code.txt").write_text("original")
+    (main / "node_modules").mkdir()
     (main / "config.json").write_text("{}")  # untracked local file a worktree must see
     (main / ".gitignore").write_text("config.json\n")
     git("add", "code.txt", ".gitignore")
@@ -112,6 +113,7 @@ def test_linked_worktrees_have_independent_sessions(tmp_path):
     assert made.returncode == 0, made.stderr
     other = tmp_path / "app-worktrees" / "feature"
     assert (other / "config.json").is_symlink()
+    assert "node_modules" not in git("status", "--porcelain", cwd=other)
 
     first = vibe("begin", "--agent", "A", "--goal", "one", "--files", "code.txt")
     assert first.returncode == 0, first.stderr
