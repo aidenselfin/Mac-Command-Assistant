@@ -24,6 +24,7 @@ from voice_action.conversion import (
     READ_DOCUMENT_TOOL,
 )
 from voice_action.deletion import DELETE_DEFINITION, DELETE_TOOL
+from voice_action.file_operations import COPY_TOOL, DEFINITIONS, MKDIR_TOOL, MOVE_TOOL, OPERATIONS
 from voice_action.file_search import (
     FIND_FILES_DEFINITION,
     FIND_FILES_TOOL,
@@ -104,6 +105,22 @@ DELETE_ACTION_PATTERN = re.compile(
     r"삭제(?=$|\s|해|하|할|를|요|[!?])|지워(?=$|\s|줘|주|요|[!?])|없애|"
     r"(?<![\w./-])(?:delete|remove|erase|rm)(?![\w./-])", re.IGNORECASE
 )
+MOVE_PATTERN = re.compile(
+    r"이동(?=$|\s|시켜|해|하|할|을)|옮(?:겨|기|길)|"
+    r"이름(?:을)?\s+(?:[^\n]{0,80})?(?:바꿔|변경)|이름(?:을)?(?:바꿔|변경)(?=$|\s|해|하)|"
+    r"(?<![\w./-])(?:move|rename)(?![\w./-])", re.IGNORECASE
+)
+COPY_PATTERN = re.compile(r"복사(?=$|\s|해|하|할|를|줘)|(?<![\w./-])copy(?![\w./-])", re.IGNORECASE)
+MKDIR_PATTERN = re.compile(r"(?:폴더|디렉터리).*?(?:만들|생성)|\bmkdir\b", re.IGNORECASE)
+
+
+def _operation_requested(tool: str, text: str) -> bool:
+    pattern = {MOVE_TOOL: MOVE_PATTERN, COPY_TOOL: COPY_PATTERN, MKDIR_TOOL: MKDIR_PATTERN}[tool]
+    plain = _without_quoted_text(text, action_pattern=pattern)
+    if re.search(r"(?:이동|복사|생성|변경)\s*(?:하지|말)|옮기지|옮겨\s*말|만들지|바꾸지|"
+                 r"(?:do\s+not|don't|never)\s+(?:move|rename|copy|mkdir)", plain, re.IGNORECASE):
+        return False
+    return pattern.search(plain) is not None
 
 
 class ToolLoopLimitError(PlannerError):
@@ -709,7 +726,8 @@ def _wants_content(text: str) -> bool:
 
 def _acts_without_reading(text: str) -> bool:
     """Delete and conversion name their own target, so a chosen file need not be read first."""
-    return bool(_destructive_request(text) or CONVERSION_REQUEST_PATTERN.search(text))
+    return bool(_destructive_request(text) or CONVERSION_REQUEST_PATTERN.search(text)
+                or _operation_requested(MOVE_TOOL, text) or _operation_requested(COPY_TOOL, text))
 
 
 def _is_pattern_delete(text: str) -> bool:
@@ -1061,6 +1079,7 @@ class Planner:
             UndoKind.CREATE_UNDONE,
             UndoKind.OVERWRITE_UNDONE,
             UndoKind.DELETE_UNDONE,
+            UndoKind.OPERATION_UNDONE,
             UndoKind.NOTHING_TO_UNDO,
         }:
             return Completed(result.message)
@@ -1190,6 +1209,12 @@ class Planner:
         if _destructive_request(user_text) and not USER_URL_PATTERN.search(user_text):
             tools.append(DELETE_DEFINITION)
         if not USER_URL_PATTERN.search(user_text):  # web requests keep their own tool set
+            for name, definition in DEFINITIONS.items():
+                if _operation_requested(name, user_text) or (
+                    name == MKDIR_TOOL and (_operation_requested(MOVE_TOOL, user_text)
+                                            or _operation_requested(COPY_TOOL, user_text))
+                ):
+                    tools.append(definition)
             tools.append(READ_DOCUMENT_DEFINITION)
             if self.config.allowed_directories:
                 tools.append(FIND_FILES_DEFINITION)
@@ -1206,6 +1231,13 @@ class Planner:
                 "role": "system",
                 "content": (
                     "사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. "
+                    "앱은 승인·Undo를 갖춘 파일 삭제, 이동·이름 변경, 복사, "
+                    "폴더 생성을 지원합니다. "
+                    "도구는 요청별로 제공되므로 이번 목록에 없다고 앱 전체에 기능이 없다고 "
+                    "말하지 마세요. 이동은 local__move_file, 복사는 local__copy_file, "
+                    "폴더 생성은 local__create_directory를 사용하세요. "
+                    "이동을 텍스트 쓰기나 복사 후 삭제로 흉내 내지 마세요. 파일명·목적지가 "
+                    "불분명하면 검색하거나 필요한 경로만 질문하고, 승인 여부는 앱이 받습니다. "
                     "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 "
                     "추측하지 마세요. "
                     "문서 요약·추출·번역·저장에서는 원문에 없는 사실, 연도, 담당자, "
@@ -1343,7 +1375,9 @@ class Planner:
             state.next_call_index += 1
             return await self._continue(state)
         outcome = await self._accept_tool_result(state, context.pending_call, result)
-        if result.ok and context.pending_call.name in {FILESYSTEM_WRITE_TOOL, CONVERT_TOOL}:
+        if result.ok and context.pending_call.name in {
+            FILESYSTEM_WRITE_TOOL, CONVERT_TOOL, *OPERATIONS
+        }:
             written = context.prepared_write.target_path
             state.changed_paths = tuple(dict.fromkeys((*state.changed_paths, written)))
         if context.pending_call.name == DELETE_TOOL:
@@ -1358,6 +1392,14 @@ class Planner:
         action = {DELETE_TOOL: "삭제를", CONVERT_TOOL: "변환을"}.get(
             context.pending_call.name, "쓰기를"
         )
+        action = {MOVE_TOOL: "이동을", COPY_TOOL: "복사를", MKDIR_TOOL: "폴더 생성을"}.get(
+            context.pending_call.name, action
+        )
+        if context.write_completed:
+            return Completed(
+                f"파일 {action} 거절했습니다. 앞서 승인한 변경은 유지됩니다. "
+                "Undo로 되돌릴 수 있습니다.", context.changed_paths,
+            )
         return Completed(f"파일 {action} 거절했습니다. 파일은 변경하지 않았습니다.")
 
     async def _continue(self, state: _LoopState) -> PlannerOutcome:
@@ -1541,6 +1583,26 @@ class Planner:
                     return Error("모호한 파일 요청은 안전한 후보 탐색 없이 진행할 수 없습니다.")
                 if state.single_search_candidate is not None and not state.candidate_read:
                     return Error("검증된 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
+                supported = [
+                    tool.name for tool in state.tools
+                    if (tool.name == DELETE_TOOL and _destructive_request(state.user_text))
+                    or (tool.name in OPERATIONS
+                        and _operation_requested(tool.name, state.user_text))
+                ]
+                if supported and not state.write_completed and turn.text and re.search(
+                    r"(?:도구|기능|지원).{0,120}(?:없|않|불가)", turn.text
+                ):
+                    if state.confirm_nudges:
+                        return Error("지원되는 파일 도구로 요청을 실행하지 못했습니다.")
+                    state.confirm_nudges += 1
+                    state.messages.extend([
+                        {"role": "assistant", "content": turn.text},
+                        {"role": "system", "content":
+                         f"현재 지원·제공되는 도구: {', '.join(supported)}. "
+                         "기능이 없다고 답하지 말고 실제 도구를 호출하세요. 승인은 앱이 받습니다."},
+                    ])
+                    state.iteration += 1
+                    continue
                 if (
                     state.confirm_nudges == 0
                     and turn.text
@@ -1551,6 +1613,7 @@ class Planner:
                         _destructive_request(state.user_text)
                         or CONVERSION_REQUEST_PATTERN.search(state.user_text)
                         or MUTATION_PATTERN.search(state.user_text)
+                        or any(_operation_requested(name, state.user_text) for name in OPERATIONS)
                     )
                 ):
                     # The model stopped to ask "shall I?" in words. The approval screen is
@@ -1565,6 +1628,23 @@ class Planner:
                     state.iteration += 1
                     self.emit("[PLAN] confirmation reply turned back into a tool call")
                     continue
+                operation_pending = any(
+                    _operation_requested(name, state.user_text) for name in OPERATIONS
+                ) and not state.write_completed
+                if operation_pending:
+                    if not state.confirm_nudges and not state.find_none:
+                        state.confirm_nudges += 1
+                        state.messages.extend([
+                            {"role": "assistant", "content": turn.text},
+                            {"role": "system", "content": "파일 이동·복사·폴더 생성 도구가 "
+                             "제공되어 "
+                             "있습니다. 승인된 실제 파일 작업 없이는 완료로 답하지 마세요. "
+                             "필요한 경로를 질문하거나 해당 도구를 호출하세요."},
+                        ])
+                        state.iteration += 1
+                        continue
+                    return Error("요청한 파일 작업을 실행하지 못했습니다. 원본·목적지·허용 경로를 "
+                                 "확인해 주세요.")
                 if not turn.text or not turn.text.strip():
                     if state.empty_retries == 0 and state.model_calls < self.config.max_tool_rounds:
                         # After tool results a model sometimes answers with nothing. Once, it
@@ -1707,6 +1787,54 @@ class Planner:
     async def _policy_error(
         self, state: _LoopState, call: ToolCall, arguments: dict
     ) -> str | None:
+        if call.name in OPERATIONS:
+            if state.user_urls or state.web_attempted or state.read_only_candidate_request:
+                return "웹·읽기 전용 요청에서는 파일 이동·복사·폴더 생성을 실행할 수 없습니다."
+            requested = _operation_requested(call.name, state.user_text)
+            if call.name == MKDIR_TOOL:
+                requested = requested or _operation_requested(MOVE_TOOL, state.user_text) or (
+                    _operation_requested(COPY_TOOL, state.user_text)
+                )
+            if not requested:
+                return "사용자가 직접 요청한 파일 작업만 실행할 수 있습니다."
+            text = state.user_text + "\n" + "\n".join(state.conditions)
+            if call.name != MKDIR_TOOL:
+                source = arguments.get("source")
+                chosen = state.attachment or state.single_search_candidate
+                if chosen is not None and source != chosen:
+                    return "첨부하거나 선택한 파일만 이동·복사할 수 있습니다."
+                if chosen is None and not _write_target_is_explicit(source, text, ()):
+                    return "이동·복사 원본을 local__find_files로 찾거나 정확한 파일명을 지정하세요."
+                if chosen is None:
+                    qualified = re.findall(
+                        rf"(?:/|[\w.-]+/)[^\s\"'<>]*{re.escape(Path(source).name)}", text
+                    )
+                    if qualified and not any(
+                        source == item or source.endswith("/" + item) for item in qualified
+                    ):
+                        return "이동·복사 원본 경로가 사용자 요청의 경로와 일치하지 않습니다."
+            raw = arguments.get("path" if call.name == MKDIR_TOOL else "destination")
+            if not isinstance(raw, str):
+                return "목적지 경로를 지정해야 합니다."
+            target = Path(raw)
+            if not target.is_absolute() or not any(
+                target.is_relative_to(root) for root in self.config.allowed_directories
+            ):
+                return "목적지는 허용 폴더 안의 절대경로여야 합니다."
+            explicit = _mentioned_directory(target, text, self.config.allowed_directories)
+            if call.name != MKDIR_TOOL:
+                explicit = explicit or _mentioned_directory(
+                    target.parent, text, self.config.allowed_directories
+                ) or (target.name != Path(arguments.get("source") or "").name
+                      and _write_target_is_explicit(raw, text, ()))
+            if not explicit:
+                return "목적지 파일명 또는 폴더가 사용자 요청에 명시되지 않았습니다."
+            return None
+        if call.name == FILESYSTEM_WRITE_TOOL and (
+            _operation_requested(MOVE_TOOL, state.user_text)
+            or _operation_requested(COPY_TOOL, state.user_text)
+        ):
+            return "이동·복사는 전용 도구를 사용하세요. 텍스트 쓰기로 대신할 수 없습니다."
         if state.attachment is not None:
             if call.name == CONVERT_TOOL and arguments.get("source") != state.attachment:
                 return "첨부한 파일만 변환할 수 있습니다."
@@ -1921,7 +2049,7 @@ class Planner:
             state.write_completed = True
             if state.web_save_required:
                 state.web_write_completed = True
-        elif call.name in {DELETE_TOOL, CONVERT_TOOL}:
+        elif call.name in {DELETE_TOOL, CONVERT_TOOL, *OPERATIONS}:
             state.write_completed = True
         state.messages.append(
             {"role": "tool", "tool_call_id": call.id, "content": result_text}

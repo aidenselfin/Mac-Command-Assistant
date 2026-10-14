@@ -1,0 +1,11 @@
+{
+  "id": "create_directory_undo", "family": "file.directory",
+  "files": {"keep.txt": "keep"},
+  "request": "새 보관 폴더를 만들어줘",
+  "user": {"approve": [true]},
+  "script": [
+    {"calls": [{"name": "local__create_directory", "args": {"path": "{root}/보관"}}]},
+    {"text": "폴더 생성 완료"}
+  ],
+  "expect": {"files": {}, "undo": true, "must_run": ["local__create_directory"]}
+}

@@ -17,6 +17,7 @@ from typing import Protocol
 from voice_action import conversion, file_search
 from voice_action.conversion import CONVERT_TOOL, READ_DOCUMENT_TOOL
 from voice_action.deletion import DELETE_TOOL
+from voice_action.file_operations import OPERATIONS
 from voice_action.file_search import FIND_FILES_TOOL
 from voice_action.mcp_client import TRUNCATION_MARKER, ToolRejectedError, ToolResult
 from voice_action.undo import (
@@ -39,7 +40,7 @@ READ_ONLY_TOOLS = frozenset(
         FIND_FILES_TOOL,
     }
 )
-WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL, CONVERT_TOOL})
+WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL, CONVERT_TOOL, *OPERATIONS})
 PREVIEW_LIMIT = 200
 # A character is up to a few UTF-8 bytes; files past this many bytes per allowed character are
 # read from their start only.
@@ -195,8 +196,29 @@ class RiskGuard:
             return await asyncio.to_thread(self._prepare_delete, arguments)
         if name == CONVERT_TOOL:
             return await asyncio.to_thread(self._prepare_convert, arguments)
+        if name in OPERATIONS:
+            return await asyncio.to_thread(self._prepare_operation, name, arguments)
         normalized = await self._gateway.normalize_tool_arguments(name, arguments)
         return self._new_prepared(name, normalized)
+
+    def _prepare_operation(self, name: str, arguments: dict) -> PreparedWrite:
+        if self._undo_journal is None:
+            raise RiskGuardError(
+                "Undo journal이 없어 파일 이동·복사·폴더 생성을 실행할 수 없습니다."
+            )
+        try:
+            normalized, snapshot = self._undo_journal.operations.prepare(name, arguments)
+        except (OSError, sqlite3.Error, UndoJournalError) as exc:
+            raise RiskGuardError("파일 작업 경로·권한·journal을 준비할 수 없습니다.") from exc
+        canonical = _canonical_json(normalized)
+        digest = _digest(name, canonical + _canonical_json({"state": snapshot}))
+        nonce = secrets.token_urlsafe(32)
+        self._pending[nonce] = digest
+        return PreparedWrite(
+            name, normalized.get("destination", normalized.get("path")), OPERATIONS[name],
+            0, "", False, canonical, digest, nonce,
+            (normalized["source"],) if "source" in normalized else (), snapshot,
+        )
 
     def _prepare_delete(self, arguments: dict) -> PreparedWrite:
         if self._undo_journal is None:
@@ -352,6 +374,32 @@ class RiskGuard:
         if prepared.tool_name == CONVERT_TOOL:
             return await self._execute_convert(prepared, expected, on_started, on_finished)
         arguments = json.loads(prepared.canonical_arguments)
+        if prepared.tool_name in OPERATIONS:
+            refreshed = await asyncio.to_thread(self._prepare_operation, prepared.tool_name,
+                                                arguments)
+            self._pending.pop(refreshed.nonce, None)
+            if expected != prepared.digest or refreshed.digest != prepared.digest:
+                self._pending[refreshed.nonce] = refreshed.digest
+                raise ApprovalChangedError(refreshed)
+            if on_started is not None:
+                on_started()
+            task = asyncio.create_task(asyncio.to_thread(
+                self._undo_journal.operations.execute, prepared.tool_name, arguments,
+                refreshed.snapshots,
+            ))
+            try:
+                try:
+                    return await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    await task
+                    raise
+            except (OSError, sqlite3.Error, UndoJournalError) as exc:
+                raise RiskGuardError(
+                    "파일 작업 중 오류가 발생했습니다. 원본·대상 경로를 확인하고 Undo하세요."
+                ) from exc
+            finally:
+                if on_finished is not None:
+                    on_finished()
         if prepared.tool_name == DELETE_TOOL:
             refreshed = await asyncio.to_thread(self._prepare_delete, arguments)
             self._pending.pop(refreshed.nonce, None)

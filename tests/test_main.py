@@ -733,6 +733,45 @@ def test_parse_rating(text, expected):
     assert main.parse_rating(text) == expected
 
 
+async def test_interactive_move_approval_and_undo(config, tmp_path, monkeypatch, capsys):
+    root = config.allowed_directories[0]
+    source, folder = root / "a.txt", root / "보관"
+    source.write_text("원본")
+    folder.mkdir()
+    manager, model = FakeManager(), AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(None, [ToolCall("move", "local__move_file", json.dumps(
+            {"source": str(source), "destination": str(folder)}
+        ))]),
+        ModelTurn("이동 완료", []),
+    ]
+
+    class Reader:
+        def __init__(self):
+            self.lines = iter(line.encode() + b"\n" for line in
+                              ("a.txt를 보관 폴더로 이동해줘", "승인", "undo", "exit"))
+
+        async def readline(self):
+            return next(self.lines)
+
+    @asynccontextmanager
+    async def reader_context():
+        yield Reader()
+
+    monkeypatch.setattr(main, "_build_mcp_manager", lambda _: manager)
+    monkeypatch.setattr(main, "AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda *_: model)
+    monkeypatch.setattr(main, "input_reader", reader_context)
+    monkeypatch.setattr(main, "finder_reveal", lambda _: None)
+    journal = UndoJournal(tmp_path / "undo.sqlite3", (root,))
+    await main.run_interactive(config, main.Console(width=240), journal)
+    assert source.read_text() == "원본" and not (folder / source.name).exists()
+    output = capsys.readouterr().out
+    assert f"source: {source}" in output and "operation: move" in output
+    assert "파일 이동을 되돌렸습니다" in output
+    assert model.generate.await_count == 2 and manager.connect_count == 1
+
+
 def test_attach_command_attaches_inside_the_folders_and_reports_refusals(config, capsys):
     from voice_action.runtime import RuntimeController
 

@@ -28,6 +28,7 @@ class UndoKind(Enum):
     CREATE_UNDONE = auto()
     OVERWRITE_UNDONE = auto()
     DELETE_UNDONE = auto()
+    OPERATION_UNDONE = auto()
     NOTHING_TO_UNDO = auto()
     CONFLICT = auto()
     BOUNDARY_ERROR = auto()
@@ -144,6 +145,9 @@ class UndoJournal:
             from voice_action.deletion import DeletionJournal
 
             self.deletions = DeletionJournal(self)
+            from voice_action.file_operations import FileOperationJournal
+
+            self.operations = FileOperationJournal(self)
         except UndoJournalError:
             raise
         except (OSError, sqlite3.Error) as exc:
@@ -268,10 +272,23 @@ class UndoJournal:
     def undo_last_write(self) -> UndoResult:
         try:
             latest_delete = self.deletions.latest()
+            latest_operation = self.operations.latest()
             with self._connect() as connection:
                 latest_write = connection.execute(
                     "SELECT MAX(created_at) FROM undo_entries WHERE status='active'"
                 ).fetchone()[0]
+            if latest_operation and latest_operation[1] > max(
+                latest_write or 0, latest_delete[1] if latest_delete else 0
+            ):
+                from voice_action.mcp_client import ToolRejectedError
+
+                try:
+                    message = self.operations.undo(latest_operation[0])
+                except (ToolRejectedError, OSError) as exc:
+                    return UndoResult(UndoKind.CONFLICT,
+                                      f"파일 작업을 되돌리지 못했습니다 ({type(exc).__name__}). "
+                                      "경로·파일 변경·폴더가 비었는지 확인하세요.")
+                return UndoResult(UndoKind.OPERATION_UNDONE, message)
             if latest_delete and (latest_write is None or latest_delete[1] > latest_write):
                 from voice_action.mcp_client import ToolRejectedError
 

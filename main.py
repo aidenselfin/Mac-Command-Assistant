@@ -76,7 +76,7 @@ def print_outcome(console: Console, outcome: RuntimeResult) -> None:
         for index, option in enumerate(outcome.shown_options, 1):
             console.print(f"  {index}. {option}", markup=False, highlight=False)
     elif isinstance(outcome, ApprovalRequired):
-        if outcome.operation == "delete":
+        if outcome.operation in {"delete", "move", "copy", "mkdir"}:
             from voice_action.ui import render_outcome
 
             console.print(render_outcome(outcome), markup=False, highlight=False)

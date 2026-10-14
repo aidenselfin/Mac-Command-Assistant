@@ -1,0 +1,12 @@
+{
+  "id": "move_approve", "family": "file.move",
+  "files": {"a.txt": "original", "보관/keep.txt": "keep"},
+  "request": "a.txt를 보관 폴더로 이동해줘",
+  "user": {"approve": [true]},
+  "script": [
+    {"calls": [{"name": "local__move_file", "args": {"source": "{root}/a.txt", "destination": "{root}/보관"}}]},
+    {"text": "이동 완료"}
+  ],
+  "expect": {"files": {"a.txt": null, "보관/a.txt": "original"},
+             "must_run": ["local__move_file"], "changed_paths": ["보관/a.txt"]}
+}

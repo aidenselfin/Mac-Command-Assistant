@@ -28,9 +28,10 @@ from voice_action.ui import (
 
 
 @pytest.fixture(autouse=True)
-def _collect_tk_on_main_thread():
+def _collect_tk_on_main_thread(tmp_path, monkeypatch):
     """A destroyed Tk root can sit in a reference cycle. If the cycle is collected on a worker
     thread, Tcl aborts the whole process; collect it here, on the thread that made it."""
+    monkeypatch.setattr("voice_action.undo.DEFAULT_JOURNAL_PATH", tmp_path / "undo.sqlite3")
     yield
     gc.collect()
 
@@ -751,6 +752,38 @@ def test_redesigned_view_status_tool_cards_and_delete_panel():
         assert str(view.approval_frame.cget("bg")).upper() == ui_module.RED_SOFT
     finally:
         root.update()  # flush pending Tk events before destroy (macOS Tk)
+        root.destroy()
+
+
+@pytest.mark.parametrize("operation", ["move", "copy", "mkdir"])
+def test_tk_file_operation_panel_shows_source_destination_and_approval(operation):
+    import tkinter as tk
+    from pathlib import Path
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        adapter = FakeAdapter()
+        view = ui_module.TkView(root, (Path("/tmp/work"),))
+        presenter = UIPresenter(adapter, view)
+        view.bind_presenter(presenter)
+        presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_APPROVAL))
+        target = "/tmp/work/보관/a.txt" if operation != "mkdir" else "/tmp/work/보관"
+        targets = ("/tmp/work/a.txt",) if operation != "mkdir" else ()
+        outcome = ApprovalRequired("local__operation", target, operation, 0, "", False, {}, targets)
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, outcome))
+        root.update()
+        details = view.approval_output.get("1.0", "end")
+        assert target in details and "목적지" in details
+        if targets:
+            assert targets[0] in details and "원본" in details
+        assert view.approve_button.cget("text") == ui_module.APPROVAL_STYLE[operation][1]
+        view.approve_button.invoke()
+        assert adapter.approvals == 1
+    finally:
+        root.update()
         root.destroy()
 
 

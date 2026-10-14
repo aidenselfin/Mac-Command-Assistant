@@ -146,6 +146,13 @@ def render_outcome(outcome: RuntimeResult) -> str:
                 f"삭제 대상: {len(outcome.targets)}개 파일\n{targets}\n"
                 "승인하면 위 파일들을 백업 후 삭제합니다. Undo로 일괄 복원할 수 있습니다."
             )
+        if outcome.operation in {"move", "copy", "mkdir"}:
+            return "\n".join((
+                "[APPROVAL REQUIRED]", f"operation: {outcome.operation}",
+                *((f"source: {outcome.targets[0]}",) if outcome.targets else ()),
+                f"target: {outcome.target_path}",
+                "승인 후 실행합니다. 기존 경로를 덮어쓰지 않으며 Undo로 되돌릴 수 있습니다.",
+            ))
         preview = outcome.preview[:200]
         suffix = "…" if outcome.preview_truncated else ""
         return "\n".join(
@@ -897,6 +904,9 @@ APPROVAL_STYLE = {
     ),
     "delete": ("🗑  승인 필요 · 파일 삭제", "🗑  승인하고 삭제", "Danger.TButton", True),
     "convert": ("⇄  승인 필요 · 파일 변환", "승인하고 변환", "Primary.TButton", False),
+    "move": ("→  승인 필요 · 파일 이동", "승인하고 이동", "Primary.TButton", False),
+    "copy": ("＋  승인 필요 · 파일 복사", "승인하고 복사", "Primary.TButton", False),
+    "mkdir": ("＋  승인 필요 · 폴더 생성", "승인하고 생성", "Primary.TButton", False),
 }
 APPROVAL_PREVIEW_CHARS = 200
 # Shown on the 1-5 rating buttons; the tags are what the feedback loop stores.
@@ -1490,6 +1500,17 @@ class TkView:
                     ("note",),
                 ),
             ]
+        if outcome.operation in {"move", "copy", "mkdir"}:
+            segments = []
+            if outcome.targets:
+                segments += [("원본  ", ("label",)),
+                             (f"{display_path(outcome.targets[0])}\n", ())]
+            segments += [("목적지  ", ("label",)),
+                         (f"{display_path(outcome.target_path)}\n", ())]
+            note = {"move": "원본 위치에서 목적지로 이동합니다. 기존 파일은 덮어쓰지 않습니다.",
+                    "copy": "원본은 유지하고 새 파일을 복사합니다. 덮어쓰지 않습니다.",
+                    "mkdir": "새 폴더를 만듭니다. Undo는 폴더가 비어 있을 때만 가능합니다."}
+            return [*segments, (note[outcome.operation] + " Undo로 되돌릴 수 있습니다.", ("note",))]
         if outcome.operation == "convert":
             segments = [
                 ("원본  ", ("label",)),
