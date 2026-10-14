@@ -8,6 +8,12 @@ Voice Action AI는 자연어 명령을 제한된 MCP(Model Context Protocol) 도
 
 LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케이션이 노출하는 도구를 고정하고, 모든 파일 경로와 웹 작업을 코드에서 다시 검증하며, 파일 쓰기는 사용자 승인과 Undo journal이 모두 준비된 경우에만 실행합니다.
 
+## 문서 안내
+개발자·에이전트용: [`AGENTS.md`](AGENTS.md)(작업 규칙) → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)(구조 지도) →
+[`docs/features.md`](docs/features.md)(기능별 코드·테스트) · [`docs/status.md`](docs/status.md)(현재 상태) ·
+[`docs/decisions.md`](docs/decisions.md)(결정 기록) · [`docs/native-protocol.md`](docs/native-protocol.md)(SwiftUI 전송 규약).
+네이티브 앱: [`native-preview/README.md`](native-preview/README.md).
+
 ## 의미 검색 (선택, 기본 꺼짐)
 
 파일명·폴더·내용 검색(`local__find_files`)이 아무것도 못 찾았을 때만, 로컬 임베딩 모델

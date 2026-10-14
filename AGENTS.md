@@ -1,19 +1,25 @@
 # 프로젝트 개요
 자연어 텍스트 명령을 LLM(OpenRouter/Groq/OpenAI)이 고정된 도구 호출로 바꾸고, 코드가 이를 다시 검증해
 실행하는 안전 중심 Python 앱이다. 이름과 달리 음성 입력(STT)은 아직 없다.
-`voice-action-AI`를 테스트·수정용으로 복제한 폴더이며 원본 폴더는 건드리지 않는다.
+화면은 셋(CLI `--interactive`, Tk `--ui`, SwiftUI `native-preview/`)이고 모두 같은 `Planner`/`RuntimeController`를 쓴다.
 
-흐름: `main.py` → `RuntimeController`(runtime.py, 상태 머신) → `Planner`(planner.py, LLM 루프)
-→ `RiskGuard`(risk_guard.py, 읽기/쓰기/금지 분류·승인) → `MCPManager`(mcp_manager.py)
-→ filesystem / web(Playwright) / macos 클라이언트. 쓰기·삭제 Undo는 undo.py, deletion.py.
-상세 설명은 README.md 참고.
+# 처음 읽을 순서 (5분)
+1. 이 파일 → 2. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 구조 지도와 "무엇을 고치려면 어디를 보나"
+→ 3. [`docs/features.md`](docs/features.md) 기능별 코드·테스트·eval 표 → 4. [`docs/status.md`](docs/status.md) 현재 상태와 미완료
+→ 5. 필요할 때 [`docs/decisions.md`](docs/decisions.md)(왜 이렇게 했나), [`docs/native-protocol.md`](docs/native-protocol.md)(SwiftUI 전송 규약),
+`README.md`(사용자용 전체 설명), `native-preview/AGENTS.md`(Swift 작업 시).
+기능을 추가·변경하면 `docs/features.md` 표를 같은 커밋에서 고친다.
 
 # 실행 및 검증
-- 의존성 설치: `uv sync --locked && npm ci && npm run playwright:install`
-- 실행: `uv run python main.py --text "..."` | `--interactive` | `--ui`
+- 의존성 설치: `uv sync --locked && npm ci && npm run playwright:install` (의미 검색을 쓰면 `uv sync --locked --extra semantic`)
+- 실행: `uv run python main.py --text "..."` | `--interactive` | `--ui`, 네이티브 앱은 `./native-preview/run.sh`
+- 의미 검색(선택): `.voice-action/config.env`에 `VOICE_ACTION_SEMANTIC_SEARCH=on`, `uv run --extra semantic …` (README "의미 검색")
+- 점검: `scripts/check.sh quick`(변경 영역 테스트+ruff), `scripts/check.sh full`, `scripts/check.sh <기능>`(features.md의 기능 이름)
 - 테스트: `uv run --locked pytest -q` (통합만: `-m integration`, 실제 LLM 키 불필요)
 - 빠른 테스트(샌드박스·네트워크 제한 환경): `uv run --locked pytest -q -m "not integration"`
 - 린트: `uv run --locked ruff check .`
+- 평가: `uv run python evals/run_eval.py`(재생) / `--live --repeat 3`(실제 모델, 유료). 터미널(`--interactive` 경로)로 먼저 확인하고,
+  화면을 봐야 할 때만 `--ui`·네이티브 앱을 쓴다.
 - API 키는 `.voice-action/config.env`에만 둔다. `config.json`에 key 필드가 있으면 로딩이 거부된다.
 - `config.json`은 git에서 제외된다. 없으면 `cp config.example.json config.json`.
 - `docs/reviews/reproduce_*.py`는 결함 존재를 단언하는 증거라 수정 후 실패하는 것이 정상이다.
@@ -58,7 +64,7 @@
 - 끝난 worktree는 `git worktree remove 경로`로 지우고, 병합한 브랜치만 삭제한다.
 
 # 작업 시작·종료 (checkout마다 한 명의 수정 세션)
-- 모든 세션은 시작·재개·컨텍스트 압축 후 `AGENTS.md`, `docs/status.md`, `docs/decisions.md`를 읽는다.
+- 모든 세션은 시작·재개·컨텍스트 압축 후 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/features.md`, `docs/status.md`, `docs/decisions.md`를 읽는다.
 - 같은 checkout의 **수정 세션은 하나**다. 읽기·리뷰는 병행 가능하나 테스트·앱 실행도 파일을 만들면 수정 작업이다.
 - 아래 소유권은 협력 규약이다. 도구의 직접 파일 쓰기를 OS 수준에서 막지는 않는다.
 
