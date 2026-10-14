@@ -234,7 +234,7 @@ class SemanticIndex:
             stored = [(wanted[(r, p)], blob) for r, p, blob in rows if (r, p) in wanted]
         finally:
             connection.close()
-        state = "partial" if self._busy or self._done < self._total else "ready"
+        state = "partial" if self._done < self._total else "ready"
         if not stored:
             return SemanticResult(state, (), self._done, self._total)
         vector = self._embedder.query(query)

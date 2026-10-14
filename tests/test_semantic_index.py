@@ -152,3 +152,10 @@ def test_a_photo_and_a_text_file_each_need_their_own_score(tmp_path, root):
     index = make_index(tmp_path, root, Weak())
     response = find_files({"keywords": ["qqq"], "query": "음식 사진"}, (root,), index).structured
     assert names(response) == ["IMG_001.jpg", "IMG_002.png"]  # no csv or txt among them
+
+
+def test_a_background_recheck_does_not_make_a_complete_index_look_partial(tmp_path, root):
+    index = make_index(tmp_path, root, FakeEmbedder())
+    index._busy = True  # the once-a-minute pass is running again
+    response = find_files({"keywords": ["qqq"], "query": "고양이"}, (root,), index).structured
+    assert response["complete"] is True
