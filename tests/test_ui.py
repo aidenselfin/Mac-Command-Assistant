@@ -835,6 +835,44 @@ def test_errors_and_questions_cannot_be_rated():
     assert not presenter.rate(5) and adapter.ratings == [] and view.rating[0] is False
 
 
+@pytest.mark.parametrize("score", [1, 2, 3, 4, 5])
+def test_saved_rating_closes_after_high_score_or_one_cause(score):
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    assert presenter.rate(score)
+    assert view.rating[0]  # scheduling alone does not confirm storage
+    presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (score, ())))
+    if score <= 3:
+        assert view.rating[0]
+        assert presenter.toggle_tag("wrong_file")
+        presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (score, ())))
+        assert view.rating[0]  # a delayed score acknowledgement cannot close the cause picker
+        presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (score, ("wrong_file",))))
+        assert adapter.ratings[-1] == (score, ("wrong_file",))
+    assert not view.rating[0]
+    assert not presenter.rate(5) and not presenter.toggle_tag("too_slow")
+    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+    assert not view.rating[0]
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("다음 답")))
+    assert view.rating == (True, None, ())
+
+
+def test_failed_rating_stays_open_and_old_success_does_not_close_next_answer():
+    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
+    adapter.rate = lambda *_: False
+    assert not presenter.rate(5)
+    assert view.rating == (True, None, ())
+    adapter.rate = lambda *_: True
+    assert presenter.rate(5)
+    presenter.handle(UIMessage(UIMessageType.NOTICE, "평가를 저장하지 못했어요."))
+    assert view.rating == (True, 5, ())
+    assert presenter.execute("다음")
+    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("다음 답")))
+    presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (5, ())))
+    assert view.rating == (True, None, ())
+
+
 def test_low_score_collects_causes_and_a_better_score_drops_them():
     presenter, adapter, view = presenter_at(RuntimeState.IDLE)
     presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
@@ -895,13 +933,19 @@ def test_tk_choice_and_rating_buttons_and_digit_shortcuts():
         root.update()
         assert view.rating_frame.winfo_ismapped() and not view.tag_row.winfo_ismapped()
         assert view._on_digit(Key("2")) == "break" and adapter.ratings[-1] == (2, ())
+        presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (2, ())))
         root.update()
         assert view.tag_row.winfo_ismapped()
         view.tag_buttons["wrong_file"].invoke()
         assert adapter.ratings[-1] == (2, ("wrong_file",))
-        view.rating_buttons[5].invoke()
+        presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (2, ("wrong_file",))))
         root.update()
-        assert adapter.ratings[-1] == (5, ()) and not view.tag_row.winfo_ismapped()
+        assert not view.rating_frame.winfo_ismapped()
+        presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("다음 답")))
+        view.rating_buttons[5].invoke()
+        presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (5, ())))
+        root.update()
+        assert adapter.ratings[-1] == (5, ()) and not view.rating_frame.winfo_ismapped()
     finally:
         root.update()
         root.destroy()
@@ -937,6 +981,8 @@ def test_worker_records_a_rating_for_the_answered_run(config, tmp_path):
     assert done.value == Completed("답")
 
     assert worker.rate(2, ("wrong_file",))
+    saved, _ = wait_for_message(messages, UIMessageType.RATING_SAVED)
+    assert saved.value == (2, ("wrong_file",))
     worker.shutdown()
 
     rows = sqlite3.connect(store).execute(

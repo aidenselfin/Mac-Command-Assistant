@@ -58,6 +58,7 @@ class UIMessageType(Enum):
     FAILURE = auto()
     NOTICE = auto()
     ATTACHMENT = auto()  # value: (path or None, refusal text or None)
+    RATING_SAVED = auto()  # value: (score, tags)
     STOPPED = auto()
 
 
@@ -225,6 +226,16 @@ class UIPresenter:
             return
         if message.type is UIMessageType.NOTICE:
             self.view.show_output(str(message.value))
+            return
+        if message.type is UIMessageType.RATING_SAVED:
+            score, tags = message.value
+            if (
+                self._can_rate()
+                and (score, tags) == (self._score, self._tags)
+                and (score > LOW_RATING or tags)
+            ):
+                self._rating_open = False
+                self._refresh_controls()
             return
         if message.type is UIMessageType.ATTACHMENT:
             path, refusal = message.value
@@ -511,6 +522,8 @@ class AsyncRuntimeWorker:
             self.messages.put(
                 UIMessage(UIMessageType.NOTICE, "평가를 저장하지 못했어요. 다시 눌러 보세요.")
             )
+        else:
+            self.messages.put(UIMessage(UIMessageType.RATING_SAVED, (score, tags)))
 
     def cancel_active(self) -> bool:
         if self._active_task is None:
