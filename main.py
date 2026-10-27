@@ -379,7 +379,7 @@ def manage_lessons(
             out(f"  #{lesson_id} {text}")
         if not rows:
             out("  없음")
-        out("[후보 lesson] 평가로 비교한 뒤 --lesson-on ID로 채택, --lesson-off ID로 거절")
+        out("[후보 lesson] 자동 평가 대기·보류 중 (수동 --lesson-on/--lesson-off ID)")
         candidates = loop.candidate_lessons()
         for lesson_id, text in candidates:
             out(f"  #{lesson_id} {text}")
@@ -391,12 +391,17 @@ def manage_lessons(
             out(f"  {stamp} {rule} {status} · {signature[:60]}")
             if analysis:
                 out(f"    원인: {analysis['root_cause']}")
-                detail = analysis.get("lesson") or analysis.get("user_hint") or "-"
+                detail = analysis.get("lesson") or analysis.get("fix_request") or "-"
                 out(f"    조치: {analysis['action']} · {detail}")
         if not incidents:
             out("  없음")
-        if loop.report_path.exists():
-            out(f"[개발자 리포트] {loop.report_path}")
+        out("[자동 개선]")
+        runs = loop.recent_autonomy()
+        for stamp, data in runs:
+            out(f"  {stamp} {data.get('job')} #{data.get('ref')} {data.get('status')}"
+                f" {data.get('why') or data.get('head') or ''}".rstrip())
+        if not runs:
+            out("  없음")
         return 0
     finally:
         loop.db.close()

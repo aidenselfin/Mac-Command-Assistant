@@ -42,6 +42,7 @@ class Config:
     feedback_api_key: str | None = field(default=None, repr=False)
     feedback_model: str = "anthropic/claude-sonnet-5.5"
     feedback_daily_limit: int = 20
+    feedback_autonomy: bool = True
     finder_reveal: bool = True
     finder_dock: bool = True  # put the revealed Finder window beside the app window
     semantic_search: bool = False  # meaning-based file search; needs the `semantic` extra
@@ -151,6 +152,9 @@ def load_config(
     feedback = str(env.get("VOICE_ACTION_FEEDBACK") or "on").strip().casefold()
     if feedback not in ("on", "off"):
         raise ConfigError("VOICE_ACTION_FEEDBACK는 on 또는 off여야 합니다.")
+    autonomy = str(env.get("VOICE_ACTION_FEEDBACK_AUTONOMY") or "on").strip().casefold()
+    if autonomy not in ("on", "off"):
+        raise ConfigError("VOICE_ACTION_FEEDBACK_AUTONOMY는 on 또는 off여야 합니다.")
     finder = str(env.get("VOICE_ACTION_FINDER_REVEAL") or "on").strip().casefold()
     if finder not in ("on", "off"):
         raise ConfigError("VOICE_ACTION_FINDER_REVEAL는 on 또는 off여야 합니다.")
@@ -180,6 +184,7 @@ def load_config(
         feedback_api_key=(env.get("OPENROUTER_API_KEY") or "").strip() or None,
         feedback_model=feedback_model,
         feedback_daily_limit=daily_limit,
+        feedback_autonomy=autonomy == "on",
         finder_reveal=finder == "on",
         finder_dock=dock == "on",
         semantic_search=semantic == "on",
