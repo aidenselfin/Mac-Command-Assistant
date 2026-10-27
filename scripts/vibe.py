@@ -58,7 +58,10 @@ def snapshot(repo, git_dir, session):
         for name in session.get("files", []):
             path = repo / name
             if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(repo):
-                git(repo, "add", "--", name, env=env)
+                try:
+                    git(repo, "add", "--", name, env=env)
+                except subprocess.CalledProcessError:
+                    pass  # .gitignore 대상(로컬 규칙 파일 등)은 snapshot에서 건너뛴다
         tree = git(repo, "write-tree", env=env)
         previous = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--verify", ref],
