@@ -2,6 +2,9 @@
 
 오래 유지할 결정만 날짜와 함께 적는다 (최신이 위). 작업 규칙은 `AGENTS.md`, 진행 상황은 `status.md`.
 
+- 2026-10-27 GitHub에는 프로그램 파일만 올린다. `CLAUDE.md`·`AGENTS.md`·`native-preview/AGENTS.md`·
+  `.claude/settings.json` 같은 AI 규칙 파일은 `.gitignore`로 추적에서 제외하고 로컬에만 둔다(이전 기록에는 남아 있음).
+
 - 2026-10-27 Codex 위임: 설치된 Codex CLI(0.162)에는 `mcp-server` 하위 명령이 없어 MCP 대신
   `codex exec`를 Bash로 부른다(설정 파일 없이 동작). 규칙은 `CLAUDE.md` "Codex 위임". 읽기 검토는 read-only,
   쓰기는 전용 worktree에서만 하고 checkout당 수정 세션 하나 원칙을 유지한다.

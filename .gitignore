@@ -27,3 +27,10 @@ Final/.venv/
 .claude/worktrees/
 *.mov
 evals/results/
+
+# AI 규칙 파일은 GitHub에 올리지 않는다 (로컬 전용)
+CLAUDE.md
+AGENTS.md
+CLAUDE.local.md
+native-preview/AGENTS.md
+.claude/settings.json
