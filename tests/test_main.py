@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import main
-from voice_action.config import ConfigError
+from tests import runner
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, ToolDefinition, ToolResult
 from voice_action.mcp_manager import MCPManager
@@ -166,55 +166,8 @@ def test_build_manager_registers_macos_client_only_on_darwin(config, monkeypatch
     }
 
 
-def test_cli_missing_key(monkeypatch, capsys):
-    def missing(_):
-        raise ConfigError("OPENAI_API_KEY 환경변수가 필요합니다.")
-
-    monkeypatch.setattr(main, "load_config", missing)
-    assert main.main(["--text", "파일 목록"]) == 1
-    assert "OPENAI_API_KEY" in capsys.readouterr().out
-
-
-def test_cli_dispatch(config, monkeypatch, capsys):
-    seen = []
-    undo_journal = object()
-    monkeypatch.setattr(main, "load_config", lambda _: config)
-    monkeypatch.setattr(main, "_build_undo_journal", lambda _: undo_journal)
-
-    async def run(actual_config, text, console, *, undo_journal):
-        seen.append((actual_config, text, undo_journal))
-        console.print("[DONE] 한글 메모.txt", markup=False)
-        return main.ExecutionTiming()
-
-    monkeypatch.setattr(main, "run_text", run)
-    assert main.main(["--text", "voice-action-test 폴더 파일 목록 보여줘"]) == 0
-    assert seen == [
-        (config, "voice-action-test 폴더 파일 목록 보여줘", undo_journal)
-    ]
-    assert "한글 메모.txt" in capsys.readouterr().out
-
-
 def test_unexpected_error_redacted():
     assert "secret" not in main.error_message(RuntimeError("secret"))
-
-
-def test_execution_timing_output_order(capsys):
-    timing = main.ExecutionTiming(
-        mcp_startup_ms=10.0,
-        planner=main.PlannerTiming([20.0, 30.0, 40.0], 2.0, 3.0),
-        total_ms=105.0,
-    )
-    main.print_timing(main.Console(), timing)
-    assert capsys.readouterr().out.splitlines() == [
-        "[TIMING]",
-        "mcp_startup_ms=10.00",
-        "llm_round_1_ms=20.00",
-        "mcp_read_ms=2.00",
-        "llm_round_2_ms=30.00",
-        "mcp_write_ms=3.00",
-        "llm_round_3_ms=40.00",
-        "total_ms=105.00",
-    ]
 
 
 async def test_print_outcome_renders_question_and_resumes_number(capsys):
@@ -257,10 +210,10 @@ async def test_run_text_uses_manager_and_combined_tools(config, monkeypatch):
     FakeOpenAI.instances.clear()
 
     monkeypatch.setattr(main, "_build_mcp_manager", lambda _: manager)
-    monkeypatch.setattr(main, "AsyncOpenAI", FakeOpenAI)
-    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+    monkeypatch.setattr(runner, "AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr(runner, "OpenAICompatibleModel", lambda _client, _model: model)
 
-    await main.run_text(config, "파일 목록", main.Console())
+    await runner.run_text(config, "파일 목록", main.Console())
 
     assert manager.connect_count == 1
     assert manager.list_count == 1
@@ -313,10 +266,10 @@ async def test_run_text_continues_filesystem_after_bounded_ax_error(
     ]
     FakeOpenAI.instances.clear()
     monkeypatch.setattr(main, "_build_mcp_manager", lambda _config: manager)
-    monkeypatch.setattr(main, "AsyncOpenAI", FakeOpenAI)
-    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+    monkeypatch.setattr(runner, "AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr(runner, "OpenAICompatibleModel", lambda _client, _model: model)
 
-    await main.run_text(config, "활성 앱 확인 후 파일 목록", main.Console())
+    await runner.run_text(config, "활성 앱 확인 후 파일 목록", main.Console())
 
     ax_message = model.generate.await_args_list[1].args[0][-1]
     assert ax_message["role"] == "tool"
@@ -365,14 +318,14 @@ async def test_run_text_prints_approval_without_writing(config, monkeypatch, cap
     model.generate.return_value = write_model_turn(config, "bounded preview")
     FakeOpenAI.instances.clear()
     monkeypatch.setattr(main, "_build_mcp_manager", lambda _: manager)
-    monkeypatch.setattr(main, "AsyncOpenAI", FakeOpenAI)
-    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+    monkeypatch.setattr(runner, "AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr(runner, "OpenAICompatibleModel", lambda _client, _model: model)
 
     undo_journal = UndoJournal(
         config.allowed_directories[0] / "undo-text.sqlite3",
         config.allowed_directories,
     )
-    await main.run_text(
+    await runner.run_text(
         config,
         "approved.txt에 저장해줘",
         main.Console(),

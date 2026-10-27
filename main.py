@@ -1,18 +1,14 @@
-"""Run with uv run python main.py --text 'voice-action-test 폴더 파일 목록 보여줘'."""
+"""Helpers shared by tools plus the lesson CLI: uv run python main.py --lessons."""
 
 import argparse
-import asyncio
 import sqlite3
 import sys
-import time
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from openai import AsyncOpenAI
 from rich.console import Console
 
-from voice_action.config import ConfigError, load_config
-from voice_action.feedback import DEFAULT_DB_PATH, FeedbackLoop, build_feedback
+from voice_action.config import ConfigError
+from voice_action.feedback import DEFAULT_DB_PATH, FeedbackLoop
 from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient, MCPError
 from voice_action.mcp_manager import MCPManager
@@ -21,39 +17,11 @@ from voice_action.planner import (
     Clarification,
     Completed,
     Error,
-    OpenAICompatibleModel,
-    Planner,
     PlannerError,
-    PlannerTiming,
 )
 from voice_action.playwright_client import PlaywrightMCPClient
-from voice_action.runtime import Busy, RuntimeController, RuntimeResult
+from voice_action.runtime import Busy, RuntimeResult
 from voice_action.undo import UndoJournal, UndoJournalError
-
-
-@dataclass
-class ExecutionTiming:
-    mcp_startup_ms: float = 0.0
-    planner: PlannerTiming = field(default_factory=PlannerTiming.empty)
-    total_ms: float = 0.0
-
-    def lines(self) -> list[str]:
-        rounds = [*self.planner.llm_round_ms, 0.0, 0.0, 0.0]
-        return [
-            f"mcp_startup_ms={self.mcp_startup_ms:.2f}",
-            f"llm_round_1_ms={rounds[0]:.2f}",
-            f"mcp_read_ms={self.planner.mcp_read_ms:.2f}",
-            f"llm_round_2_ms={rounds[1]:.2f}",
-            f"mcp_write_ms={self.planner.mcp_write_ms:.2f}",
-            f"llm_round_3_ms={rounds[2]:.2f}",
-            f"total_ms={self.total_ms:.2f}",
-        ]
-
-
-def print_timing(console: Console, timing: ExecutionTiming) -> None:
-    console.print("[TIMING]", markup=False)
-    for line in timing.lines():
-        console.print(line, markup=False)
 
 
 def print_outcome(console: Console, outcome: RuntimeResult) -> None:
@@ -110,55 +78,6 @@ def _build_undo_journal(config) -> UndoJournal | None:
         return UndoJournal.default(config.allowed_directories)
     except UndoJournalError:
         return None
-
-
-async def run_text(
-    config,
-    text: str,
-    console: Console,
-    timing: ExecutionTiming | None = None,
-    *,
-    allow_local_web: bool = False,
-    undo_journal: UndoJournal | None = None,
-) -> ExecutionTiming:
-    timing = timing or ExecutionTiming()
-    total_started = time.perf_counter_ns()
-    startup_started = time.perf_counter_ns()
-    manager = _build_mcp_manager(config)
-    feedback = build_feedback(config, lambda text: console.print(text, markup=False))
-    try:
-        async with manager.connect():
-            timing.mcp_startup_ms = (time.perf_counter_ns() - startup_started) / 1_000_000
-            async with AsyncOpenAI(
-                api_key=config.api_key,
-                base_url=config.base_url,
-                timeout=config.llm_timeout_seconds,
-                max_retries=0,
-            ) as client:
-                tools = await manager.list_tools()
-                model = OpenAICompatibleModel(client, config.model)
-                planner = Planner(
-                    config,
-                    manager,
-                    feedback.wrap(model) if feedback else model,
-                    emit=lambda text: console.print(text, markup=False, highlight=False),
-                    tools=tools,
-                    timing=timing.planner,
-                    allow_local_web=allow_local_web,
-                    undo_journal=undo_journal,
-                )
-                controller = RuntimeController(
-                    planner,
-                    emit=lambda message: console.print(message, markup=False),
-                    feedback=feedback,
-                )
-                console.print("[PLAN] 모델 응답 대기 중...", markup=False)
-                print_outcome(console, await controller.submit(text))
-    finally:
-        timing.total_ms = (time.perf_counter_ns() - total_started) / 1_000_000
-        if feedback is not None:
-            await feedback.close()
-    return timing
 
 
 def error_message(exc: BaseException) -> str:
@@ -222,47 +141,25 @@ def manage_lessons(
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="허용 폴더 안의 파일 읽기·쓰기·승인 기반 삭제")
+    parser = argparse.ArgumentParser(description="피드백 lesson 관리")
     command_mode = parser.add_mutually_exclusive_group(required=True)
-    command_mode.add_argument("--text")
     command_mode.add_argument("--lessons", action="store_true", help="활성 피드백 lesson 목록")
     command_mode.add_argument("--lesson-off", type=int, metavar="ID", help="lesson 비활성화")
     command_mode.add_argument("--lesson-on", type=int, metavar="ID", help="후보 lesson 채택")
-    parser.add_argument("--provider", choices=("openai", "groq", "openrouter"))
-    parser.add_argument("--model")
-    parser.add_argument("--base-url")
-    parser.add_argument("--allowed-directory", action="append", dest="allowed_directories")
-    args = vars(parser.parse_args(argv))
-    lessons, lesson_off = args.pop("lessons"), args.pop("lesson_off")
-    lesson_on = args.pop("lesson_on")
-    if lessons or lesson_off is not None or lesson_on is not None:
-        console = Console()
-        try:
-            return manage_lessons(console, lesson_off, lesson_on)
-        except (OSError, sqlite3.Error):
-            console.print(
-                "[ERROR] 피드백 기록을 읽을 수 없습니다. .voice-action/feedback.sqlite3를 "
-                "확인하세요.",
-                markup=False,
-            )
-            return 1
-    text = args.pop("text")
+    args = parser.parse_args(argv)
     console = Console()
     try:
-        if text is not None and not text.strip():
-            raise ConfigError("명령이 비어 있습니다.")
-        config = load_config(args)
-        timing = asyncio.run(
-            run_text(config, text, console, undo_journal=_build_undo_journal(config))
+        return manage_lessons(console, args.lesson_off, args.lesson_on)
+    except (OSError, sqlite3.Error):
+        console.print(
+            "[ERROR] 피드백 기록을 읽을 수 없습니다. .voice-action/feedback.sqlite3를 "
+            "확인하세요.",
+            markup=False,
         )
-        print_timing(console, timing)
+        return 1
     except KeyboardInterrupt:
         console.print("[STOP] 종료했습니다.", markup=False)
         return 130
-    except Exception as exc:
-        console.print(f"[ERROR] {error_message(exc)}", markup=False)
-        return 1
-    return 0
 
 
 if __name__ == "__main__":

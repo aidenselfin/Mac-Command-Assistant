@@ -24,7 +24,7 @@ LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케
 
 ```sh
 uv sync --locked --extra semantic
-VOICE_ACTION_SEMANTIC_SEARCH=on uv run --extra semantic python main.py --text "..."   # 또는 .voice-action/config.env에 적는다
+echo "VOICE_ACTION_SEMANTIC_SEARCH=on" >> .voice-action/config.env
 ```
 
 - 앱이 시작되면 백그라운드에서 모델을 불러오고(약 20초) 허용 폴더를 색인한다. 파일 20개 기준 약 30초이고,
@@ -103,7 +103,6 @@ batch와 journal 기록이 끝나기를 기다린 뒤 창을 닫습니다. 재�
 
 | 실행 모드 | 쓰기 요청 처리 |
 |---|---|
-| `--text` | 승인 정보를 출력하고 종료합니다. 실제 파일을 쓰거나 삭제하지 않습니다. |
 | 네이티브 앱(`native-preview/`) | 표시된 대상·작업·미리보기를 확인하고 `승인` 버튼을 눌러야 실행합니다. |
 
 거절 토큰은 `거절`, `reject`, `no`, `n`, `취소`, `cancel`, `c`입니다. 대소문자와 앞뒤 공백은 정규화하지만, 빈 입력이나 알 수 없는 문자열은 승인으로 취급하지 않습니다.
@@ -180,14 +179,6 @@ OpenAI를 사용할 때는 provider를 `openai`로 지정하고 `OPENAI_API_KEY`
 
 ## 빠른 시작
 
-### 단발 명령
-
-```sh
-uv run python main.py --text "voice-action-test 폴더 파일 목록 보여줘"
-```
-
-단발 모드는 읽기 작업에 적합합니다. 쓰기가 필요하면 승인 정보를 표시하지만 입력을 기다리지 않고 종료합니다.
-
 ### 화면
 
 ```sh
@@ -198,30 +189,8 @@ uv run python main.py --text "voice-action-test 폴더 파일 목록 보여줘"
 
 ## 명령행 옵션
 
-`--text`나 아래 lesson 옵션 중 정확히 하나가 필요합니다. 화면은 네이티브 앱(`./native-preview/run.sh`)으로 실행합니다.
-
-```text
---text TEXT
-```
-
-공통 override:
-
-```text
---provider {openai,groq,openrouter}
---model MODEL
---base-url URL
---allowed-directory PATH   # 반복 가능
-```
-
-예시:
-
-```sh
-uv run python main.py \
-  --text "폴더 파일 목록 보여줘" \
-  --provider openai \
-  --model gpt-4o-mini \
-  --allowed-directory /absolute/path/to/documents
-```
+`main.py`는 피드백 lesson 관리 전용입니다(아래 "lesson 관리"). 명령 실행은 네이티브 앱에서 합니다.
+provider·모델·허용 폴더는 `config.json`과 `.voice-action/config.env`로 정합니다.
 
 허용 디렉터리는 실행 시 존재하는 실제 디렉터리여야 합니다. 상대경로는 현재 작업 디렉터리를 기준으로 해석되므로 일반적으로 저장소 root에서 실행해야 합니다.
 
@@ -598,7 +567,7 @@ Undo 동작:
 기존 `undo_entries` 테이블과 쓰기 이력은 유지합니다. 삭제는 같은 DB의 `delete_batches`와
 `delete_files`에 별도로 기록하며, 쓰기/삭제 중 가장 최근 활성 작업부터 Undo합니다.
 
-네이티브 앱에서는 IDLE일 때만 Undo 버튼이 활성화됩니다. `--text`는 자연어 Undo를 특별 처리하지 않습니다.
+네이티브 앱에서는 IDLE일 때만 Undo 버튼이 활성화됩니다. 
 
 ## 오류, 제한 및 자원 정리
 
@@ -616,7 +585,7 @@ Undo 동작:
 ## 프로젝트 구조
 
 ```text
-main.py                         CLI entry point
+main.py                         피드백 lesson 관리 CLI
 voice_action/
   config.py                    설정 병합·검증과 secret 정책
   mcp_client.py                Filesystem MCP client와 경로 경계
@@ -685,11 +654,11 @@ journal은 `$TMP_WORKDIR/.voice-action/undo.sqlite3`에만 생성되고, 기존 
 
 ```sh
 cd "$TMP_WORKDIR"
-PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/main.py" \
-  --text "<아래 입력>" --allowed-directory "$TMP_ROOT"
+PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/llm_mcp_transcript.py" \
+  "<아래 입력>" --allowed-directory "$TMP_ROOT"
 ```
 
-다음 시나리오를 **서로 분리해** `--text`로 한 번씩 확인합니다. 승인 후 실행과 Undo는 `--text`가 승인 정보만 출력하고 끝나므로 네이티브 앱에서 확인합니다.
+다음 시나리오를 **서로 분리해** 한 번씩 확인합니다. 승인 후 실행과 Undo는 이 도구가 승인 정보만 출력하고 끝나므로 네이티브 앱에서 확인합니다.
 
 | 시나리오 | 입력 및 판정할 안전 불변식 |
 |---|---|

@@ -5,8 +5,8 @@
 파일 정리·의미 검색·네이티브 UI 세 갈래를 `main`에 통합했다. 다음은 사람이 직접 써 보며 확인하는 일과 이동 과제의 live 성공률 개선(아래 "다음 작업").
 
 # 최근 검증
-- 2026-10-27 터미널 대화형·Tk UI 제거(브랜치 `work/remove-cli-tk`): 전체 pytest **675 passed**, ruff 통과.
-  지운 것: `--interactive`·`--ui`, Tk 뷰(`ui.py` 1,082줄), Finder 패널 함수, `tkinterdnd2`, Tk·대화형 테스트(15+12개).
+- 2026-10-27 터미널 대화형·Tk UI·`--text` 제거(브랜치 `work/remove-cli-tk`): 전체 pytest **672 passed**, ruff 통과.
+  지운 것: `--interactive`·`--ui`·`--text`, Tk 뷰(`ui.py` 1,082줄), Finder 패널 함수, `tkinterdnd2`, Tk·대화형 테스트(15+12개).
   `test_planner_tools_review`의 후보 선택 통합 테스트는 대화형 대신 Planner를 직접 두 번 불러 다시 짰다.
   평가 재생 **42/42**. 네이티브 앱 실행·live 평가는 하지 않았다. 아래 기록의 `--ui`·`--interactive`·Tk는 제거 전 기준이다.
 - 2026-10-21 의미 검색 체험 자료: `voice-action-test/embedding-demo/`에 공개 사진 3장과 가상 txt 3개 추가.

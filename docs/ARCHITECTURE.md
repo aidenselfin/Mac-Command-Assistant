@@ -7,7 +7,6 @@
 
 ```text
 입력 화면 ──► RuntimeController (runtime.py: 한 번에 한 명령, 상태 머신)
-  main.py --text (한 번 실행)               │
                                           ▼
   native_bridge.py ◄─JSON lines─► SwiftUI Planner (planner.py: 모델 ↔ 도구 루프, 최대 10회)
      (native-preview/)                    │ 모델이 부른 도구마다
@@ -23,13 +22,13 @@
 - 모델은 **노출된 도구만** 부를 수 있고, 그 도구의 인자는 코드가 다시 검증한다(노출 = 실행 권한).
 - 쓰기·삭제·이동·변환은 `ApprovalRequired`로 멈추고, 화면이 승인하면 `RiskGuard.execute_approved`가 같은 인자인지
   다시 확인해 실행한다. 실행한 쓰기는 `undo.py`의 SQLite journal에 남아 `undo`로 되돌린다.
-- 모든 화면(`--text`, 네이티브)은 같은 `Planner`/`RuntimeController`를 쓴다. 화면별 로직은 보여 주기·입력 변환뿐이다.
+- 화면은 SwiftUI 네이티브 앱 하나이고 `Planner`/`RuntimeController`를 쓴다. 화면별 로직은 보여 주기·입력 변환뿐이다.
 
 ## 파일 지도
 
 | 파일 | 역할 | 크기 주의 |
 |---|---|---|
-| `main.py` | 진입점: `--text`, 설정 덮어쓰기, `--lessons/--lesson-on/off` | |
+| `main.py` | lesson 관리 CLI(`--lessons/--lesson-on/off`)와 공용 헬퍼(`print_outcome`·`error_message`) | |
 | `voice_action/config.py` | 설정 검증. 환경변수·`.voice-action/config.env`·`config.json`(키 금지) | |
 | `voice_action/planner.py` | 시스템 프롬프트, 요청별 도구 노출, 모델 루프, 검색·삭제·이동 규칙, 결과 타입(`Completed` `Clarification` `ApprovalRequired` `Error`) | **2,200줄+**: 고칠 함수 주변만 읽는다 |
 | `voice_action/risk_guard.py` | 도구 위험 분류(`classify_tool`), 승인 발급·검증, 읽기 도구 실행 | 새 도구는 여기에 분류를 추가해야 한다 |
