@@ -216,6 +216,9 @@ uv run python main.py --interactive
 uv run python main.py --ui
 ```
 
+macOS에서는 프로젝트 폴더의 `Voice Action AI.command`를 더블클릭해도 UI가 실행됩니다.
+실행 오류는 함께 열리는 터미널에 표시됩니다.
+
 UI는 다음을 표시합니다.
 
 - 현재 runtime 상태
