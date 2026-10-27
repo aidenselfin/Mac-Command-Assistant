@@ -2,6 +2,11 @@
 
 오래 유지할 결정만 날짜와 함께 적는다 (최신이 위). 작업 규칙은 `AGENTS.md`, 진행 상황은 `status.md`.
 
+- 2026-10-27 터미널 대화형(`--interactive`)과 Tk UI(`--ui`)를 제거한다. 화면은 SwiftUI 네이티브 앱 하나이고
+  `--text`도 제거해 `main.py`는 lesson 관리(`--lessons` 등)와 공용 헬퍼만 남는다(테스트용 한 번 실행은 `tests/runner.py`). `ui.py`는 네이티브 브리지가 쓰는 worker·presenter만 남기고,
+  Tk 전용 `finder.panel_*`·`tkinterdnd2` 의존성·Tk 테스트를 지웠다. 이전 Finder 패널(Tk)·"Tk와 SwiftUI 둘 다 고친다" 결정을 대체한다.
+  `finder.arrange`/`finder_dock` 설정은 호출처가 없어졌으나 이번에는 남겼다(별도 정리 대상).
+
 - 2026-10-27 GitHub에는 프로그램 파일만 올린다. `CLAUDE.md`·`AGENTS.md`·`native-preview/AGENTS.md`·
   `.claude/settings.json` 같은 AI 규칙 파일은 `.gitignore`로 추적에서 제외하고 로컬에만 둔다(이전 기록에는 남아 있음).
 

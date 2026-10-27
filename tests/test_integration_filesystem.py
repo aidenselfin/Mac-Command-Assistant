@@ -1,13 +1,7 @@
 import asyncio
 import json
 import os
-import selectors
-import signal
-import subprocess
-import sys
-import time
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import anyio
@@ -230,79 +224,6 @@ async def test_server_exit_fails_without_respawn(config, processes):
         with pytest.raises(MCPConnectionError):
             await mcp.call_tool("list_directory", {"path": str(config.allowed_directories[0])})
         assert len(processes) == 1
-
-
-@pytest.mark.parametrize("exit_mode", ["sigint", "eof", "exit"])
-def test_interactive_process_cleanup(config, exit_mode):
-    # Launch the actual CLI in a separate process so SIGINT tests real asyncio.run
-    # shutdown while stdin is idle. Record only the MCP PID, never credentials.
-    script = """
-import anyio
-import main
-original = anyio.open_process
-async def record(*args, **kwargs):
-    process = await original(*args, **kwargs)
-    print(f"[MCP-PID] {process.pid}", flush=True)
-    return process
-anyio.open_process = record
-raise SystemExit(main.main())
-"""
-    env = {**os.environ, "OPENAI_API_KEY": "test-only", "VOICE_ACTION_FEEDBACK": "off"}
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-u",
-            "-c",
-            script,
-            "--interactive",
-            "--provider",
-            "openai",
-            "--allowed-directory",
-            str(config.allowed_directories[0]),
-        ],
-        cwd=Path(__file__).resolve().parents[1],
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    child_pids = []
-    try:
-        output = b""
-        with selectors.DefaultSelector() as selector:
-            selector.register(process.stdout, selectors.EVENT_READ)
-            deadline = time.monotonic() + 10
-            while b"[READY]" not in output and time.monotonic() < deadline:
-                if selector.select(timeout=0.2):
-                    chunk = os.read(process.stdout.fileno(), 4096)
-                    if not chunk:
-                        break
-                    output += chunk
-        for line in output.splitlines():
-            if line.startswith(b"[MCP-PID]"):
-                child_pids.append(int(line.split()[-1]))
-        assert b"[READY]" in output and len(child_pids) == 2
-        if exit_mode == "sigint":
-            process.send_signal(signal.SIGINT)
-            tail, errors = process.communicate(timeout=10)
-        else:
-            tail, errors = process.communicate(
-                input=b"exit\n" if exit_mode == "exit" else b"",
-                timeout=10,
-            )
-        assert process.returncode == (130 if exit_mode == "sigint" else 0), errors.decode()
-        for child_pid in child_pids:
-            with pytest.raises(ProcessLookupError):
-                os.kill(child_pid, 0)
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
-        for child_pid in child_pids:
-            try:
-                os.kill(child_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
 
 
 async def test_search_runtime_discovery_allowlist_and_boundaries(config, tmp_path, processes):
