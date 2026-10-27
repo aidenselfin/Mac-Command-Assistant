@@ -5,6 +5,10 @@
 파일 정리·의미 검색·네이티브 UI 세 갈래를 `main`에 통합했다. 다음은 사람이 직접 써 보며 확인하는 일과 이동 과제의 live 성공률 개선(아래 "다음 작업").
 
 # 최근 검증
+- 2026-10-27 터미널 대화형·Tk UI 제거(브랜치 `work/remove-cli-tk`): 전체 pytest **675 passed**, ruff 통과.
+  지운 것: `--interactive`·`--ui`, Tk 뷰(`ui.py` 1,082줄), Finder 패널 함수, `tkinterdnd2`, Tk·대화형 테스트(15+12개).
+  `test_planner_tools_review`의 후보 선택 통합 테스트는 대화형 대신 Planner를 직접 두 번 불러 다시 짰다.
+  평가 재생 **42/42**. 네이티브 앱 실행·live 평가는 하지 않았다. 아래 기록의 `--ui`·`--interactive`·Tk는 제거 전 기준이다.
 - 2026-10-21 의미 검색 체험 자료: `voice-action-test/embedding-demo/`에 공개 사진 3장과 가상 txt 3개 추가.
   PNG 디코딩·해상도·12 MiB 제한·UTF-8·2000자 제한 확인, 대표 검색어 6묶음의 일반 검색 0건 확인.
   기존 `.venv`에서 검색·의미 색인 회귀 52 passed, ruff 전체·diff check 통과.
@@ -57,8 +61,7 @@
     - 승인 ID 재사용·잘못된 입력·허용 밖 첨부 차단, 질문 답변→실제 MCP 쓰기→Undo 회귀 확인.
     - 실행 오류 162는 앱 전체 ad-hoc 서명으로 수정했다. strict 검사·반복 실행 통과.
 # 다음 작업
-1. 사람이 확인: 네이티브 앱(`./native-preview/run.sh`)의 이동·복사·폴더 생성 승인 화면, 의미 검색 후보 선택, `--ui`의 Finder 패널,
-   의미 검색을 켠 상태의 사용(`.voice-action/config.env`에 `VOICE_ACTION_SEMANTIC_SEARCH=on`, `uv sync --locked --extra semantic`).
+1. 사람이 확인: 네이티브 앱(`./native-preview/run.sh`)의 이동·복사·폴더 생성 승인 화면, 의미 검색 후보 선택,    의미 검색을 켠 상태의 사용(`.voice-action/config.env`에 `VOICE_ACTION_SEMANTIC_SEARCH=on`, `uv sync --locked --extra semantic`).
 2. 이동 과제의 live 성공률 개선: "…를 보관 폴더로 옮겨줘"에서 모델이 폴더의 절대 경로를 되묻는다(`move_*`·`create_directory_undo`가 INVALID).
    프롬프트가 허용 폴더 기준 상대 이름을 해석하도록 보강하고 같은 live 평가로 비교한다. 변동 폭이 크므로 같은 코드로 2회 이상 잰다.
 3. 의미 검색 임계값(글 0.69·사진 0.62)은 파일 20개 시험값이다. 실제 폴더에서 엉뚱한 후보가 나오면 `semantic_index.py`를 조정한다.

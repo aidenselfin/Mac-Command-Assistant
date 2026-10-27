@@ -25,7 +25,7 @@ case "${1:-quick}" in
   delete|삭제) $RUN pytest -q tests/test_deletion.py ;;
   convert|변환) $RUN pytest -q tests/test_conversion.py tests/test_conversion_review.py ;;
   write|쓰기) $RUN pytest -q tests/test_risk_guard.py tests/test_integration_undo.py ;;
-  ui|tk) $RUN pytest -q tests/test_ui.py tests/test_ui_review.py tests/test_finder.py ;;
+  ui|tk) $RUN pytest -q tests/test_ui.py tests/test_finder.py ;;
   native|네이티브) $RUN pytest -q tests/test_native_bridge.py tests/test_native_protocol.py tests/test_native_preview.py && swift build --package-path native-preview ;;
   feedback|피드백) $RUN pytest -q tests/test_feedback.py tests/test_feedback_review.py tests/test_lesson_candidates.py ;;
   eval|평가) $RUN python evals/run_eval.py ;;
