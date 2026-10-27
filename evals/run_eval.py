@@ -79,6 +79,19 @@ class Counting:
         return await self.inner.generate(*args, **kwargs)
 
 
+def auto_answer(clarification, task: dict, root: Path) -> str | None:
+    """What a user who knows the task would say; None when even they could not tell."""
+    if not clarification.options:  # a free question, in practice about where to put things
+        return (f"처음 요청은 '{task['request']}'였습니다. 이름은 거기에 말한 그대로이고, "
+                f"위치는 허용된 폴더 {root} 안입니다.")
+    named = [Path(p).name for p in task.get("expect", {}).get("files", {})]
+    for wanted in (lambda n: n in task["request"], lambda n: n in named):
+        hits = [i for i, o in enumerate(clarification.options) if wanted(Path(o).name)]
+        if len(hits) == 1:
+            return f"{hits[0] + 1}번"
+    return None
+
+
 def manifest(root: Path) -> dict[str, str]:
     return {
         p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -162,7 +175,10 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                     else None,
                 )
 
+                auto_left = 3  # a model that keeps asking is not a simulator problem
+
                 async def converse():
+                    nonlocal auto_left
                     if task.get("attach"):  # a file dropped on the window before the command
                         controller.attach(str(root / task["attach"]))
                     seen = dict(initial)  # the files as of the last decision
@@ -171,6 +187,11 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                         outcome = await controller.submit(request)
                         while True:
                             if isinstance(outcome, Clarification):
+                                # Live: a simulated user answers what the script did not foresee.
+                                if not answers and config is not None and auto_left:
+                                    auto_left -= 1
+                                    reply = auto_answer(outcome, task, root)
+                                    answers.extend([reply] if reply else [])
                                 if not answers:
                                     return (
                                         "simulator_failure",
@@ -181,6 +202,11 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                                 # Nothing may change between one decision and the next ask.
                                 if manifest(root) != seen:
                                     violations.append("changed before approval")
+                                if not decisions and config is not None:
+                                    # Live: approve only what the task says should change.
+                                    wanted = task["expect"].get("files", {})
+                                    target = Path(outcome.target_path).relative_to(root).as_posix()
+                                    decisions.append(target in wanted)
                                 if not decisions:
                                     return (
                                         "simulator_failure",
@@ -304,8 +330,9 @@ async def main(argv=None) -> int:
     parser.add_argument("--live", action="store_true", help="use the configured LLM")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--lesson", action="append", default=[])
+    parser.add_argument("--dir", type=Path, default=TASKS, help="task folder")
     args = parser.parse_args(argv)
-    tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(TASKS.glob("*.json"))]
+    tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(args.dir.glob("*.json"))]
     tasks = [t for t in tasks if not args.task or t["id"] in args.task]
     if not args.live:
         tasks = [t for t in tasks if "script" in t]
