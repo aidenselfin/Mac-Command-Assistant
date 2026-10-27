@@ -46,6 +46,8 @@
 | `voice_action/attachment.py` | 창에 끌어다 놓은 파일 검사 | |
 | `native-preview/` | SwiftUI 앱(SwiftPM). 규칙은 `native-preview/AGENTS.md` | |
 | `evals/` | JSON 과제 + `run_eval.py`(재생 또는 `--live` 실제 모델) | |
+| `evals/make_cases.py` | 과제를 어렵게 바꾼 변형(L1 말투, L2 무관 파일 20개+비슷한 이름, L3 200개)을 `evals/generated/`에 만든다. 재생 통과한 것만 남김 | 결과는 git 제외 |
+| `scripts/check.py` | 개발 후 한 번에 점검: ruff·pytest·평가 재생·변형 재생. 화면 없이 입력→결과만 본다 (`--fast`는 pytest 생략) | 보고 전에 실행 |
 | `scripts/vibe.py` | 수정 세션 잠금·snapshot·worktree 생성 | |
 
 ## 앱이 쓰는 상태 (모두 git 제외, `.voice-action/` 아래)

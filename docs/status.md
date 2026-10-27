@@ -7,6 +7,9 @@
 파일 정리·의미 검색·네이티브 UI 세 갈래를 `main`에 통합했다. 다음은 사람이 직접 써 보며 확인하는 일과 이동 과제의 live 성공률 개선(아래 "다음 작업").
 
 # 최근 검증
+- 2026-10-28 개발용 검사 도구(`scripts/check.py`)와 변형 케이스 생성기(`evals/make_cases.py`): 전체 pytest **676 passed**, ruff 통과,
+  평가 재생 **42/42**, 변형(L1~L3) 재생 각 34/34. live(Groq gpt-oss-120b) L2 변형 33×3: **94/99**, 남은 실패는 `create_directory_undo~L2`
+  (폴더 생성 뒤에도 절대 경로를 되묻는 현상, 원인 미확인). 기본 과제 3회 반복 기준선은 아직 없다. 네이티브 앱은 확인하지 않았다.
 - 2026-10-27 터미널 대화형·Tk UI·`--text` 제거(브랜치 `work/remove-cli-tk`): 전체 pytest **672 passed**, ruff 통과.
   지운 것: `--interactive`·`--ui`·`--text`, Tk 뷰(`ui.py` 1,082줄), Finder 패널 함수, `tkinterdnd2`, Tk·대화형 테스트(15+12개).
   `test_planner_tools_review`의 후보 선택 통합 테스트는 대화형 대신 Planner를 직접 두 번 불러 다시 짰다.
