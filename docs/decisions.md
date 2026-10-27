@@ -2,6 +2,10 @@
 
 오래 유지할 결정만 날짜와 함께 적는다 (최신이 위). 작업 규칙은 `AGENTS.md`, 진행 상황은 `status.md`.
 
+- 2026-10-27 Codex 위임: 설치된 Codex CLI(0.162)에는 `mcp-server` 하위 명령이 없어 MCP 대신
+  `codex exec`를 Bash로 부른다(설정 파일 없이 동작). 규칙은 `CLAUDE.md` "Codex 위임". 읽기 검토는 read-only,
+  쓰기는 전용 worktree에서만 하고 checkout당 수정 세션 하나 원칙을 유지한다.
+
 - 2026-10-14 파일 정리 도구: 승인·Undo가 있는 `local__move_file`(이름 변경 포함),
   `local__copy_file`, `local__create_directory`를 추가한다. 요청별 노출과 코드의 작업 범위 검증을
   모두 적용한다. 이동은 같은 파일시스템의 일반 파일 하나(최대 50 MiB), 덮어쓰기·폴더 이동은

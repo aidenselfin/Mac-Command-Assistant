@@ -1,1 +1,5 @@
-{}
+{
+  "permissions": {
+    "allow": ["Bash(codex exec --sandbox read-only *)"]
+  }
+}
