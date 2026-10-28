@@ -18,6 +18,9 @@
   },
   "expect": {
     "files": {},
-    "undo": true
+    "undo": true,
+    "must_run": [
+      "local__move_file"
+    ]
   }
 }
