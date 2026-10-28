@@ -132,8 +132,8 @@ def test_guidance_weakest_axis_is_lowest_measured_score():
 
 
 def test_compare_reports_signed_deltas():
-    new = {"overall": 40, "axes": {"see": {"score": 30}, "read": {"score": None}}}
-    old = {"overall": 35, "axes": {"see": {"score": 20}, "read": {"score": 10}}}
+    new = {"overall": 40, "axes": {"see": {"score": 30}}}
+    old = {"overall": 35, "axes": {"see": {"score": 20}}}
     assert benchmark.compare(new, old) == {"overall_delta": 5, "axis_delta": {"see": 10}}
 
 
@@ -396,3 +396,9 @@ def test_one_unmeasured_task_blocks_its_level_even_among_passing_ones():
     tasks = [t(f"l{i}", "see", 10) for i in range(5)] + [t("next", "see", 20)]
     trials = [trial(f"l{i}") for i in range(4)] + [trial("next")]
     assert benchmark.evaluate(tasks, trials, CONFIG)["axes"]["see"]["score"] == 0
+
+
+def test_compare_skips_overall_when_measured_axes_differ():
+    new = {"overall": 10, "axes": {"see": {"score": 10}, "read": {"score": None}}}
+    old = {"overall": 55, "axes": {"see": {"score": 10}, "read": {"score": 100}}}
+    assert benchmark.compare(new, old) == {"overall_delta": None, "axis_delta": {"see": 0}}

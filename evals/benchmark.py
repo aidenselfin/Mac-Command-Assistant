@@ -173,8 +173,10 @@ def compare(new: dict, old: dict) -> dict:
         before = old["axes"].get(axis, {}).get("score")
         if info["score"] is not None and before is not None:
             axis_delta[axis] = info["score"] - before
-    delta = None
-    if new["overall"] is not None and old["overall"] is not None:
+    delta = None  # overalls over different measured axes are not comparable
+    measured = lambda r: {a for a, i in r["axes"].items() if i["score"] is not None}  # noqa: E731
+    if (new["overall"] is not None and old["overall"] is not None
+            and measured(new) == measured(old)):
         delta = new["overall"] - old["overall"]
     return {"overall_delta": delta, "axis_delta": axis_delta}
 
