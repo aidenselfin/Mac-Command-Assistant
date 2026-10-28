@@ -254,6 +254,9 @@ def main(argv=None) -> int:
         earlier = json.loads(args.compare.read_text(encoding="utf-8"))
         if "report" in earlier:  # a saved benchmark record
             old = earlier["report"]
+            if stale_tasks(tasks, (earlier.get("versions") or {}).get("tasks", {})):
+                print("그 기록 뒤에 과제가 바뀌어 점수 변화를 비교하지 않습니다.")
+                old = {**old, "ladder": "changed"}
         elif earlier.get("versions", {}).get("model") == "scripted":
             print("재생 결과는 비교할 수 없습니다.")
             return 2

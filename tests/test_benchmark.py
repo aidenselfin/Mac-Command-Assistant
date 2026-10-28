@@ -460,3 +460,13 @@ def test_compare_leaves_out_tasks_edited_since_the_earlier_run(monkeypatch, tmp_
     before.write_text(json.dumps({"versions": versions, "trials": [trial("a", False)]}))
     assert benchmark.main(["--no-save", "--compare", str(before)]) == 0
     assert "(+" not in capsys.readouterr().out  # the stale earlier score is not compared
+
+
+def test_compare_skips_a_saved_record_when_tasks_changed_since(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    record = tmp_path / "record.json"
+    report = {"ladder": None, "overall": 1, "axes": {"see": {"score": 1}}}
+    record.write_text(json.dumps({"report": report, "versions": {"tasks": {"a": "000000000000"}}}))
+    assert benchmark.main(["--no-save", "--compare", str(record)]) == 0
+    out = capsys.readouterr().out
+    assert "과제가 바뀌어" in out and "(+" not in out
