@@ -1,0 +1,43 @@
+"""Speech-to-text for push-to-talk: one recorded clip -> Korean command text (Groq Whisper)."""
+
+import os
+import tempfile
+from pathlib import Path
+
+from openai import OpenAI
+
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+MODEL = "whisper-large-v3-turbo"
+MAX_BYTES = 20 * 1024 * 1024  # Groq rejects larger uploads
+PREFIX = "voice-action-voice-"
+
+
+def clip_path(raw):
+    """Return the clip only if it is a plain file the app just wrote into the temp directory."""
+    if not isinstance(raw, str):
+        return None
+    path = Path(raw)
+    temp = Path(tempfile.gettempdir()).resolve()
+    if (path.is_symlink() or not path.name.startswith(PREFIX)
+            or path.resolve().parent != temp):
+        return None
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return path if path.is_file() and 0 < info.st_size <= MAX_BYTES else None
+
+
+def transcribe(path, api_key, timeout=60):
+    """Send the clip to Groq and return stripped text; the clip is always deleted."""
+    try:
+        client = OpenAI(api_key=api_key, base_url=GROQ_BASE_URL, timeout=timeout)
+        with path.open("rb") as clip:
+            result = client.audio.transcriptions.create(
+                model=MODEL, file=clip, language="ko", response_format="text")
+        return (result if isinstance(result, str) else result.text).strip()
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass

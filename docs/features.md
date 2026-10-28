@@ -19,6 +19,7 @@
 | 자가 피드백(평가·lesson) | ✅ 피드백 on | 1~5 평가 | `feedback.py` | | `test_feedback*.py` `test_lesson_candidates.py` | `evals/run_eval.py --lesson` | 2026-10-04 lesson |
 | Tk UI + Finder 패널 | ✅ `--ui` | | `ui.py` `finder.py` `attachment.py` | | `test_ui.py` `test_ui_review.py` `test_finder.py` | | 2026-10-14 Finder 패널 |
 | **네이티브 SwiftUI 앱** | ✅ `native-preview/run.sh` | | `native_bridge.py` `native-preview/` | 승인은 Python이 보유 | `test_native_bridge.py` `test_native_preview.py` `test_native_protocol.py` | | 2026-10-14 네이티브 백엔드 |
+| **오른쪽 옵션 키 음성 명령** | ✅ 네이티브 앱 | 꾹 누르는 동안 녹음 → Groq Whisper → 일반 `submit` | `VoiceInput.swift` `transcribe.py` `native_bridge.py` | 마이크 권한 필요, 앱 밖 감지는 입력 모니터링 권한 | `test_voice_input.py` `test_native_protocol.py` | 실제 마이크·Groq 호출은 사람 확인 전 | 2026-10-28 |
 | 수정 세션·worktree 도구 | ✅ | | `scripts/vibe.py` | | `test_vibe.py` | | 2026-10-14 병렬 수정 세션 |
 
 과제 이름은 `evals/tasks/*.json` 파일명이다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.

@@ -29,6 +29,7 @@ final class Backend: ObservableObject {
     @Published var attachment: String?
     @Published var online = false
     @Published var pending = false
+    @Published var transcribing = false
     @Published var ratable = false
     @Published var lowScore: Int?
     private var process: Process?
@@ -88,6 +89,7 @@ final class Backend: ObservableObject {
                     self.input = nil
                     self.online = false
                     self.pending = false
+                    self.transcribing = false
                     self.approval = nil
                     self.choices = []
                     self.state = "STOPPED"
@@ -157,6 +159,11 @@ final class Backend: ObservableObject {
             case "rejected":
                 pending = false
                 append("error", text)
+            case "transcript":
+                pending = false
+                transcribing = false
+                if let problem = value["error"] as? String { append("error", problem) }
+                else { submit(text) }
             case "notice": append("notice", text)
             case "stopped": online = false; pending = false; approval = nil; choices = []
             default: break
@@ -194,6 +201,16 @@ final class Backend: ObservableObject {
             attachment = nil
             append("user", text)
         }
+    }
+
+    /// Hand a finished recording to the backend; it comes back as a `transcript` event.
+    func sendVoice(_ clip: URL) {
+        guard canSubmit, send("voice", fields: ["path": clip.path]) else {
+            try? FileManager.default.removeItem(at: clip)
+            return
+        }
+        pending = true
+        transcribing = true
     }
 
     func decide(_ approve: Bool) {
