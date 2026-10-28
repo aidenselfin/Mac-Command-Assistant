@@ -26,6 +26,9 @@
     "must_run": [
       "local__create_directory",
       "local__move_file"
+    ],
+    "absent_dirs": [
+      "정리"
     ]
   }
 }

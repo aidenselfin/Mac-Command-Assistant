@@ -21,6 +21,10 @@
     "undo": true,
     "must_run": [
       "local__move_file"
+    ],
+    "changed_paths": [
+      "보관/a.txt",
+      "보관/b.txt"
     ]
   }
 }

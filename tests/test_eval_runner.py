@@ -188,6 +188,15 @@ async def test_reply_order_allows_an_intro_that_mentions_a_name_first():
     assert result["passed"]
 
 
+async def test_absent_dirs_catches_a_leftover_folder():
+    script = [{"calls": [{"name": "local__create_directory", "args": {"path": "{root}/정리"}}]},
+              {"text": "만들었습니다."}]
+    result = await run_eval.run_trial(
+        task(script=script, request="정리 폴더를 만들어줘", user={"approve": [True]},
+             expect={"files": {}, "absent_dirs": ["정리"]}), None, [])
+    assert not result["passed"] and "정리: directory should not exist" in result["problems"]
+
+
 async def test_ages_set_modification_time_before_the_run(monkeypatch):
     seen = {}
     real = run_eval.manifest

@@ -256,6 +256,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                 if target.is_file():
                     body = target.read_text(encoding="utf-8", errors="ignore")
                 problems += [f"{path}: missing {word!r}" for word in words if word not in body]
+        problems += [f"{name}: directory should not exist" for name in expect.get("absent_dirs", [])
+                     if (root / name).is_dir()]
         want = sorted(expect.get("changed_paths", []))
         if "changed_paths" in expect and sorted(changed) != want:
             problems.append(f"changed_paths: {sorted(changed)} != {want}")
