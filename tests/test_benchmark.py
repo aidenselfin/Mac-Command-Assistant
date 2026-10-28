@@ -242,3 +242,20 @@ def test_guidance_ignores_unclassified_tasks():
     trials = [trial("a"), trial("bad", False)]
     report = benchmark.evaluate(tasks, trials, CONFIG)
     assert benchmark.guidance(report, tasks, trials)["blocked"] == {}
+
+
+def test_report_counts_invalid_trials():
+    tasks = [t("a", "see", 5)]
+    trials = [trial("a"), trial("a", False, False), trial("a", False, False)]
+    report = benchmark.evaluate(tasks, trials, CONFIG)
+    assert report["invalid_trials"] == 2 and "INVALID" in benchmark.render(
+        report, {"weakest_axis": None, "blocked": {}}
+    )
+
+
+def test_main_does_not_overwrite_a_record_from_the_same_second(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(benchmark.time, "strftime", lambda fmt: fmt.replace("%Y%m%d-%H%M%S", "X"))
+    benchmark.main([])
+    benchmark.main([])
+    assert len(list((tmp_path / "benchmarks").glob("*.json"))) == 2

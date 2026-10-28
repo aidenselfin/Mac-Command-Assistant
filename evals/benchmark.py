@@ -91,6 +91,9 @@ def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
         "not_run": [t["id"] for t in classified if t["id"] not in rates],
         "unclassified": [t["id"] for t in graded if t not in classified],
         "invalid_only": [i for i, r in rates.items() if r is None],
+        "invalid_trials": sum(
+            1 for r in trials if not r["valid"] and r["task"] in {t["id"] for t in classified}
+        ),
     }
 
 
@@ -169,6 +172,8 @@ def render(report: dict, guide: dict, delta: dict | None = None) -> str:
     if delta and delta["overall_delta"] is not None:
         total += f" ({delta['overall_delta']:+d})"
     lines.append(f"종합 {total}")
+    if report.get("invalid_trials"):
+        lines.append(f"INVALID 시도 {report['invalid_trials']}회는 통과율에서 제외")
     if guide["weakest_axis"]:
         lines.append(f"가장 약한 축: {guide['weakest_axis']}")
     for axis, b in guide["blocked"].items():
@@ -205,6 +210,10 @@ def main(argv=None) -> int:
     print(render(report, guide, delta))
     BENCHMARKS.mkdir(exist_ok=True)
     out = BENCHMARKS / time.strftime("%Y%m%d-%H%M%S.json")
+    for n in range(2, 100):  # never overwrite an earlier record taken in the same second
+        if not out.exists():
+            break
+        out = BENCHMARKS / time.strftime(f"%Y%m%d-%H%M%S-{n}.json")
     out.write_text(
         json.dumps(
             {"versions": data.get("versions"), "source": result.name, "report": report,
