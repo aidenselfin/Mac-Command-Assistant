@@ -33,7 +33,7 @@ def bridge(key="k"):
 
 def test_clip_path_rejects_foreign_names_locations_symlinks_and_empty_or_huge_files(tmp_path):
     good = clip()
-    assert tr.clip_path(str(good)) == good
+    assert tr.clip_path(str(good)) == good.resolve()
     assert tr.clip_path(None) is None
     other = tmp_path / f"{tr.PREFIX}x.m4a"
     other.write_bytes(b"x")
