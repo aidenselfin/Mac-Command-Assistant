@@ -375,3 +375,18 @@ def test_task_files_with_reply_checks_are_well_formed():
         expect = task["expect"]
         for key in ("reply_contains", "reply_excludes", "reply_order"):
             assert all(isinstance(w, str) and w for w in expect.get(key, [])), (task["id"], key)
+
+
+def test_live_false_tasks_are_not_scored():
+    tasks = [t("a", "see", 5), t("pinned", "see", 6, live=False)]
+    report = benchmark.evaluate(tasks, [trial("a")], CONFIG)
+    assert report["axes"]["see"]["score"] == 5 and report["not_run"] == []
+
+
+def test_guidance_lists_the_unmeasured_level_that_blocks_the_score():
+    tasks = [t("easy", "see", 1), t("mid", "see", 50)]
+    trials = [trial("easy", False, False), trial("mid")]
+    report = benchmark.evaluate(tasks, trials, CONFIG)
+    blocked = benchmark.guidance(report, tasks, trials)["blocked"]["see"]
+    assert (blocked["task"], blocked["kind"], blocked["rate"]) == ("easy", "unmeasured", None)
+    assert "다시 잴 것: easy" in benchmark.render(report, benchmark.guidance(report, tasks, trials))

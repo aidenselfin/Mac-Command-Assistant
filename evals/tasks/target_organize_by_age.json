@@ -18,6 +18,8 @@
   "user": {
     "approve": [
       true,
+      true,
+      true,
       true
     ]
   },

@@ -71,7 +71,8 @@ def is_classified(task: dict, axes) -> bool:
 
 def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
     axes = config["axes"]
-    graded = [t for t in tasks if not t.get("negative")]
+    # live:false tasks pin one scripted path and never run live, so they cannot be scored
+    graded = [t for t in tasks if not t.get("negative") and t.get("live", True)]
     classified = [t for t in graded if is_classified(t, axes)]
     rates = task_rates(classified, trials)
     ran_ids = {r["task"] for r in trials}
@@ -127,9 +128,13 @@ def load_config() -> dict:
 
 
 def guidance(report: dict, tasks: list[dict], trials: list[dict], threshold: float = 0.8) -> dict:
-    """Where to develop next: the weakest axis and, per axis, the lowest unmet task."""
+    """Where to develop next: the weakest axis and, per axis, the lowest unmet task.
+
+    Unmeasured levels (not run, or only INVALID) block the score, so they are listed too.
+    """
     classified = [
-        t for t in tasks if not t.get("negative") and is_classified(t, report["axes"])
+        t for t in tasks
+        if not t.get("negative") and t.get("live", True) and is_classified(t, report["axes"])
     ]
     rates = task_rates(classified, trials)
     blocked = {}
@@ -138,18 +143,23 @@ def guidance(report: dict, tasks: list[dict], trials: list[dict], threshold: flo
             continue
         failing = [
             t for t in classified
-            if t["axis"] == axis and rates.get(t["id"]) is not None and rates[t["id"]] < threshold
+            if t["axis"] == axis and (rates.get(t["id"]) or 0.0) < threshold
         ]
         if failing:
             t = min(failing, key=lambda x: x["level"])
+            rate = rates.get(t["id"])
             problems = sorted({
                 p for r in trials if r["task"] == t["id"] and r["valid"] and not r["passed"]
                 for p in r.get("problems", []) + r.get("violations", [])
             })
+            if rate is None:
+                kind = "unmeasured"  # run it again: no valid trial exists
+            else:
+                kind = "target" if t.get("status") == "target" else "active"
             blocked[axis] = {
-                "task": t["id"], "level": t["level"], "rate": rates[t["id"]], "problems": problems,
+                "task": t["id"], "level": t["level"], "rate": rate, "problems": problems,
                 # active = something that should work is broken (fix); target = not built yet
-                "kind": "target" if t.get("status") == "target" else "active",
+                "kind": kind,
             }
     measured = {a: i["score"] for a, i in report["axes"].items() if i["measured"]}
     weakest = min(measured, key=measured.get) if measured else None
@@ -189,8 +199,9 @@ def render(report: dict, guide: dict, delta: dict | None = None) -> str:
         lines.append(f"가장 약한 축: {guide['weakest_axis']}")
     ordered = sorted(guide["blocked"].items(), key=lambda kv: kv[1]["level"])
     for axis, b in ordered[:3]:
-        what = "만들 것" if b["kind"] == "target" else "고칠 것"
-        lines.append(f"{what}: {b['task']} ({axis} {b['level']}단계, 통과 {b['rate']:.0%})")
+        what = {"target": "만들 것", "active": "고칠 것", "unmeasured": "다시 잴 것"}[b["kind"]]
+        rate = "측정 없음" if b["rate"] is None else f"통과 {b['rate']:.0%}"
+        lines.append(f"{what}: {b['task']} ({axis} {b['level']}단계, {rate})")
     cost = report.get("cost")
     if cost and cost["trials"]:
         lines.append(f"측정 비용: 시도 {cost['trials']}회, 모델 호출 {cost['calls']}회, "
