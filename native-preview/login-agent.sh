@@ -12,14 +12,16 @@ case "${1:-}" in
 install)
     [[ -x "$MAIN_DIR/native-preview/run.sh" ]] || { print -u2 "main 폴더에 run.sh가 없습니다: $MAIN_DIR"; exit 1; }
     mkdir -p "$HOME/Library/LaunchAgents"
+    xml() { local s=${1//&/&amp;}; s=${s//</&lt;}; print -r -- "${s//>/&gt;}"; }
+    MAIN_XML=$(xml "$MAIN_DIR"); HOME_XML=$(xml "$HOME")
     cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>$LABEL</string>
-<key>ProgramArguments</key><array><string>/bin/zsh</string><string>$MAIN_DIR/native-preview/run.sh</string></array>
+<key>ProgramArguments</key><array><string>/bin/zsh</string><string>$MAIN_XML/native-preview/run.sh</string></array>
 <key>EnvironmentVariables</key><dict>
-<key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+<key>PATH</key><string>$HOME_XML/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
 <key>VOICE_ACTION_BACKGROUND</key><string>1</string>
 </dict>
 <key>RunAtLoad</key><true/>
