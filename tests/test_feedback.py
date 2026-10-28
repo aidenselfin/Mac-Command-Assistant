@@ -378,3 +378,14 @@ async def test_incomplete_search_is_a_cause_and_content_stage_is_only_the_last_r
     assert sig == "rating:search_incomplete:none"
     assert data["measured"]["model_calls"] == 1
 
+
+
+async def test_cancelling_a_clarification_counts_toward_r10(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    seen = []
+    for _ in range(2):
+        loop.clock.now += 700
+        loop.user_input("그 파일 열어줘", new_run=True)
+        loop.record("cancelled", reason="clarification")  # what runtime records on "취소"
+        seen.append([rule for rule, _ in loop.run_finished()])
+    assert "R10" in seen[1]

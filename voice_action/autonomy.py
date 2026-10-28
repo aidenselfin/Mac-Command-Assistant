@@ -143,7 +143,8 @@ def bench_job(loop, top: int = BENCH_TOP) -> dict:
     """One improvement round: live eval, capability score, queue the tasks that block it.
     The analysis of each queued gap then runs as for any incident (lesson or code fix)."""
     bench = _module("benchmark")
-    data = _live_eval([], targets=True)
+    adopted = [text for _, text in getattr(loop, "active_lessons", lambda: [])()]
+    data = _live_eval(adopted, targets=True)  # score what users get: adopted lessons included
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(bench.TASKS.glob("*.json"))]
     config = bench.load_config()
     previous = sorted(bench.BENCHMARKS.glob("*.json"))
