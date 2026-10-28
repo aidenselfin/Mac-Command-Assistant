@@ -422,3 +422,13 @@ async def test_a_completed_run_is_not_a_failed_first_try(tmp_path):
     loop.clock.now += 20
     loop.user_input("폴더 요약해줘.", new_run=True)
     assert "R3" not in [r for r, _ in loop.run_finished()]
+
+
+async def test_requests_starting_like_thanks_still_count_and_exceptions_are_failures(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    loop.user_input("예산 파일 찾아줘", new_run=True)
+    loop.exception(PlannerError("boom"))
+    loop.run_finished()
+    loop.clock.now += 20
+    loop.user_input("예산 파일 찾아줘.", new_run=True)
+    assert "R3" in [r for r, _ in loop.run_finished()]

@@ -81,7 +81,8 @@ UNSAFE_LESSON_PATTERN = re.compile(
 )
 # Thanks and acknowledgements are not requests: they never count as retries or corrections.
 PLEASANTRY_PATTERN = re.compile(
-    r"^\W*(감사|고마워|고맙|땡큐|thanks?|thank you|ok|okay|응|네|예|알겠|좋아|굿)", re.IGNORECASE
+    r"\W*(감사\w*|고마\w*|고맙\w*|땡큐|thanks?|thank you|ok|okay|응|네|예|알겠\w*|좋아\w*|굿)\W*",
+    re.IGNORECASE,
 )
 # R11: the same request again and again over two weeks (the app keeps missing its context).
 HABIT_COUNT, HABIT_WINDOW, HABIT_RATIO = 3, 14 * 86400, 0.9
@@ -168,6 +169,11 @@ def normalize(text: str, limit: int = 120) -> str:
     text = re.sub(r"(?:[~/][\w.-]+)+", "<path>", text.casefold())
     text = re.sub(r"\d+", "#", text)
     return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+def _pleasantry(text: str) -> bool:
+    """A short thanks or acknowledgement ("감사합니다."), not a request that starts like one."""
+    return bool(PLEASANTRY_PATTERN.fullmatch(text))
 
 
 def _same(a: str, b: str, ratio: float) -> bool:
@@ -658,7 +664,7 @@ class FeedbackLoop:
             # first one visibly failed (error, question back, rejection, cancel); else three.
             similar = tuple(r for r, t in earlier if _same(t, text, RETRY_RATIO))
             failed_first = any(self._bad_run(r) for r in similar)
-            if not PLEASANTRY_PATTERN.search(text) and (
+            if not _pleasantry(text) and (
                 len(similar) + 1 >= RETRY_COUNT or (similar and failed_first)
             ):
                 found.append(("R3", f"retry:{normalize(text, 60)}", (*similar, run)))
@@ -667,7 +673,7 @@ class FeedbackLoop:
                 r for r, t in self._rows_inputs(run, ts - HABIT_WINDOW, ts - RETRY_WINDOW)
                 if _same(t, text, HABIT_RATIO)
             )
-            if not PLEASANTRY_PATTERN.search(text) and len(habit) + 1 >= HABIT_COUNT:
+            if not _pleasantry(text) and len(habit) + 1 >= HABIT_COUNT:
                 found.append(("R11", f"habit:{normalize(text, 60)}", (*habit, run)))
             # R10: the same command cancelled again and again.
             if any(kind == "cancelled" for kind, *_ in events):
@@ -682,7 +688,7 @@ class FeedbackLoop:
                 )
                 if len(cancelled) >= CANCEL_REPEAT:
                     found.append(("R10", f"cancel:{key}", cancelled))
-            if CORRECTION_PATTERN.search(text) and earlier and not PLEASANTRY_PATTERN.search(text):
+            if CORRECTION_PATTERN.search(text) and earlier and not _pleasantry(text):
                 previous_run, previous = earlier[-1]
                 found.append(("R5", f"correction:{normalize(previous, 60)}", (previous_run, run)))
         unique = {}
@@ -691,16 +697,18 @@ class FeedbackLoop:
         return [(rule, signature, evidence) for (rule, signature), evidence in unique.items()]
 
     def _bad_run(self, run_id: str) -> bool:
-        """Did this run visibly go wrong for the user (error, question back, reject, cancel)?"""
-        done = self._rows(
-            "SELECT 1 FROM events WHERE run_id = ? AND kind = 'outcome' "
-            "AND payload LIKE '%Completed%' LIMIT 1", run_id)
-        return not done and bool(self._rows(
-            "SELECT 1 FROM events WHERE run_id = ? AND (kind IN ('error_outcome', 'cancelled') "
-            "OR (kind = 'outcome' AND payload LIKE '%Clarification%') "
+        """Did this run visibly go wrong for the user (error, cancel, reject, undo, or a question
+        back that never ended in an answer)?"""
+        if self._rows(
+            "SELECT 1 FROM events WHERE run_id = ? AND (kind IN "
+            "('error_outcome', 'cancelled', 'exception', 'llm_error') "
             "OR (kind = 'user_decision' AND signature IN ('reject', 'undo'))) LIMIT 1",
             run_id,
-        ))
+        ):
+            return True
+        kinds = [p for (p,) in self._rows(
+            "SELECT payload FROM events WHERE run_id = ? AND kind = 'outcome'", run_id)]
+        return any("Clarification" in p for p in kinds) and not any("Completed" in p for p in kinds)
 
     def _rows_inputs(self, run: str, since: float, until: float) -> list[tuple[str, str]]:
         return [
