@@ -443,3 +443,20 @@ def test_compare_accepts_a_raw_run_eval_result(monkeypatch, tmp_path, capsys):
     before.write_text(json.dumps({"versions": {"model": "m"}, "trials": [trial("a", False)]}))
     assert benchmark.main(["--no-save", "--compare", str(before)]) == 0
     assert "(+5)" in capsys.readouterr().out
+
+
+def test_compare_refuses_a_replay_result(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    before = tmp_path / "before.json"
+    before.write_text(json.dumps({"versions": {"model": "scripted"}, "trials": [trial("a")]}))
+    assert benchmark.main(["--no-save", "--compare", str(before)]) == 2
+    assert "재생 결과" in capsys.readouterr().out
+
+
+def test_compare_leaves_out_tasks_edited_since_the_earlier_run(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    before = tmp_path / "before.json"
+    versions = {"model": "m", "tasks": {"a": "000000000000"}}
+    before.write_text(json.dumps({"versions": versions, "trials": [trial("a", False)]}))
+    assert benchmark.main(["--no-save", "--compare", str(before)]) == 0
+    assert "(+" not in capsys.readouterr().out  # the stale earlier score is not compared

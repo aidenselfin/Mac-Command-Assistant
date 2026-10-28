@@ -254,8 +254,12 @@ def main(argv=None) -> int:
         earlier = json.loads(args.compare.read_text(encoding="utf-8"))
         if "report" in earlier:  # a saved benchmark record
             old = earlier["report"]
+        elif earlier.get("versions", {}).get("model") == "scripted":
+            print("재생 결과는 비교할 수 없습니다.")
+            return 2
         else:  # a run_eval result: score it with the same tasks and ladder
-            old = evaluate(tasks, earlier["trials"], config)
+            gone = stale_tasks(tasks, earlier.get("versions", {}).get("tasks", {}))
+            old = evaluate(tasks, [r for r in earlier["trials"] if r["task"] not in gone], config)
         if old.get("ladder") == report["ladder"]:
             delta = compare(report, old)
         else:
