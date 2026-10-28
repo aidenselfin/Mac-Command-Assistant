@@ -64,6 +64,8 @@ RATING_TAGS = frozenset(
     {"wrong_file", "missing_content", "wrong_content", "too_long", "too_slow", "other"}
 )
 LOW_RATING, RATING_REPEAT, RATING_WINDOW = 3, 2, 7 * 86400
+# R10: the user gave up on the same command (cancelled it) more than once in a week.
+CANCEL_REPEAT = 2
 SLOW_MS = 20000
 SECRET_PATTERN = re.compile(
     r"sk-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{8,}|xai-[A-Za-z0-9]{8,}"
@@ -129,7 +131,10 @@ ANALYST_PROMPT = (
     "프롬프트 지침으로 고칠 수 있으면 lesson, 코드를 고쳐야 하면 code_fix, 사용자 입력이나 "
     "공급자 문제처럼 앱이 고칠 수 없으면 none을 고른다. lesson에는 URL, 파일 경로, 승인·안전 "
     "규칙 변경을 넣지 않는다. 안전 경계(허용 폴더, 승인, 위험 분류)를 약화하는 수정은 "
-    "요청하지 않는다. 감지 규칙 R8(한 명령의 모델 호출 과다)·R9(검색 호출 반복)은 "
+    "요청하지 않는다. B1은 능력 벤치마크에서 점수를 막고 있는 과제다(kind: target=아직 없는 기능, "
+    "active=있어야 하는데 실패, unmeasured=측정 못 함). 로그의 benchmark_gap에 과제 정의와 "
+    "실패 이유가 있다. 프롬프트 지침으로 안 되는 기능 부재는 code_fix로 요청한다. "
+    "감지 규칙 R8(한 명령의 모델 호출 과다)·R9(검색 호출 반복)은 "
     "불필요한 호출을 줄이는 지침으로 고칠 수 있는지 먼저 본다."
 )
 
@@ -337,6 +342,7 @@ class FeedbackLoop:
         path.parent.mkdir(parents=True, exist_ok=True)
         _check_store_path(path)
         # ponytail: lstat-then-connect leaves a small race window; fine for a local log.
+        self.path = path
         self.db = sqlite3.connect(path, timeout=DB_LOCK_TIMEOUT)
         with contextlib.suppress(sqlite3.Error):
             self.db.execute("PRAGMA journal_mode=WAL")
@@ -643,6 +649,19 @@ class FeedbackLoop:
             if len(similar) + 1 >= RETRY_COUNT:
                 found.append(("R3", f"retry:{normalize(text, 60)}", (*similar, run)))
             # R5: the user opened with a correction right after a previous command.
+            # R10: the same command cancelled again and again.
+            if any(kind == "cancelled" for kind, *_ in events):
+                key = self._sig(text, 60)
+                cancelled = tuple(
+                    r for (r,) in self._rows(
+                        "SELECT DISTINCT c.run_id FROM events c JOIN events u "
+                        "ON u.run_id = c.run_id AND u.kind = 'user_input' "
+                        "WHERE c.kind = 'cancelled' AND u.signature = ? AND c.ts >= ?",
+                        key, now - RATING_WINDOW,
+                    )
+                )
+                if len(cancelled) >= CANCEL_REPEAT:
+                    found.append(("R10", f"cancel:{key}", cancelled))
             if CORRECTION_PATTERN.search(text) and earlier:
                 previous_run, previous = earlier[-1]
                 found.append(("R5", f"correction:{normalize(previous, 60)}", (previous_run, run)))
@@ -650,6 +669,23 @@ class FeedbackLoop:
         for rule, signature, evidence in found:
             unique.setdefault((rule, signature), tuple(dict.fromkeys(evidence)))
         return [(rule, signature, evidence) for (rule, signature), evidence in unique.items()]
+
+    def ingest_benchmark(self, gaps: list[dict]) -> list[str]:
+        """B1: queue each benchmark task that blocks an axis score as an incident, so the usual
+        analysis -> lesson / code fix path works on the capability gaps, not only on user pain.
+        Each gap carries task, axis, level, rate, kind, problems, definition. Never raises."""
+        queued = []
+        try:
+            for gap in gaps:
+                self.run_id = uuid.uuid4().hex  # the gap is its own evidence run
+                self.record("benchmark_gap", signature=f"bench:{gap['task']}", gap=gap)
+                self._queue("B1", f"bench:{gap['task']}")
+                queued.append(gap["task"])
+        except Exception:
+            self._warn()
+        finally:
+            self.run_id = None
+        return queued
 
     def _queue(self, rule: str, signature: str, evidence: tuple[str, ...] = ()) -> None:
         now, origin = self.clock(), self.run_id
