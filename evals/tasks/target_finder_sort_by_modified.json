@@ -3,7 +3,7 @@
   "family": "finder.sort",
   "axis": "finder",
   "level": 40,
-  "status": "target",
+  "status": "active",
   "files": {
     "a.txt": "1",
     "b.txt": "2",
@@ -27,5 +27,20 @@
       "c.txt",
       "a.txt"
     ]
-  }
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "sort_by": "modified"
+          }
+        }
+      ]
+    },
+    {
+      "text": "최근 수정 순: b.txt, c.txt, a.txt"
+    }
+  ]
 }

@@ -3,7 +3,7 @@
   "family": "file.info",
   "axis": "see",
   "level": 95,
-  "status": "target",
+  "status": "active",
   "files": {
     "x.pdf": "1",
     "y.pdf": "2",
@@ -27,5 +27,24 @@
       "z.txt",
       "w.pdf"
     ]
-  }
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "extensions": [
+              "pdf"
+            ],
+            "modified_within_days": 60,
+            "not_modified_for_days": 30
+          }
+        }
+      ]
+    },
+    {
+      "text": "해당 기간 pdf: x.pdf"
+    }
+  ]
 }

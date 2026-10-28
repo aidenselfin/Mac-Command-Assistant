@@ -3,7 +3,7 @@
   "family": "finder.info",
   "axis": "finder",
   "level": 32,
-  "status": "target",
+  "status": "active",
   "files": {
     "a.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   },
@@ -13,5 +13,20 @@
     "reply_contains": [
       "100"
     ]
-  }
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "sort_by": "name"
+          }
+        }
+      ]
+    },
+    {
+      "text": "a.txt 크기는 100바이트입니다."
+    }
+  ]
 }
