@@ -116,12 +116,15 @@ def stale_tasks(tasks: list[dict], recorded: dict) -> list[str]:
     return [t["id"] for t in tasks if t["id"] in recorded and recorded[t["id"]] != digest(t)]
 
 
-def latest_live_result(directory: Path) -> Path | None:
-    live = [
-        p for p in sorted(directory.glob("*.json"))
-        if json.loads(p.read_text(encoding="utf-8")).get("versions", {}).get("model") != "scripted"
-    ]
-    return live[-1] if live else None
+def latest_live_result(directory: Path, task_ids: set | None = None) -> Path | None:
+    """Newest live result that belongs to these tasks (variant runs use other task ids)."""
+    for path in reversed(sorted(directory.glob("*.json"))):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("versions", {}).get("model") == "scripted":
+            continue
+        if task_ids is None or any(r["task"] in task_ids for r in data["trials"]):
+            return path
+    return None
 
 
 def load_config() -> dict:
@@ -222,19 +225,24 @@ def render(report: dict, guide: dict, delta: dict | None = None) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--result", type=Path, help="run_eval live result (default: latest)")
-    parser.add_argument("--compare", type=Path, help="earlier file from evals/benchmarks/")
+    parser.add_argument("--compare", type=Path,
+                        help="earlier evals/benchmarks record or evals/results file")
     parser.add_argument("--no-save", action="store_true", help="print only; keep no record")
     args = parser.parse_args(argv)
-    result = args.result or latest_live_result(RESULTS)
+    tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(TASKS.glob("*.json"))]
+    ids = {t["id"] for t in tasks}
+    result = args.result or latest_live_result(RESULTS, ids)
     if result is None:
         print("결과 없음. 먼저 `python evals/run_eval.py --live --repeat 3`를 실행하세요.")
         return 2
     data = json.loads(result.read_text(encoding="utf-8"))
+    if not any(r["task"] in ids for r in data["trials"]):
+        print("이 결과는 다른 과제 폴더(변형 과제 등)의 것이라 채점하지 않습니다.")
+        return 2
     if data.get("versions", {}).get("model") == "scripted":
         print("재생 결과는 능력을 재지 못합니다. --live 결과를 쓰세요.")
         return 2
     config = load_config()
-    tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(TASKS.glob("*.json"))]
     # a task edited after the run no longer matches its result: score it as not run
     stale = stale_tasks(tasks, data.get("versions", {}).get("tasks", {}))
     trials = [r for r in data["trials"] if r["task"] not in stale]
@@ -243,7 +251,11 @@ def main(argv=None) -> int:
     guide = guidance(report, tasks, trials, config["threshold"])
     delta = None
     if args.compare:
-        old = json.loads(args.compare.read_text(encoding="utf-8"))["report"]
+        earlier = json.loads(args.compare.read_text(encoding="utf-8"))
+        if "report" in earlier:  # a saved benchmark record
+            old = earlier["report"]
+        else:  # a run_eval result: score it with the same tasks and ladder
+            old = evaluate(tasks, earlier["trials"], config)
         if old.get("ladder") == report["ladder"]:
             delta = compare(report, old)
         else:

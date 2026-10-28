@@ -197,6 +197,35 @@ async def test_absent_dirs_catches_a_leftover_folder():
     assert not result["passed"] and "정리: directory should not exist" in result["problems"]
 
 
+async def test_run_stops_after_three_provider_failures_in_a_row(monkeypatch, tmp_path):
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    for i in range(6):
+        (tasks_dir / f"t{i}.json").write_text(json.dumps(task(id=f"t{i}")))
+    seen = []
+
+    async def failing_trial(t, config, lessons):
+        seen.append(t["id"])
+        return {"task": t["id"], "passed": False, "valid": False, "status": "provider_failure",
+                "model_calls": 1, "problems": [], "violations": [], "reply": "LLM 인증 실패"}
+
+    monkeypatch.setattr(run_eval, "ROOT", tmp_path)
+    monkeypatch.setattr(run_eval, "TASKS", tasks_dir)
+    monkeypatch.setattr(run_eval, "RESULTS", tmp_path / "results")
+    monkeypatch.setattr(run_eval, "run_trial", failing_trial)
+    monkeypatch.setattr(run_eval, "load_config", live_config)
+    monkeypatch.setattr(run_eval, "versions", lambda *a: {})
+    await run_eval.main(["--live"])
+    assert len(seen) == 3
+
+
+@pytest.mark.integration
+async def test_live_trial_records_what_the_model_heard_and_said(monkeypatch):
+    monkeypatch.setattr(run_eval, "live_model", lambda config: (Answering(), FakeClient()))
+    result = await run_eval.run_trial(task(), live_config(), [])
+    assert result["trace"] and result["trace"][0]["said"] == "x입니다."
+
+
 async def test_ages_set_modification_time_before_the_run(monkeypatch):
     seen = {}
     real = run_eval.manifest

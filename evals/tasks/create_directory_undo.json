@@ -33,6 +33,9 @@
     "undo": true,
     "must_run": [
       "local__create_directory"
+    ],
+    "absent_dirs": [
+      "보관"
     ]
   }
 }

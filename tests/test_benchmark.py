@@ -420,3 +420,26 @@ def test_the_top_of_the_ladders_covers_real_world_difficulty():
     assert sum(1 for t in top if t.get("ages")) >= 5                  # date-based work
     assert sum(1 for t in top if t.get("followups") or t["expect"].get("undo")) >= 2  # multi-step
     assert any(t["expect"].get("reply_excludes") for t in top)        # traps, not just hits
+
+
+def test_latest_live_result_skips_results_of_other_task_folders(tmp_path):
+    for name, task_id in (("1.json", "a"), ("2.json", "a~L2")):
+        (tmp_path / name).write_text(json.dumps(
+            {"versions": {"model": "live"}, "trials": [trial(task_id)]}))
+    assert benchmark.latest_live_result(tmp_path, {"a"}).name == "1.json"
+
+
+def test_main_refuses_a_result_from_another_task_folder(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    _write_trials(tmp_path, [trial("zzz~L2")])
+    path = next((tmp_path / "results").glob("*.json"))
+    assert benchmark.main(["--no-save", "--result", str(path)]) == 2
+    assert "다른 과제 폴더" in capsys.readouterr().out
+
+
+def test_compare_accepts_a_raw_run_eval_result(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    before = tmp_path / "before.json"
+    before.write_text(json.dumps({"versions": {"model": "m"}, "trials": [trial("a", False)]}))
+    assert benchmark.main(["--no-save", "--compare", str(before)]) == 0
+    assert "(+5)" in capsys.readouterr().out

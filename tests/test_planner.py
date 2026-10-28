@@ -2337,3 +2337,14 @@ async def test_url_literal_explanation_does_not_require_navigation(config, user_
     model.generate.return_value = ModelTurn("주소 설명", [])
     assert await Planner(config, gateway, model).run(user_text) == Completed("주소 설명")
     gateway.call_tool.assert_not_awaited()
+
+
+async def test_mkdir_prompt_forbids_asking_location_or_confirmation(config):
+    mcp = fake_mcp()
+    model = AsyncMock()
+    model.generate.side_effect = [ModelTurn("폴더를 만들었습니다.", [])] * 5
+    await Planner(config, mcp, model).run("새 보관 폴더를 만들어줘")
+    system = model.generate.call_args.args[0][0]["content"]
+    assert "허용 루트가 하나뿐이면 위치를 묻지 말고" in system
+    assert "만들까요" in system
+    assert "폴더 이름은 '새'와 '폴더'를 뺀" in system

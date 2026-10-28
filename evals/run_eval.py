@@ -74,11 +74,22 @@ class Scripted:
 
 class Counting:
     def __init__(self, inner):
-        self.inner, self.calls = inner, 0
+        self.inner, self.calls, self.trace = inner, 0, []
 
     async def generate(self, *args, **kwargs):
         self.calls += 1
-        return await self.inner.generate(*args, **kwargs)
+        messages = args[0] if args else kwargs.get("messages") or []
+        turn = await self.inner.generate(*args, **kwargs)
+        if len(self.trace) < 12:  # why a trial failed: what the app told the model, what it said
+            last = messages[-1] if messages and isinstance(messages[-1], dict) else {}
+            heard = last.get("content")
+            self.trace.append({
+                "heard": str(heard or "")[:160],
+                "said": (turn.text or "")[:160],
+                "calls": [c.name for c in turn.tool_calls],
+                "asked": turn.clarification.question[:120] if turn.clarification else None,
+            })
+        return turn
 
 
 def auto_answer(clarification, task: dict, root: Path) -> str | None:
@@ -311,6 +322,7 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
             "graded": "state_and_side_effects",
             "seconds": round(time.monotonic() - started, 2),
             "reply": text[:200],
+            **({"trace": model.trace} if isinstance(model, Counting) else {}),
         }
 
 
@@ -379,13 +391,24 @@ async def main(argv=None) -> int:
         # another), so only controls and scripted replays use it.
         tasks = [t for t in tasks if not t.get("negative") and t.get("live", True)]
     config = load_config() if args.live else None
-    trials = [await run_trial(t, config, args.lesson) for _ in range(args.repeat) for t in tasks]
-    for r in trials:
-        mark = "PASS" if r["passed"] else ("FAIL" if r["valid"] else "INVALID")
-        print(
-            f"{mark:7} {r['task']:28} {r['status']:17} calls={r['model_calls']} "
-            f"{'; '.join(r['problems'] + r['violations'])}"
-        )
+    trials, outage = [], 0
+    for _ in range(args.repeat):
+        for t in tasks:
+            r = await run_trial(t, config, args.lesson)
+            trials.append(r)
+            mark = "PASS" if r["passed"] else ("FAIL" if r["valid"] else "INVALID")
+            why = "; ".join(r["problems"] + r["violations"])
+            if not why and not r["valid"]:
+                why = r["reply"][:100]
+            print(f"{mark:7} {r['task']:28} {r['status']:17} calls={r['model_calls']} {why}",
+                  flush=True)
+            outage = outage + 1 if r["status"] in {"provider_failure", "timeout"} else 0
+            if outage >= 3:  # same outage again and again: stop paying for it
+                print("\n제공자 오류 3연속이라 중단합니다. 키·네트워크·속도 제한을 확인하세요.")
+                break
+        else:
+            continue
+        break
     valid = [r for r in trials if r["valid"]]
     print(
         f"\npassed {sum(r['passed'] for r in trials)}/{len(trials)} "
