@@ -122,6 +122,7 @@ async def _main_seen(monkeypatch, tmp_path, argv):
         return {"task": t["id"], "passed": True, "valid": True, "status": "completed",
                 "model_calls": 0, "problems": [], "violations": []}
 
+    monkeypatch.setattr(run_eval, "ROOT", tmp_path)
     monkeypatch.setattr(run_eval, "TASKS", tasks_dir)
     monkeypatch.setattr(run_eval, "RESULTS", tmp_path / "results")
     monkeypatch.setattr(run_eval, "run_trial", fake_trial)
