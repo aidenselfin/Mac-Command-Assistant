@@ -37,6 +37,7 @@ final class Backend: ObservableObject {
     private var buffer = Data()
     private var reveal = false
     private var voiceClip: URL?
+    private var voiceCancelled = false
     private var session = UUID()
 
     var running: Bool { process != nil }
@@ -165,6 +166,9 @@ final class Backend: ObservableObject {
             case "transcript":
                 pending = false
                 transcribing = false
+                let cancelled = voiceCancelled
+                voiceCancelled = false
+                if cancelled { break }
                 if let problem = value["error"] as? String { append("error", problem) }
                 else { submit(text) }
             case "notice": append("notice", text)
@@ -181,6 +185,7 @@ final class Backend: ObservableObject {
     @discardableResult
     func send(_ action: String, fields: [String: Any] = [:]) -> Bool {
         guard let input else { return false }
+        if action == "cancel", transcribing { voiceCancelled = true }
         do {
             var value = fields
             value["action"] = action
@@ -213,6 +218,7 @@ final class Backend: ObservableObject {
             return
         }
         voiceClip = clip
+        voiceCancelled = false
         pending = true
         transcribing = true
     }

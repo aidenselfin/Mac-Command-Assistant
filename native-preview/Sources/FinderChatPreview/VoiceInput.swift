@@ -56,7 +56,12 @@ final class VoiceInput: ObservableObject {
     private func flagsChanged(key: UInt16, flags: UInt) {
         // Another modifier joining the hold (Shift, Command, ...) makes it a shortcut, not speech.
         guard key == Self.rightOptionKey else { discard(); return }
-        if flags & Self.rightOptionBit != 0 { begin() } else { finish() }
+        let held = NSEvent.ModifierFlags(rawValue: flags)
+            .intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
+        if flags & Self.rightOptionBit != 0 {
+            // Shift/Command/Control already down means a shortcut, not a spoken command.
+            if held == .option { begin() } else { discard() }
+        } else { finish() }
     }
 
     private func begin() {
@@ -79,6 +84,7 @@ final class VoiceInput: ObservableObject {
             AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 32000,
         ]
         guard let new = try? AVAudioRecorder(url: url, settings: settings), new.record() else {
+            try? FileManager.default.removeItem(at: url)
             backend.append("error", "녹음을 시작하지 못했습니다.")
             return
         }
