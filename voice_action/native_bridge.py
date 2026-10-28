@@ -109,7 +109,8 @@ class NativeBridge:
                     clip.unlink(missing_ok=True)
                 return self.refuse()
             self.transcribing, self.voice_cancelled = True, False
-            self.voice_thread = threading.Thread(target=self.transcribe_clip, args=(clip,))
+            self.voice_thread = threading.Thread(
+                target=self.transcribe_clip, args=(clip,), daemon=True)
             self.voice_thread.start()
             return True
         if action == "submit":

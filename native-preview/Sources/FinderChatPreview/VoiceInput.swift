@@ -10,6 +10,7 @@ final class VoiceInput: ObservableObject {
     private var recorder: AVAudioRecorder?
     private var monitors: [Any] = []
     private var started = Date()
+    private var limit: Task<Void, Never>?
 
     /// Right Option is key code 61; the device-dependent bit 0x40 tells it apart from the left one.
     private static let rightOptionKey: UInt16 = 61
@@ -26,6 +27,12 @@ final class VoiceInput: ObservableObject {
             handler(event)
             return event
         }) { monitors.append(local) }
+        // Without Input Monitoring the key-up is lost once another app is frontmost.
+        let resign = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in if !CGPreflightListenEventAccess() { VoiceInput.shared.finish() } }
+        }
+        monitors.append(resign)
         if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) {
             monitors.append(global)
         }
@@ -62,11 +69,17 @@ final class VoiceInput: ObservableObject {
         recorder = new
         started = Date()
         recording = true
+        // Safety net: a missed key-up (app switched without Input Monitoring) must not record forever.
+        limit = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(30))
+            if !Task.isCancelled { finish() }
+        }
     }
 
-    private func finish() {
+    fileprivate func finish() {
         guard recording, let current = recorder else { return }
         recording = false
+        limit?.cancel()
         recorder = nil
         current.stop()
         // A tap shorter than this is an accidental press, not a command.

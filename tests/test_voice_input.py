@@ -74,6 +74,22 @@ def test_voice_command_reports_missing_key_empty_text_and_failure_without_submit
         transport.worker.submit.assert_not_called()
 
 
+def test_transcribe_refuses_a_clip_swapped_for_a_symlink_after_validation(tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("private")
+    link = Path(tempfile.gettempdir()) / f"{tr.PREFIX}swap.m4a"
+    link.unlink(missing_ok=True)
+    link.symlink_to(secret)
+    with patch("voice_action.transcribe.OpenAI") as client:
+        try:
+            tr.transcribe(link, "k")
+            raise AssertionError("symlink was opened")
+        except OSError:
+            pass
+    client.return_value.audio.transcriptions.create.assert_not_called()
+    assert secret.exists() and not link.exists()
+
+
 def test_cancel_during_transcription_discards_the_text():
     transport, events, done = bridge()
     path = clip(f"{tr.PREFIX}cancel.m4a")
