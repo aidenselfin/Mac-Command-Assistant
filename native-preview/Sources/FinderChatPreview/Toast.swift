@@ -20,7 +20,7 @@ final class Toast {
         label.stringValue = role == "user" ? asked
             : (asked.isEmpty ? "" : asked + "\n") + (role == "error" ? "오류 · " : "") + shown
         label.textColor = role == "error" ? .systemRed : .labelColor
-        if role != "user" { asked = "" }  // the question belongs to this answer only
+        if role != "user" && role != "notice" { asked = "" }  // the question belongs to this answer only
         let panel = panel ?? makePanel()
         let height = label.sizeThatFits(NSSize(width: Self.width - 24, height: .greatestFiniteMagnitude)).height + 16
         label.frame = NSRect(x: 12, y: 8, width: Self.width - 24, height: height - 16)
