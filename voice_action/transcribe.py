@@ -32,9 +32,11 @@ def transcribe(path, api_key, timeout=60):
     """Send the clip to Groq and return stripped text; the clip is always deleted."""
     try:
         client = OpenAI(api_key=api_key, base_url=GROQ_BASE_URL, timeout=timeout)
-        with path.open("rb") as clip:
+        # O_NOFOLLOW: a symlink swapped in after clip_path() must not leak other files.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as clip:
             result = client.audio.transcriptions.create(
-                model=MODEL, file=clip, language="ko", response_format="text")
+                model=MODEL, file=(path.name, clip), language="ko", response_format="text")
         return (result if isinstance(result, str) else result.text).strip()
     finally:
         try:

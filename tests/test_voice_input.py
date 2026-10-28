@@ -44,7 +44,7 @@ def test_clip_path_rejects_foreign_names_locations_symlinks_and_empty_or_huge_fi
     link.unlink(missing_ok=True)
     link.symlink_to(good)
     assert tr.clip_path(str(link)) is None
-    for path in (good, link, *Path(tempfile.gettempdir()).glob(f"{tr.PREFIX}*")):
+    for path in (good, link):
         path.unlink(missing_ok=True)
     (tmp_path / "notmine.m4a").unlink(missing_ok=True)
 
@@ -72,6 +72,20 @@ def test_voice_command_reports_missing_key_empty_text_and_failure_without_submit
         assert expected in events[-1]["error"] and events[-1]["text"] == ""
         assert not path.exists()
         transport.worker.submit.assert_not_called()
+
+
+def test_cancel_during_transcription_discards_the_text():
+    transport, events, done = bridge()
+    path = clip(f"{tr.PREFIX}cancel.m4a")
+
+    def slow(*_):
+        transport.command({"action": "cancel"})
+        return "지워줘"
+
+    with patch("voice_action.native_bridge.transcribe", side_effect=slow):
+        transport.command({"action": "voice", "path": str(path)})
+        assert done.wait(5)
+    assert events[-1]["text"] == "" and "취소" in events[-1]["error"]
 
 
 def test_voice_command_is_refused_when_busy_or_clip_is_not_ours():

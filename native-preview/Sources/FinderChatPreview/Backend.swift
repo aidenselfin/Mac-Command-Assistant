@@ -36,6 +36,7 @@ final class Backend: ObservableObject {
     private var input: FileHandle?
     private var buffer = Data()
     private var reveal = false
+    private var voiceClip: URL?
     private var session = UUID()
 
     var running: Bool { process != nil }
@@ -158,6 +159,8 @@ final class Backend: ObservableObject {
                 else { lowScore = score }
             case "rejected":
                 pending = false
+                transcribing = false
+                if let clip = voiceClip { try? FileManager.default.removeItem(at: clip) }
                 append("error", text)
             case "transcript":
                 pending = false
@@ -209,6 +212,7 @@ final class Backend: ObservableObject {
             try? FileManager.default.removeItem(at: clip)
             return
         }
+        voiceClip = clip
         pending = true
         transcribing = true
     }

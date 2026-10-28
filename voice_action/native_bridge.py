@@ -21,6 +21,8 @@ class NativeBridge:
     def __init__(self, worker, emit, voice_key=None):
         self.worker, self.emit, self.voice_key = worker, emit, voice_key
         self.transcribing = False
+        self.voice_cancelled = False
+        self.voice_thread = None
         self.state = None
         self.in_flight = False
         self.approval_id = None
@@ -76,6 +78,9 @@ class NativeBridge:
         if action == "shutdown":
             return False
         if action == "cancel":
+            if self.transcribing:
+                self.voice_cancelled = True
+                return True
             if self.state is RuntimeState.WAITING_APPROVAL:
                 return self.command({"action": "reject", "approval_id": self.approval_id})
             if self.state is RuntimeState.WAITING_USER_INPUT:
@@ -103,8 +108,9 @@ class NativeBridge:
                 if clip is not None:
                     clip.unlink(missing_ok=True)
                 return self.refuse()
-            self.transcribing = True
-            threading.Thread(target=self.transcribe_clip, args=(clip,), daemon=True).start()
+            self.transcribing, self.voice_cancelled = True, False
+            self.voice_thread = threading.Thread(target=self.transcribe_clip, args=(clip,))
+            self.voice_thread.start()
             return True
         if action == "submit":
             text = request.get("text")
@@ -152,6 +158,8 @@ class NativeBridge:
         finally:
             clip.unlink(missing_ok=True)
             self.transcribing = False
+        if self.voice_cancelled:
+            text, problem = "", "음성 명령을 취소했습니다."
         self.emit({"type": "transcript", "text": text, "error": problem})
 
     def refuse(self):
@@ -172,8 +180,7 @@ def main():
         return 1
     messages = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
-    voice_key = config.api_key if config.provider == "groq" else os.environ.get("GROQ_API_KEY")
-    bridge = NativeBridge(worker, emit, voice_key)
+    bridge = NativeBridge(worker, emit, config.voice_api_key)
     stopped = False
 
     def stop(_signum, _frame):
@@ -221,6 +228,8 @@ def main():
     except (BrokenPipeError, OSError):
         pass
     finally:
+        if bridge.voice_thread:
+            bridge.voice_thread.join(timeout=5)
         worker.shutdown()  # waits for cancellation and durable deletion/Undo cleanup
     return 0
 
