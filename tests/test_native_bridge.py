@@ -199,3 +199,31 @@ def test_completed_event_carries_found_paths_for_drag_chip():
         UIMessage(UIMessageType.OUTCOME, Completed("찾았어요", found_paths=("/a/b.txt",)))
     )
     assert events[-1]["found_paths"] == ["/a/b.txt"]
+
+
+def test_floating_file_box_only_when_the_file_itself_is_asked_for():
+    from voice_action.native_bridge import asks_for_file
+
+    for text in ("보고서 파일 줘", "회의록 줘", "계약서파일줘", "그거 좀 줘", "사진 꺼내줘",
+                 "견적서 가져와", "발표 자료 주세요"):
+        assert asks_for_file(text), text
+    for text in ("회의록 요약해줘", "보고서 찾아 줘", "파일 위치 알려줘", "사진 지워줘",
+                 "pdf로 바꿔줘", "회의록 읽어줘", "보고서 파일 열어 줘"):
+        assert not asks_for_file(text), text
+
+
+def test_offer_file_follows_the_original_request_through_a_clarification():
+    from voice_action.planner import Completed
+
+    events = []
+    worker = Mock()
+    worker.can_rate.return_value = False
+    worker.submit.return_value = True
+    bridge = NativeBridge(worker, events.append)
+    bridge.state = RuntimeState.IDLE
+    bridge.command({"action": "submit", "text": "보고서 파일 줘"})
+    bridge.state = RuntimeState.WAITING_USER_INPUT
+    bridge.command({"action": "submit", "text": "2번"})
+    found = Completed("찾았어요", found_paths=("/a/b.txt",))
+    bridge.message(UIMessage(UIMessageType.OUTCOME, found))
+    assert events[-1]["offer_file"] is True

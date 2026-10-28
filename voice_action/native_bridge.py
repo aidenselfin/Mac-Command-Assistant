@@ -16,6 +16,30 @@ from voice_action.runtime import Busy, RuntimeState
 from voice_action.transcribe import clip_path, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
+GIVE_ENDINGS = ("줘요", "줘", "주세요", "줄래요", "줄래")
+
+
+def _verb_form(word):
+    """'해'·'찾아'·'알려'처럼 받침 없는 아/어 꼴이면 그 뒤 '줘'는 동작을 해 달라는 말이다."""
+    code = ord(word[-1]) - 0xAC00
+    return 0 <= code < 11172 and code % 28 == 0 and code // 28 % 21 in {0, 1, 4, 6, 9, 10, 14, 15}
+
+
+def asks_for_file(text):
+    """'보고서 파일 줘'처럼 파일 자체를 달라는 말인지. '요약해줘'·'찾아 줘'는 아니다."""
+    # ponytail: 말끝 규칙만 본다. '데이터 줘'처럼 아/어로 끝나는 명사는 놓친다
+    if any(word in text for word in ("가져와", "가져다", "꺼내")):
+        return True
+    words = [word.strip(".,!?~") for word in text.split()]
+    for index, word in enumerate(words):
+        give = next((ending for ending in GIVE_ENDINGS if word.endswith(ending)), None)
+        if give is None:
+            continue
+        stem = word[: -len(give)] or (words[index - 1] if index else "")
+        if not stem or stem.endswith(("거", "것", "좀")) or not _verb_form(stem):
+            return True
+    return False
+
 
 class NativeBridge:
     def __init__(self, worker, emit, voice_key=None):
@@ -27,6 +51,7 @@ class NativeBridge:
         self.state = None
         self.in_flight = False
         self.approval_id = None
+        self.request = ""  # the command a clarification answer belongs to
 
     def message(self, message):
         kind, value = message.type, message.value
@@ -52,6 +77,7 @@ class NativeBridge:
                 self.emit({"type": "completed", "text": value.text,
                            "changed_paths": list(value.changed_paths),
                            "found_paths": list(value.found_paths),
+                           "offer_file": asks_for_file(self.request),
                            "ratable": self.worker.can_rate()})
             elif isinstance(value, (Error, Busy)):
                 self.emit({"type": "error", "text": value.message})
@@ -125,6 +151,8 @@ class NativeBridge:
                     or not isinstance(text, str) or not text.strip()):
                 return self.refuse()
             if self.worker.submit(text):
+                if self.state is not RuntimeState.WAITING_USER_INPUT:
+                    self.request = text
                 self.in_flight = True
                 return True
             return self.refuse()

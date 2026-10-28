@@ -27,8 +27,8 @@ final class Backend: ObservableObject {
     @Published var choices: [String] = []
     @Published var approval: Approval?
     @Published var attachment: String?
-    // The one found file, offered as a chip the user drags out, also floating over other apps.
-    @Published var dragFile: URL? { didSet { FileBox.shared.show(dragFile) } }
+    // The one found file, offered as a chip the user drags out; "파일 줘" also floats it over other apps.
+    @Published var dragFile: URL? { didSet { if dragFile == nil { FileBox.shared.show(nil) } } }
     @Published var online = false
     @Published var pending = false
     @Published var transcribing = false
@@ -148,6 +148,7 @@ final class Backend: ObservableObject {
                        folders.contains(where: { url.path.hasPrefix($0 + "/") }),
                        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular {
                         dragFile = url
+                        if value["offer_file"] as? Bool == true { FileBox.shared.show(url) }
                     }
                 }
                 if type == "completed", reveal,
