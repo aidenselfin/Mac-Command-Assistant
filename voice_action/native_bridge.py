@@ -29,11 +29,6 @@ def _bare(word):
     return word
 
 
-def _file_fact(words):
-    """'경로를 가져와'처럼 파일이 아니라 파일에 대한 사실을 달라는 말인지 (마지막 낱말 기준)."""
-    return bool(words) and _bare(words[-1]).endswith(FILE_FACTS)
-
-
 def _verb_form(word):
     """'해'·'찾아'·'알려'처럼 받침 없는 아/어 꼴이면 그 뒤 '줘'는 동작을 해 달라는 말이다."""
     code = ord(word[-1]) - 0xAC00
@@ -44,19 +39,17 @@ def asks_for_file(text):
     """'보고서 파일 줘'처럼 파일 자체를 달라는 말인지. '요약해줘'·'찾아 줘'는 아니다."""
     # ponytail: 말끝 규칙만 본다. '데이터 줘'처럼 아/어로 끝나는 명사는 놓친다
     words = [word.strip(".,!?~") for word in text.split()]
-    if not words:
-        return False
+    if not words or any(fact in text for fact in FILE_FACTS):
+        return False  # "경로 좀 가져와": facts about the file, not the file
     last = words[-1]  # what the command finally asks: "가져와서 요약해줘" is a summary
     give = next((ending for ending in GIVE_ENDINGS if last.endswith(ending)), "")
     if not give:
-        return last.endswith(GIVE_VERBS) and not _file_fact(words[:-1])
+        return last.endswith(GIVE_VERBS)
     before = [*words[:-1], last[: -len(give)]]
     before = [word for word in before if word and word != "좀"]  # "찾아 좀 줘" is still 찾아 줘
     stem = before[-1] if before else ""
     if stem.endswith(GIVE_VERBS):  # "꺼내줘", "가져와 줘"
-        return not _file_fact(before[:-1])
-    if _file_fact(before):
-        return False
+        return True
     stem = _bare(stem)
     if stem.endswith(("거", "것")):
         return True
