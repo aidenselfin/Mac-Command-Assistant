@@ -27,7 +27,8 @@ final class Backend: ObservableObject {
     @Published var choices: [String] = []
     @Published var approval: Approval?
     @Published var attachment: String?
-    @Published var dragFile: URL?  // the one found file, offered as a chip the user drags out
+    // The one found file, offered as a chip the user drags out, also floating over other apps.
+    @Published var dragFile: URL? { didSet { FileBox.shared.show(dragFile) } }
     @Published var online = false
     @Published var pending = false
     @Published var transcribing = false
