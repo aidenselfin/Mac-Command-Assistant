@@ -390,3 +390,9 @@ def test_guidance_lists_the_unmeasured_level_that_blocks_the_score():
     blocked = benchmark.guidance(report, tasks, trials)["blocked"]["see"]
     assert (blocked["task"], blocked["kind"], blocked["rate"]) == ("easy", "unmeasured", None)
     assert "다시 잴 것: easy" in benchmark.render(report, benchmark.guidance(report, tasks, trials))
+
+
+def test_one_unmeasured_task_blocks_its_level_even_among_passing_ones():
+    tasks = [t(f"l{i}", "see", 10) for i in range(5)] + [t("next", "see", 20)]
+    trials = [trial(f"l{i}") for i in range(4)] + [trial("next")]
+    assert benchmark.evaluate(tasks, trials, CONFIG)["axes"]["see"]["score"] == 0

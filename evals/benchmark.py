@@ -36,7 +36,7 @@ def task_rates(tasks: list[dict], trials: list[dict]) -> dict[str, float | None]
     return rates
 
 
-def axis_score(rates: list[tuple[int, float]], threshold: float = 0.8) -> int:
+def axis_score(rates: list[tuple[int, float | None]], threshold: float = 0.8) -> int:
     """Highest level whose own tasks meet the threshold, with every lower level also met.
 
     Stops at the first level that falls short, so an easy pass above a failure never counts.
@@ -47,7 +47,8 @@ def axis_score(rates: list[tuple[int, float]], threshold: float = 0.8) -> int:
         levels[level].append(rate)
     score = 0
     for level in sorted(levels):
-        if sum(levels[level]) / len(levels[level]) < threshold:
+        group = levels[level]
+        if None in group or sum(group) / len(group) < threshold:  # None = could not measure
             break
         score = level
     return score
@@ -84,7 +85,7 @@ def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
                 ran.add(t["axis"])  # unrun targets alone must not make an axis "measured"
     for t in classified:  # a level we could not measure must not be skipped over
         if rates.get(t["id"]) is None and t["axis"] in ran:
-            pairs[t["axis"]].append((t["level"], 0.0))
+            pairs[t["axis"]].append((t["level"], None))
     scores = {a: axis_score(pairs[a], config["threshold"]) if a in ran else None for a in axes}
     return {
         "axes": {

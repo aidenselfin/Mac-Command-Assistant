@@ -6,7 +6,7 @@
 
 # 최근 검증
 - 2026-10-28 능력 점수 벤치마크(`evals/benchmark.py`, 설계·계획: `docs/superpowers/`): 시험 25개 추가, 평가 재생 42/42,
-  ruff 통과. 과제 42개에 axis·level을 붙이고 목표 과제 5개를 추가했다. **실제 모델 점수는 아직 재지 않았다**
+  ruff 통과. 과제에 axis·level을 붙였다. **실제 모델 점수는 아직 재지 않았다**
   (`run_eval.py --live --repeat 3` 후 `benchmark.py`). 재생 결과로는 점수를 내지 않는다.
 - 2026-10-21 의미 검색 체험 자료: `voice-action-test/embedding-demo/`에 공개 사진 3장과 가상 txt 3개 추가.
   PNG 디코딩·해상도·12 MiB 제한·UTF-8·2000자 제한 확인, 대표 검색어 6묶음의 일반 검색 0건 확인.
