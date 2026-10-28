@@ -164,6 +164,8 @@ class Completed:
     changed_paths: tuple[str, ...] = field(default=(), compare=False)
     # Files it read, for the next command's "that file". Same kind of side-effect record.
     read_paths: tuple[str, ...] = field(default=(), compare=False)
+    # The one file a search settled on, so the app can offer a drag chip for it.
+    found_paths: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -225,6 +227,7 @@ class ApprovalContext:
     changed_paths: tuple[str, ...] = ()
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
+    found_paths: tuple[str, ...] = ()
 
     @property
     def digest(self) -> str:
@@ -1041,6 +1044,7 @@ class _LoopState:
     changed_paths: tuple[str, ...] = ()
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
+    found_paths: tuple[str, ...] = ()
     empty_retries: int = 0  # times an empty final reply was sent back for a real answer
     confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
     find_tried: bool = False  # local__find_files has run in this command
@@ -1361,6 +1365,7 @@ class Planner:
             next_call_index=0,
             previous_signature=None,
             single_search_candidate=selected_file,
+            found_paths=(selected_file,) if selected_file else (),
             read_only_candidate_request=read_only_candidate_request,
             search_required=(read_only_candidate_request or delete_search_required)
             and selected_file is None,
@@ -1702,8 +1707,12 @@ class Planner:
                     raise PlannerError("LLM 최종 응답이 비어 있습니다.")
                 if state.partial_read is not None:
                     notice = PARTIAL_READ_NOTICE.format(state.partial_read)
-                    return Completed(turn.text + notice, state.changed_paths, state.read_paths)
-                return Completed(turn.text, state.changed_paths, state.read_paths)
+                    turn_text = turn.text + notice
+                else:
+                    turn_text = turn.text
+                return Completed(
+                    turn_text, state.changed_paths, state.read_paths, state.found_paths
+                )
             state.messages.append(
                 {
                     "role": "assistant",
@@ -2121,6 +2130,8 @@ class Planner:
         state.search_completed = True
         state.find_tried = True
         state.find_none = response.get("decision") == "none"
+        if response.get("decision") == "single":
+            state.found_paths = (response["candidates"][0]["path"],)
         arguments = json.loads(call.arguments)
         kept = {key: arguments[key] for key in FIND_ARGUMENT_KEYS if arguments.get(key)}
         state.last_search = json.dumps(kept, ensure_ascii=False)[:500]
@@ -2264,6 +2275,7 @@ class Planner:
             changed_paths=state.changed_paths,
             attachment=state.attachment,
             read_paths=state.read_paths,
+            found_paths=state.found_paths,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -2311,6 +2323,7 @@ class Planner:
             changed_paths=context.changed_paths,
             attachment=context.attachment,
             read_paths=context.read_paths,
+            found_paths=context.found_paths,
         )
 
     def _append_tool_error(

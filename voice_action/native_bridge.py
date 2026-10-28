@@ -51,6 +51,7 @@ class NativeBridge:
             elif isinstance(value, Completed):
                 self.emit({"type": "completed", "text": value.text,
                            "changed_paths": list(value.changed_paths),
+                           "found_paths": list(value.found_paths),
                            "ratable": self.worker.can_rate()})
             elif isinstance(value, (Error, Busy)):
                 self.emit({"type": "error", "text": value.message})

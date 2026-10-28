@@ -3,6 +3,7 @@
 They run detached, so a long evaluation or code fix outlives the app that detected the problem:
     python voice_action/autonomy.py lesson <lesson id>    # live-eval a candidate, adopt or drop it
     python voice_action/autonomy.py fix <incident id>     # let a developer agent patch the code
+    python voice_action/autonomy.py bench                 # score round: queue what blocks the score
 Run from the folder that holds `.voice-action/` (API keys, feedback DB). One worker at a time.
 Lessons are prompt hints only. Code fixes go through a branch and every gate below; the files
 that guard safety, the grader and this loop itself are off limits to the agent.
@@ -73,24 +74,27 @@ def decide(baselines: list[dict], candidate: dict) -> str:
     return "adopt" if candidate["passed"] > max(b["passed"] for b in baselines) else "hold"
 
 
-def _eval_module():
-    spec = importlib.util.spec_from_file_location("run_eval", ROOT / "evals" / "run_eval.py")
+def _module(name: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "evals" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def _live_eval(lessons: list[str]) -> dict:
+def _live_eval(lessons: list[str], targets: bool = False) -> dict:
     """One `--live --repeat 3` run against the current code; the saved JSON is the evidence."""
     command = [sys.executable, str(ROOT / "evals" / "run_eval.py"), "--live",
                "--repeat", str(EVAL_REPEAT)]
+    if targets:  # score rounds must see abilities that now work, not count them as 0
+        command.append("--include-targets")
     for lesson in lessons:
         command += ["--lesson", lesson]
     done = subprocess.run(command, capture_output=True, text=True, timeout=EVAL_TIMEOUT)
     saved = [line for line in done.stdout.splitlines() if line.startswith("saved ")]
     if not saved:
         raise RuntimeError("평가 결과 파일이 없습니다: " + done.stderr[-300:])
-    return json.loads((ROOT / saved[-1][6:].strip()).read_text(encoding="utf-8"))
+    name = saved[-1][6:].strip()
+    return {**json.loads((ROOT / name).read_text(encoding="utf-8")), "file": name}
 
 
 def _matching_baselines(versions: dict) -> list[dict]:
@@ -128,6 +132,38 @@ def lesson_job(loop, lesson_id: int) -> dict:
         loop.deactivate_lesson(lesson_id)
     return {"status": verdict, "candidate": result["passed"],
             "baselines": [b["passed"] for b in baselines], "invalid": result["invalid"]}
+
+
+# ---- benchmark rounds: measure the score, queue what blocks it ---------------------------
+
+BENCH_TOP = 2  # gaps queued per round: the lowest-level ones, one per weakest axis first
+
+
+def bench_job(loop, top: int = BENCH_TOP) -> dict:
+    """One improvement round: live eval, capability score, queue the tasks that block it.
+    The analysis of each queued gap then runs as for any incident (lesson or code fix)."""
+    bench = _module("benchmark")
+    adopted = [text for _, text in getattr(loop, "active_lessons", lambda: [])()]
+    data = _live_eval(adopted, targets=True)  # score what users get: adopted lessons included
+    tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(bench.TASKS.glob("*.json"))]
+    config = bench.load_config()
+    previous = sorted(bench.BENCHMARKS.glob("*.json"))
+    report = bench.evaluate(tasks, data["trials"], config)
+    guide = bench.guidance(report, tasks, data["trials"], config["threshold"])
+    delta = None
+    if previous:
+        old = json.loads(previous[-1].read_text(encoding="utf-8"))
+        same = not bench.drifted(tasks, (old.get("versions") or {}).get("tasks", {}))
+        if same and "report" in old and old["report"].get("ladder") == report["ladder"]:
+            delta = bench.compare(report, old["report"])
+    by_id = {t["id"]: t for t in tasks}
+    gaps = [
+        {**b, "axis": axis, "definition": json.dumps(by_id[b["task"]], ensure_ascii=False)[:800]}
+        for axis, b in sorted(guide["blocked"].items(),
+                         key=lambda kv: (report["axes"][kv[0]]["score"], kv[1]["level"]))[:top]
+    ]
+    return {"status": "done", "overall": report["overall"], "delta": delta, "gaps": gaps,
+            "eval": data["file"]}
 
 
 # ---- code fixes: branch, agent, gates, merge --------------------------------------------
@@ -264,8 +300,37 @@ def fix_job(loop, incident_id: int) -> dict:
 # ---- entry point -------------------------------------------------------------------------
 
 
+def _bench_main(loop) -> dict:
+    """bench: run the round, then wait for the analysis of every queued gap to finish."""
+    import asyncio
+
+    from voice_action.config import load_config
+    from voice_action.feedback import OpenRouterAnalyzer
+
+    result = bench_job(loop)
+    if "eval" in result:  # keep the record the next round compares to
+        if _module("benchmark").main(["--result", str(ROOT / result["eval"])]):
+            return {**result, "gaps": [], "why": "평가 결과를 믿을 수 없어 분석 생략"}
+    config = load_config()
+    if config.feedback_enabled and config.feedback_api_key:
+        loop.analyzer = OpenRouterAnalyzer(config.feedback_api_key, config.feedback_model)
+        loop.daily_limit = config.feedback_daily_limit
+        if config.feedback_enabled and config.feedback_autonomy:  # same switches as the app
+            loop.launch = lambda kind, ref: launch(kind, ref, loop.path)
+    elif result["gaps"]:
+        result["why"] = "피드백이 꺼졌거나 OPENROUTER_API_KEY가 없어 분석 생략"
+
+    async def queue():
+        result["queued"] = loop.ingest_benchmark(result.pop("gaps")) if loop.analyzer else []
+        await asyncio.gather(*loop._tasks, return_exceptions=True)
+
+    asyncio.run(queue())
+    return result
+
+
 def main(argv: list[str]) -> int:
-    kind, ref = argv[0], int(argv[1])
+    kind = argv[0]
+    ref = int(argv[1]) if len(argv) > 1 else 0
     from voice_action.feedback import DEFAULT_DB_PATH, FeedbackLoop
 
     db_path = Path.cwd() / DEFAULT_DB_PATH
@@ -274,7 +339,8 @@ def main(argv: list[str]) -> int:
         fcntl.flock(lock, fcntl.LOCK_EX)  # one worker at a time: evals and merges don't overlap
         started = time.time()
         try:
-            result = (lesson_job if kind == "lesson" else fix_job)(loop, ref)
+            result = _bench_main(loop) if kind == "bench" else (
+                lesson_job if kind == "lesson" else fix_job)(loop, ref)
         except Exception as exc:  # noqa: BLE001
             result = {"status": "failed", "why": type(exc).__name__}
     loop.record("autonomy", signature=f"{kind}:{ref}", job=kind, ref=ref,

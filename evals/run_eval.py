@@ -25,6 +25,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import heavy_lock  # noqa: E402
 
 from main import error_message  # noqa: E402
 from voice_action.config import Config, load_config  # noqa: E402
@@ -391,6 +394,8 @@ async def main(argv=None) -> int:
         # another), so only controls and scripted replays use it.
         tasks = [t for t in tasks if not t.get("negative") and t.get("live", True)]
     config = load_config() if args.live else None
+    if args.live:  # live runs make many model calls; one at a time across sessions
+        heavy_lock.acquire()
     trials, outage = [], 0
     for _ in range(args.repeat):
         for t in tasks:

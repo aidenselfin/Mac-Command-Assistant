@@ -88,7 +88,7 @@ def test_corrupted_row_does_not_hide_valid_detection(tmp_path):
         )
         loop.outcome(Error("같은 실패"))
         found = loop.run_finished()
-    assert [rule for rule, *_ in found] == ["R1"]
+    assert "R1" in [rule for rule, *_ in found]  # R11 also sees the same request 3x
 
 
 async def test_analysis_result_is_sanitized_once_for_every_sink(tmp_path):

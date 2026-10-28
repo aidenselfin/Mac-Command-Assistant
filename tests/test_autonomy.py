@@ -175,3 +175,64 @@ def test_fix_job_retries_once_after_main_moved(tmp_path, monkeypatch):
     fake = FakeGit(GOOD, "tests/test_new.py", ff=[1], pull=1)  # main conflicts
     assert run_fix(tmp_path / "c", monkeypatch, fake)["status"] == "branch_kept"
     assert any("merge --abort" in c for c in fake.calls)
+
+
+def test_bench_job_picks_the_lowest_blocked_task_per_axis(monkeypatch):
+    trials = [{"task": "delete_pattern", "valid": True, "passed": False, "problems": ["x"]}]
+    fake = {"trials": trials, "file": "r.json"}
+    monkeypatch.setattr(autonomy, "_live_eval", lambda lessons, **_: fake)
+    result = autonomy.bench_job(object(), top=1)
+    assert result["status"] == "done"
+    assert len(result["gaps"]) == 1
+    gap = result["gaps"][0]
+    assert set(gap) >= {"task", "axis", "level", "rate", "kind", "problems", "definition"}
+
+
+async def test_benchmark_gap_becomes_an_analysed_incident(tmp_path):
+    analyzer = FakeAnalyzer(LESSON)
+    loop, emitted = make_loop(tmp_path, analyzer)
+    gap = {"task": "file_info", "axis": "see", "level": 15, "rate": 0.0, "kind": "target",
+           "problems": ["tool: not run"], "definition": "{}"}
+    assert loop.ingest_benchmark([gap]) == ["file_info"]
+    await asyncio.gather(*loop._tasks)
+    rule, bundle = analyzer.calls[0]
+    assert rule == "B1" and "benchmark_gap" in bundle and "file_info" in bundle
+    assert loop.run_id is None
+    assert any("문제 감지 B1" in m for m in emitted)
+
+
+async def test_same_command_cancelled_twice_is_an_incident(tmp_path):
+    from voice_action.planner import Completed
+
+    loop, _ = make_loop(tmp_path)
+    seen = []
+    for _ in range(2):
+        loop.clock.now += 700
+        loop.user_input("사진 정리해줘", new_run=True)
+        loop.exception(asyncio.CancelledError())
+        seen.append([rule for rule, _ in loop.run_finished()])
+    assert "R10" not in seen[0] and "R10" in seen[1]
+    loop.clock.now += 700
+    loop.user_input("사진 정리해줘", new_run=True)
+    loop.outcome(Completed("ok"))
+    assert "R10" not in [rule for rule, _ in loop.run_finished()]
+
+
+def test_bench_round_launches_workers_only_when_feedback_and_autonomy_are_on(monkeypatch):
+    from dataclasses import replace
+
+    from voice_action import config as config_module
+
+    base = config_module.load_config({}, cwd=autonomy.ROOT, home=autonomy.ROOT)
+    monkeypatch.setattr(autonomy, "bench_job", lambda loop: {"status": "done", "gaps": []})
+    for enabled, auto, launches in ((True, True, True), (True, False, False), (False, True, False)):
+        cfg = replace(base, feedback_api_key="k", feedback_enabled=enabled,
+                      feedback_autonomy=auto, feedback_daily_limit=1)
+        monkeypatch.setattr(config_module, "load_config", lambda cfg=cfg: cfg)
+        loop = type("L", (), {"_tasks": set(), "analyzer": None, "launch": None, "path": None,
+                                 "ingest_benchmark": lambda self, gaps: []})()
+        autonomy._bench_main(loop)
+        assert (loop.launch is not None) is launches
+        assert (loop.analyzer is not None) is enabled  # feedback off: no paid analysis
+        if enabled:
+            assert loop.daily_limit == 1

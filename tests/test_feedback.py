@@ -96,9 +96,9 @@ async def test_tool_results_are_stored_as_fingerprints(tmp_path):
 async def test_repeated_error_yields_candidate_injected_once_adopted(tmp_path):
     analyzer = FakeAnalyzer(LESSON)
     loop, emitted = make_loop(tmp_path, analyzer)
-    for _ in range(3):
-        loop.clock.now += 700  # past the retry window, so only R1 applies
-        loop.user_input("목록 보여줘", new_run=True)
+    for text in ("목록 보여줘", "폴더 안에 뭐 있는지 알려줘", "파일들 나열해줘"):
+        loop.clock.now += 700  # past the retry window; different words, so only R1 applies
+        loop.user_input(text, new_run=True)
         loop.outcome(Error("LLM 응답 시간 초과"))
         incidents = loop.run_finished()
     assert incidents == [("R1", "error:llm 응답 시간 초과")]
@@ -378,3 +378,57 @@ async def test_incomplete_search_is_a_cause_and_content_stage_is_only_the_last_r
     assert sig == "rating:search_incomplete:none"
     assert data["measured"]["model_calls"] == 1
 
+
+
+async def test_cancelling_a_clarification_counts_toward_r10(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    seen = []
+    for _ in range(2):
+        loop.clock.now += 700
+        loop.user_input("그 파일 열어줘", new_run=True)
+        loop.record("cancelled", reason="clarification")  # what runtime records on "취소"
+        seen.append([rule for rule, _ in loop.run_finished()])
+    assert "R10" in seen[1]
+
+
+async def test_quick_rephrase_after_a_failed_try_is_a_retry(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    loop.user_input("철골 공사 현장 사진 찾아줘", new_run=True)
+    loop.outcome(Error("못 찾았습니다"))
+    assert "R3" not in [r for r, _ in loop.run_finished()]
+    loop.clock.now += 20
+    loop.user_input("철골공사현장 사진 찾아줘.", new_run=True)  # spacing and a period changed
+    assert "R3" in [r for r, _ in loop.run_finished()]
+
+
+async def test_thanks_are_not_retries_and_old_habits_are_found(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    for _ in range(4):
+        loop.clock.now += 5
+        loop.user_input("감사합니다.", new_run=True)
+        assert loop.run_finished() == []
+    for _ in range(3):
+        loop.clock.now += 86400
+        loop.user_input("폴더 요약해줘.", new_run=True)
+        found = [r for r, _ in loop.run_finished()]
+    assert "R11" in found
+
+
+async def test_a_completed_run_is_not_a_failed_first_try(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    loop.user_input("폴더 요약해줘", new_run=True)
+    loop.outcome(Completed("요약"))
+    loop.run_finished()
+    loop.clock.now += 20
+    loop.user_input("폴더 요약해줘.", new_run=True)
+    assert "R3" not in [r for r, _ in loop.run_finished()]
+
+
+async def test_requests_starting_like_thanks_still_count_and_exceptions_are_failures(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    loop.user_input("예산 파일 찾아줘", new_run=True)
+    loop.exception(PlannerError("boom"))
+    loop.run_finished()
+    loop.clock.now += 20
+    loop.user_input("예산 파일 찾아줘.", new_run=True)
+    assert "R3" in [r for r, _ in loop.run_finished()]
