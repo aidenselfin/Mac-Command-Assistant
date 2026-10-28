@@ -90,3 +90,74 @@ def test_evaluate_is_deterministic():
     tasks = [t("a", "see", 5), t("b", "read", 20)]
     trials = [trial("a"), trial("b", False)]
     assert benchmark.evaluate(tasks, trials, CONFIG) == benchmark.evaluate(tasks, trials, CONFIG)
+
+
+# --- report, guidance, compare, CLI ---
+
+import json  # noqa: E402
+
+
+def test_guidance_picks_lowest_failing_level_per_axis():
+    tasks = [t("a", "see", 5), t("b", "see", 9), t("c", "see", 20)]
+    trials = [trial("a"), {**trial("b", False), "problems": ["files: x"]}, trial("c", False)]
+    guide = benchmark.guidance(benchmark.evaluate(tasks, trials, CONFIG), tasks, trials)
+    assert guide["blocked"]["see"] == {
+        "task": "b", "level": 9, "rate": 0.0, "problems": ["files: x"]
+    }
+
+
+def test_guidance_weakest_axis_is_lowest_measured_score():
+    tasks = [t("a", "see", 5), t("b", "read", 20)]
+    trials = [trial("a"), trial("b", False)]
+    guide = benchmark.guidance(benchmark.evaluate(tasks, trials, CONFIG), tasks, trials)
+    assert guide["weakest_axis"] == "read"
+
+
+def test_compare_reports_signed_deltas():
+    new = {"overall": 40, "axes": {"see": {"score": 30}, "read": {"score": None}}}
+    old = {"overall": 35, "axes": {"see": {"score": 20}, "read": {"score": 10}}}
+    assert benchmark.compare(new, old) == {"overall_delta": 5, "axis_delta": {"see": 10}}
+
+
+def test_render_shows_measured_axes_and_unmeasured_marker():
+    report = benchmark.evaluate([t("a", "see", 40)], [trial("a")], CONFIG)
+    text = benchmark.render(report, {"weakest_axis": "see", "blocked": {}})
+    assert "see" in text and "40" in text and "측정 안 됨" in text and "█" in text
+
+
+def _setup(monkeypatch, tmp_path, model="live-model", tasks=None):
+    tasks_dir = tmp_path / "tasks"
+    results = tmp_path / "results"
+    tasks_dir.mkdir()
+    results.mkdir()
+    for task in tasks or [t("a", "see", 5)]:
+        (tasks_dir / f"{task['id']}.json").write_text(json.dumps(task))
+    (results / "20261028-000000.json").write_text(
+        json.dumps({"versions": {"model": model}, "trials": [trial("a")]})
+    )
+    monkeypatch.setattr(benchmark, "TASKS", tasks_dir)
+    monkeypatch.setattr(benchmark, "RESULTS", results)
+    monkeypatch.setattr(benchmark, "BENCHMARKS", tmp_path / "benchmarks")
+    monkeypatch.setattr(benchmark, "load_config", lambda: CONFIG)
+
+
+def test_main_refuses_scripted_results(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path, model="scripted")
+    assert benchmark.main([]) == 2
+    assert "--live" in capsys.readouterr().out
+    assert not (tmp_path / "benchmarks").exists()
+
+
+def test_main_writes_record_and_prints_path(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    assert benchmark.main([]) == 0
+    record = next((tmp_path / "benchmarks").glob("*.json"))
+    assert json.loads(record.read_text())["report"]["overall"] == 5
+    assert record.name in capsys.readouterr().out
+
+
+def test_main_without_results_explains_how_to_get_them(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    next((tmp_path / "results").glob("*.json")).unlink()
+    assert benchmark.main([]) == 2
+    assert "run_eval.py --live" in capsys.readouterr().out
