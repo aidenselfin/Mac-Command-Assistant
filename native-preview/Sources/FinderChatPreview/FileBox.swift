@@ -68,6 +68,8 @@ private final class FileChip: NSView, NSDraggingSource {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }  // drag on the first click
     override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
 
+    override func mouseDown(with event: NSEvent) {}  // keep the press here so mouseDragged follows
+
     override func mouseDragged(with event: NSEvent) {
         guard let file else { return }
         let item = NSDraggingItem(pasteboardWriter: file as NSURL)
