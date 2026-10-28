@@ -179,7 +179,9 @@ final class Backend: ObservableObject {
     }
 
     func append(_ role: String, _ text: String) {
-        if !text.isEmpty { messages.append(ChatMessage(role: role, text: text)) }
+        guard !text.isEmpty else { return }
+        messages.append(ChatMessage(role: role, text: text))
+        Toast.shared.show(role, text)
     }
 
     @discardableResult
@@ -256,7 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.target = self
         item.button?.action = #selector(statusClicked)
-        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        item.button?.sendAction(on: [.leftMouseUp])  // right-click does nothing
         statusItem = item
         refreshIcon()
         // Login launch (--background) starts hidden; the window opens from the menu.
@@ -270,26 +272,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let image = NSImage(systemSymbolName: on ? "mic.fill" : "mic.slash", accessibilityDescription: "음성 키")
         image?.isTemplate = true
         statusItem?.button?.image = image
-        statusItem?.button?.toolTip = on ? "음성 키 감지 켜짐 · 누르면 끔" : "음성 키 감지 꺼짐 · 누르면 켬"
+        statusItem?.button?.toolTip = on ? "음성 키 감지 켜짐" : "음성 키 감지 꺼짐"
     }
 
-    /// Click toggles the voice key; right-click or Control-click opens the menu.
+    /// Left click opens the menu (toggle, open window, quit); right click is ignored.
     @objc private func statusClicked() {
-        let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
-            let menu = NSMenu()
-            let toggle = menu.addItem(withTitle: VoiceInput.shared.enabled ? "음성 키 끄기" : "음성 키 켜기",
-                                      action: #selector(toggleVoice), keyEquivalent: "")
-            toggle.target = self
-            menu.addItem(.separator())
-            menu.addItem(withTitle: "창 열기", action: #selector(openWindow), keyEquivalent: "").target = self
-            menu.addItem(withTitle: "종료", action: #selector(quit), keyEquivalent: "").target = self
-            statusItem?.menu = menu
-            statusItem?.button?.performClick(nil)
-            statusItem?.menu = nil
-        } else {
-            toggleVoice()
-        }
+        let menu = NSMenu()
+        let toggle = menu.addItem(withTitle: VoiceInput.shared.enabled ? "음성 키 끄기" : "음성 키 켜기",
+                                  action: #selector(toggleVoice), keyEquivalent: "")
+        toggle.target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "창 열기", action: #selector(openWindow), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "종료", action: #selector(quit), keyEquivalent: "").target = self
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
     }
 
     @objc private func toggleVoice() {
