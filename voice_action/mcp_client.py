@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import os
+import shutil
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -35,6 +37,12 @@ class MCPError(RuntimeError):
 
 class ToolRejectedError(MCPError):
     pass
+
+
+def find_node() -> str:
+    """A Dock-launched app has a minimal PATH, so also look where node is usually installed."""
+    path = os.pathsep.join(["/opt/homebrew/bin", "/usr/local/bin", os.environ.get("PATH", "")])
+    return shutil.which("node", path=path) or "node"
 
 
 class MCPStartupError(MCPError):
@@ -180,7 +188,7 @@ class MCPClient:
                     "Filesystem MCP가 설치되어 있지 않습니다. npm ci를 실행하세요."
                 )
             params = StdioServerParameters(
-                command="node",
+                command=find_node(),
                 args=[str(SERVER_ENTRYPOINT), *map(str, self._roots)],
             )
             # SDK context managers must be entered/exited by the same task. Shield

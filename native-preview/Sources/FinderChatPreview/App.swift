@@ -5,7 +5,7 @@ import SwiftUI
 struct FinderChatPreviewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
-        Window("파일 도우미", id: "assistant") {
+        Window("Symbio", id: "assistant") {
             ChatPanel().frame(minWidth: 360, minHeight: 480)
         }
         .defaultSize(width: 360, height: 560)

@@ -300,7 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openWindow() {
         NSApp.activate()
         // The app also owns small helper windows (status item, 64pt stub): pick the chat window by title.
-        NSApp.windows.first { $0.title == "파일 도우미" }?.makeKeyAndOrderFront(nil)
+        NSApp.windows.first { $0.title == "Symbio" }?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
