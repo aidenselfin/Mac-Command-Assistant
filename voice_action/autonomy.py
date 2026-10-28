@@ -158,7 +158,8 @@ def bench_job(loop, top: int = BENCH_TOP) -> dict:
     by_id = {t["id"]: t for t in tasks}
     gaps = [
         {**b, "axis": axis, "definition": json.dumps(by_id[b["task"]], ensure_ascii=False)[:800]}
-        for axis, b in sorted(guide["blocked"].items(), key=lambda kv: kv[1]["level"])[:top]
+        for axis, b in sorted(guide["blocked"].items(),
+                         key=lambda kv: (report["axes"][kv[0]]["score"], kv[1]["level"]))[:top]
     ]
     return {"status": "done", "overall": report["overall"], "delta": delta, "gaps": gaps,
             "eval": data["file"]}
