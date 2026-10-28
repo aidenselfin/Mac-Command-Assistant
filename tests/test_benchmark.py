@@ -259,3 +259,11 @@ def test_main_does_not_overwrite_a_record_from_the_same_second(monkeypatch, tmp_
     benchmark.main([])
     benchmark.main([])
     assert len(list((tmp_path / "benchmarks").glob("*.json"))) == 2
+
+
+def test_main_refuses_to_record_when_mostly_invalid(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    path = next((tmp_path / "results").glob("*.json"))
+    path.write_text(json.dumps({"versions": {"model": "m"}, "trials": [trial("a", False, False)]}))
+    assert benchmark.main([]) == 2
+    assert not (tmp_path / "benchmarks").exists()
