@@ -96,12 +96,12 @@ async def test_tool_results_are_stored_as_fingerprints(tmp_path):
 async def test_repeated_error_yields_candidate_injected_once_adopted(tmp_path):
     analyzer = FakeAnalyzer(LESSON)
     loop, emitted = make_loop(tmp_path, analyzer)
-    for _ in range(3):
-        loop.clock.now += 700  # past the retry window, so only R1 applies
-        loop.user_input("목록 보여줘 " + "ab"[_ % 2] * 8 * (_ + 1), new_run=True)
+    for text in ("목록 보여줘", "폴더 안에 뭐 있는지 알려줘", "파일들 나열해줘"):
+        loop.clock.now += 700  # past the retry window; different words, so only R1 applies
+        loop.user_input(text, new_run=True)
         loop.outcome(Error("LLM 응답 시간 초과"))
         incidents = loop.run_finished()
-    assert ("R1", "error:llm 응답 시간 초과") in incidents  # R11 (same request 3x) also fires
+    assert incidents == [("R1", "error:llm 응답 시간 초과")]
     await asyncio.gather(*loop._tasks)
     # The analysis yields a candidate; a person adopts it after comparing evals.
     assert loop.active_lessons() == []
