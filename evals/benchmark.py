@@ -35,17 +35,17 @@ def task_rates(tasks: list[dict], trials: list[dict]) -> dict[str, float | None]
 
 
 def axis_score(rates: list[tuple[int, float]], threshold: float = 0.8) -> int:
-    """Highest level whose cumulative pass rate (all tasks up to it) meets the threshold.
+    """Highest level whose own tasks meet the threshold, with every lower level also met.
 
     Stops at the first level that falls short, so an easy pass above a failure never counts.
+    Levels are not averaged together: one failing hard task must not hide behind many easy ones.
     """
     levels = defaultdict(list)
     for level, rate in rates:
         levels[level].append(rate)
-    score, seen = 0, []
+    score = 0
     for level in sorted(levels):
-        seen += levels[level]
-        if sum(seen) / len(seen) < threshold:
+        if sum(levels[level]) / len(levels[level]) < threshold:
             break
         score = level
     return score

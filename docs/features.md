@@ -19,9 +19,10 @@
 | 자가 피드백(평가·lesson) | ✅ 피드백 on | 1~5 평가 | `feedback.py` | | `test_feedback*.py` `test_lesson_candidates.py` | `evals/run_eval.py --lesson` | 2026-10-04 lesson |
 | Tk UI + Finder 패널 | ✅ `--ui` | | `ui.py` `finder.py` `attachment.py` | | `test_ui.py` `test_ui_review.py` `test_finder.py` | | 2026-10-14 Finder 패널 |
 | **네이티브 SwiftUI 앱** | ✅ `native-preview/run.sh` | | `native_bridge.py` `native-preview/` | 승인은 Python이 보유 | `test_native_bridge.py` `test_native_preview.py` `test_native_protocol.py` | | 2026-10-14 네이티브 백엔드 |
+| 능력 점수 벤치마크 | ✅ live 결과로만 | `python evals/benchmark.py` | `evals/benchmark.py` `evals/benchmark.json` | | `test_benchmark.py` `test_eval_runner.py` | 모든 과제의 `axis`·`level`·`status` | 2026-10-28 능력 점수 |
 | 수정 세션·worktree 도구 | ✅ | | `scripts/vibe.py` | | `test_vibe.py` | | 2026-10-14 병렬 수정 세션 |
 
-과제 이름은 `evals/tasks/*.json` 파일명이다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.
+과제 이름은 `evals/tasks/*.json` 파일명이다. `status: "target"` 과제(`target_*`)는 아직 없는 능력의 목표이며 `--include-targets` 없이는 실행하지 않는다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.
 
 ## 기능 사이의 약속 (깨면 안 되는 것)
 

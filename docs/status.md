@@ -5,6 +5,9 @@
 파일 정리·의미 검색·네이티브 UI 세 갈래를 `main`에 통합했다. 다음은 사람이 직접 써 보며 확인하는 일과 이동 과제의 live 성공률 개선(아래 "다음 작업").
 
 # 최근 검증
+- 2026-10-28 능력 점수 벤치마크(`evals/benchmark.py`, 설계·계획: `docs/superpowers/`): 시험 25개 추가, 평가 재생 42/42,
+  ruff 통과. 과제 42개에 axis·level을 붙이고 목표 과제 5개를 추가했다. **실제 모델 점수는 아직 재지 않았다**
+  (`run_eval.py --live --repeat 3` 후 `benchmark.py`). 재생 결과로는 점수를 내지 않는다.
 - 2026-10-21 의미 검색 체험 자료: `voice-action-test/embedding-demo/`에 공개 사진 3장과 가상 txt 3개 추가.
   PNG 디코딩·해상도·12 MiB 제한·UTF-8·2000자 제한 확인, 대표 검색어 6묶음의 일반 검색 0건 확인.
   기존 `.venv`에서 검색·의미 색인 회귀 52 passed, ruff 전체·diff check 통과.
@@ -57,6 +60,7 @@
     - 승인 ID 재사용·잘못된 입력·허용 밖 첨부 차단, 질문 답변→실제 MCP 쓰기→Undo 회귀 확인.
     - 실행 오류 162는 앱 전체 ad-hoc 서명으로 수정했다. strict 검사·반복 실행 통과.
 # 다음 작업
+0. 능력 점수 첫 측정: `uv run python evals/run_eval.py --live --repeat 3` 다음 `uv run python evals/benchmark.py`(유료, 확인 후).
 1. 사람이 확인: 네이티브 앱(`./native-preview/run.sh`)의 이동·복사·폴더 생성 승인 화면, 의미 검색 후보 선택, `--ui`의 Finder 패널,
    의미 검색을 켠 상태의 사용(`.voice-action/config.env`에 `VOICE_ACTION_SEMANTIC_SEARCH=on`, `uv sync --locked --extra semantic`).
 2. 이동 과제의 live 성공률 개선: "…를 보관 폴더로 옮겨줘"에서 모델이 폴더의 절대 경로를 되묻는다(`move_*`·`create_directory_undo`가 INVALID).

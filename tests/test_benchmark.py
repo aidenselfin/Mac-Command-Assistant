@@ -36,6 +36,11 @@ def test_axis_score_groups_tasks_of_the_same_level():
     assert benchmark.axis_score([(10, 1.0), (10, 0.0), (20, 1.0)]) == 0
 
 
+def test_axis_score_one_failing_level_is_not_diluted_by_easy_ones():
+    easy = [(level, 1.0) for level in range(1, 20)]
+    assert benchmark.axis_score([*easy, (50, 0.0)]) == 19
+
+
 def test_overall_skips_unmeasured_axes():
     assert benchmark.overall({"a": 50, "b": None}, {"a": 1, "b": 1}) == 50
 

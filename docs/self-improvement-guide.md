@@ -228,3 +228,8 @@ AGENTS.md 규칙을 따르고 이 폴더에서 직접 작업·커밋한다.
    uv run python evals/run_eval.py
 4. 바뀐 파일, 검증 결과, 남은 문제를 보고하고 docs/status.md를 갱신한다.
 ```
+
+## 능력 점수
+
+`evals/benchmark.py`가 live 결과를 능력 축별·종합 1~100점으로 바꾸고 약한 축·막힌 과제·이전 점수와의 차이를 보여 준다.
+설계는 `docs/superpowers/specs/2026-10-28-capability-benchmark-design.md`. 재생 결과는 점수를 낼 수 없다.
