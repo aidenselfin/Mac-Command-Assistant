@@ -157,7 +157,10 @@ class NativeBridge:
         except Exception as exc:
             problem = f"음성을 글로 바꾸지 못했습니다 ({type(exc).__name__})."
         finally:
-            clip.unlink(missing_ok=True)
+            try:
+                clip.unlink(missing_ok=True)
+            except OSError:
+                pass
             self.transcribing = False
         if self.voice_cancelled:
             text, problem = "", "음성 명령을 취소했습니다."

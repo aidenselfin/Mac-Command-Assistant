@@ -19,9 +19,10 @@ def clip_path(raw):
         return None
     path = Path(raw)
     temp = Path(tempfile.gettempdir()).resolve()
-    if path.is_symlink() or not path.name.startswith(PREFIX) or path.resolve().parent != temp:
+    real = path.resolve()  # resolve once: check and use the same location
+    if path.is_symlink() or not real.name.startswith(PREFIX) or real.parent != temp:
         return None
-    path = path.resolve()  # use the checked location, not the caller's spelling
+    path = real
     try:
         info = path.stat()
     except OSError:
