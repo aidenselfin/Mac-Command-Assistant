@@ -21,6 +21,11 @@
       "b.txt",
       "c.txt",
       "a.txt"
+    ],
+    "reply_order": [
+      "b.txt",
+      "c.txt",
+      "a.txt"
     ]
   }
 }

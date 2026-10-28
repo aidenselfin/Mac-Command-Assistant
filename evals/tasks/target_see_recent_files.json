@@ -23,6 +23,9 @@
       "a.txt",
       "b.txt",
       "c.txt"
+    ],
+    "reply_excludes": [
+      "old.txt"
     ]
   }
 }

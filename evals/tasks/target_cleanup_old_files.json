@@ -2,7 +2,7 @@
   "id": "target_cleanup_old_files",
   "family": "file.organize",
   "axis": "organize",
-  "level": 98,
+  "level": 100,
   "status": "target",
   "files": {
     "a.log": "1",

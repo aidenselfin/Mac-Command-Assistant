@@ -19,6 +19,9 @@
     ]
   },
   "expect": {
-    "files": {}
+    "files": {},
+    "must_run": [
+      "local__delete_files"
+    ]
   }
 }

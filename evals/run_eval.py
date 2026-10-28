@@ -236,6 +236,11 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                      if name not in tools_run]
         problems += [f"reply: missing {word!r}" for word in expect.get("reply_contains", [])
                      if word not in (text or "")]
+        problems += [f"reply: should not mention {word!r}"
+                     for word in expect.get("reply_excludes", []) if word in (text or "")]
+        order = [(text or "").find(word) for word in expect.get("reply_order", [])]
+        if order and (min(order) < 0 or order != sorted(order)):
+            problems.append(f"reply: expected order {expect['reply_order']}")
         want = sorted(expect.get("changed_paths", []))
         if "changed_paths" in expect and sorted(changed) != want:
             problems.append(f"changed_paths: {sorted(changed)} != {want}")

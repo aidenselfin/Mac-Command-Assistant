@@ -2,7 +2,7 @@
   "id": "target_read_cross_file_answer",
   "family": "file.read",
   "axis": "read",
-  "level": 95,
+  "level": 100,
   "status": "target",
   "files": {
     "인사.txt": "김하늘 팀장은 영업팀 소속이다.",

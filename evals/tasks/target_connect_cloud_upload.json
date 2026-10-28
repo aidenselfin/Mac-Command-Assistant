@@ -2,7 +2,7 @@
   "id": "target_connect_cloud_upload",
   "family": "app.cloud",
   "axis": "connect",
-  "level": 98,
+  "level": 100,
   "status": "target",
   "files": {
     "report.txt": "x"

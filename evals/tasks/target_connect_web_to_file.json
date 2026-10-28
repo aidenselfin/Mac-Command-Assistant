@@ -20,5 +20,6 @@
     "must_run": [
       "web__browser_navigate"
     ]
-  }
+  },
+  "note": "평가 하네스에 web·macos MCP 연결이 있어야 풀 수 있다(지금은 filesystem만)"
 }

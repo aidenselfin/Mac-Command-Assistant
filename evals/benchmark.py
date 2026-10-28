@@ -81,6 +81,9 @@ def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
             pairs[t["axis"]].append((t["level"], rates[t["id"]]))
             if t.get("status") != "target" or t["id"] in ran_ids:
                 ran.add(t["axis"])  # unrun targets alone must not make an axis "measured"
+    for t in classified:  # a level we could not measure must not be skipped over
+        if rates.get(t["id"]) is None and t["axis"] in ran:
+            pairs[t["axis"]].append((t["level"], 0.0))
     scores = {a: axis_score(pairs[a], config["threshold"]) if a in ran else None for a in axes}
     return {
         "axes": {

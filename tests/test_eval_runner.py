@@ -153,6 +153,17 @@ async def test_reply_contains_grades_the_answer():
     assert bad["problems"] == ["reply: missing 'c.csv'"]
 
 
+async def test_reply_order_and_excludes_are_graded():
+    base = {"script": [{"text": "b.txt, c.txt, a.txt 순서입니다."}]}
+    ok = await run_eval.run_trial(
+        task(**base, expect={"files": {}, "reply_order": ["b.txt", "c.txt", "a.txt"],
+                             "reply_excludes": ["old.txt"]}), None, [])
+    bad = await run_eval.run_trial(
+        task(**base, expect={"files": {}, "reply_order": ["a.txt", "b.txt"],
+                             "reply_excludes": ["c.txt"]}), None, [])
+    assert ok["passed"] and not bad["passed"] and len(bad["problems"]) == 2
+
+
 async def test_ages_set_modification_time_before_the_run(monkeypatch):
     seen = {}
     real = run_eval.manifest

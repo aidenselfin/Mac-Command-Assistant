@@ -2,7 +2,7 @@
   "id": "target_see_recent_csv",
   "family": "file.info",
   "axis": "see",
-  "level": 96,
+  "level": 100,
   "status": "target",
   "files": {
     "new.csv": "1",
@@ -19,6 +19,10 @@
     "files": {},
     "reply_contains": [
       "new.csv"
+    ],
+    "reply_excludes": [
+      "old.csv",
+      "new.txt"
     ]
   }
 }

@@ -91,6 +91,19 @@ def test_evaluate_flags_unclassified_and_not_run_but_ignores_controls():
     assert report["unclassified"] == ["c"] and report["not_run"] == ["b"]
 
 
+def test_unmeasured_low_level_stops_the_ladder():
+    tasks = [t("easy", "see", 1), t("hard", "see", 90)]
+    report = benchmark.evaluate(tasks, [trial("easy", False, False), trial("hard")], CONFIG)
+    assert report["axes"]["see"]["score"] == 0
+
+
+def test_perfect_run_of_every_task_scores_100_overall():
+    config = benchmark.load_config()
+    tasks = [x for x in _tasks() if not x.get("negative")]
+    trials = [trial(x["id"]) for x in tasks]
+    assert benchmark.evaluate(tasks, trials, config)["overall"] == 100
+
+
 def test_evaluate_is_deterministic():
     tasks = [t("a", "see", 5), t("b", "read", 20)]
     trials = [trial("a"), trial("b", False)]
@@ -293,7 +306,7 @@ def test_every_axis_ladder_is_filled_from_easy_to_hard():
             t["level"] for t in _tasks() if not t.get("negative") and t.get("axis") == axis
         )
         assert len(levels) >= 8, axis
-        assert levels[0] <= 15 and levels[-1] >= 90, axis
+        assert levels[0] <= 15 and levels[-1] == 100, axis
         assert max(b - a for a, b in zip(levels, levels[1:], strict=False)) <= 25, axis
 
 
@@ -355,3 +368,10 @@ def test_tasks_edited_after_the_run_are_not_scored(monkeypatch, tmp_path, capsys
     benchmark.main(["--no-save"])
     out = capsys.readouterr().out
     assert "측정 안 됨" in out and "측정 뒤 바뀐 과제" in out
+
+
+def test_task_files_with_reply_checks_are_well_formed():
+    for task in _tasks():
+        expect = task["expect"]
+        for key in ("reply_contains", "reply_excludes", "reply_order"):
+            assert all(isinstance(w, str) and w for w in expect.get(key, [])), (task["id"], key)
