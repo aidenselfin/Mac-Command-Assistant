@@ -132,7 +132,7 @@ uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장
    - 덮어쓰기 거절, 다중 삭제 중 일부만 대상, 변환(`local__convert_file`) 승인
    - 회의록 후보 검색(`회의록 요약해줘`) → Planner 후보 질문 → 번호 답변
 2. `docs/test-data.md`의 interactive 예시를 과제로 옮긴다 (내용은 합성으로 바꾼다).
-3. 실제 사용에서 실패한 사례는 `.voice-action/feedback-report.md`·`--lessons` 기록을 보고
+3. 실제 사용에서 실패한 사례는 `--lessons` 기록을 보고
    **구조만** 복제한 합성 과제로 만든다. 원문 파일 내용은 복사하지 않는다.
 4. 새 과제는 반드시 두 번 확인한다.
    - 재생 모드: 정답 `script`로 PASS, 일부러 틀린 `script`(`negative: true`)로도 PASS
@@ -209,7 +209,7 @@ lesson이 겨냥한 실패를 재현하는 과제가 없으면 **먼저 그 과�
 | 과제 split(validation/heldout) | 과제가 50개를 넘고 같은 과제로 lesson을 반복 튜닝하기 시작할 때 |
 | LLM 사용자 시뮬레이터 | scripted user의 `simulator_failure`가 자주 나올 때 |
 | LLM judge | 요약·번역 품질을 채점해야 할 때. 파일 상태로 판정 가능한 것은 계속 코드로 |
-| 자동 코드 수정 (원문 15, 19.6) | 3·4단계가 안정적으로 돌고 dev_report가 쌓일 때. 그때도 별도 브랜치 + 사람 리뷰 |
+| 자동 코드 수정 (원문 15, 19.6) | **2026-10-27 도입됨**(`autonomy.py`). 별도 브랜치·보호 파일·검증 게이트를 거쳐 사람 리뷰 없이 main에 합친다 |
 | 새 기능 자동 개발 (원문 16) | 보류. 새 기능(예: 파일 이동)은 사람이 정하고, 먼저 `evals/tasks`에 실패 과제를 넣은 뒤 구현 |
 | 비용 | `--live` 1회 = 과제 수 × 반복 × 평균 2~3회 모델 호출. 25과제×3회면 약 150~225회 |
 

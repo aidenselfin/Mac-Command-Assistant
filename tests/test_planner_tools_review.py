@@ -1,18 +1,14 @@
 """C03/C04 regressions: exposed tools are the only executable tools; the document reader
 follows the selected-candidate contract. Real stdin + Filesystem MCP for the candidate flow."""
 
-import io
 import json
-import os
 import shutil
 import sys
-from contextlib import redirect_stdout
 from copy import deepcopy
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import main
 from voice_action import conversion
 from voice_action.config import Config
 from voice_action.conversion import CONVERT_TOOL, READ_DOCUMENT_TOOL
@@ -100,7 +96,7 @@ async def test_hidden_call_beside_an_exposed_one_only_runs_the_exposed_one(confi
 
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("textutil"), reason="macOS")
-def test_document_reader_follows_the_selected_candidate(tmp_path):
+async def test_document_reader_follows_the_selected_candidate(tmp_path):
     root = (tmp_path / "work")
     root.mkdir()
     root = root.resolve()
@@ -116,22 +112,17 @@ def test_document_reader_follows_the_selected_candidate(tmp_path):
         calls(search), calls((READ_DOCUMENT_TOOL, {"path": str(unrelated)})),
         calls((READ_DOCUMENT_TOOL, {"path": str(selected)})), ModelTurn("recovered", []),
     ])
-    commands = ["회의록 요약해줘", "회의록 요약해줘", "exit"]
-    output = io.StringIO()
-    read_fd, write_fd = os.pipe()
-    os.write(write_fd, ("\n".join(commands) + "\n").encode())
-    os.close(write_fd)
-    with os.fdopen(read_fd, encoding="utf-8") as stdin, patch.object(sys, "stdin", stdin), \
-            patch.object(main, "load_config", return_value=config), \
-            patch.object(main, "_build_undo_journal",
-                         return_value=UndoJournal(tmp_path / "undo.sqlite3", (root,))), \
-            patch.object(main, "OpenAICompatibleModel", return_value=model), \
-            patch.object(main, "_build_mcp_manager", side_effect=lambda c: MCPManager({
-                "filesystem": MCPClient(c, allowed_tools=SUPPORTED_TOOLS)})), \
-            redirect_stdout(output):
-        assert main.main(["--interactive"]) == 0
-    shown = output.getvalue()
+    manager = MCPManager({"filesystem": MCPClient(config, allowed_tools=SUPPORTED_TOOLS)})
+    shown = []
+    async with manager.connect():
+        planner = Planner(
+            config, manager, model, tools=await manager.list_tools(),
+            undo_journal=UndoJournal(tmp_path / "undo.sqlite3", (root,)),
+        )
+        for _ in range(2):
+            shown.append((await planner.run("회의록 요약해줘")).text)
+    shown = " ".join(shown)
     assert not model.turns, shown
-    assert "[DONE] candidate summarized" in shown and "[DONE] recovered" in shown
+    assert "candidate summarized" in shown and "recovered" in shown
     assert "검증된 후보 파일을 읽지 않아" not in shown
     assert not any("UNRELATED_REVIEW_DOCUMENT" in str(messages) for messages in model.seen)

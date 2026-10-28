@@ -8,4 +8,5 @@
 <key>CFBundleShortVersionString</key><string>0.1</string>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSMicrophoneUsageDescription</key><string>오른쪽 옵션 키를 누르는 동안 음성 명령을 녹음합니다.</string>
 </dict></plist>

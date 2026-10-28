@@ -36,3 +36,14 @@ Finder 옆 자동 배치는 아직 네이티브 화면에 옮기지 않았다. �
 앱 패키지 전체를 로컬 ad-hoc 서명하고 strict 검사를 통과한 뒤 연다.
 빌드 hash가 같으면 실행 중인 앱을 덮어쓰거나 새 인스턴스를 만들지 않는다.
 코드가 바뀌면 이 worktree의 앱만 종료하고 갱신한다. 자동 소유권 스냅샷은 실행 검증과 별개다.
+
+## 메뉴 막대·로그인 자동 시작
+앱은 메뉴 막대 아이콘(마이크)으로 떠 있다. 아이콘을 누르면 오른쪽 옵션 키 감지가 켜지고 꺼진다(설정은 기억된다).
+우클릭(또는 Control+클릭)하면 켜기·끄기, 창 열기, 종료 메뉴가 나온다. 창을 닫아도 앱은 계속 실행된다.
+
+```sh
+./native-preview/login-agent.sh install    # 로그인 때 main 폴더 코드를 빌드해 실행
+./native-preview/login-agent.sh uninstall
+```
+
+main이 업데이트되면 다음 로그인(또는 `install` 다시 실행) 때 최신 코드로 다시 빌드된다. 로그는 `/tmp/com.aidenselfin.voice-action-ai.menubar.log`.

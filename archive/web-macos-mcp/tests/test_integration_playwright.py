@@ -11,9 +11,11 @@ from unittest.mock import AsyncMock
 
 import anyio
 import pytest
+import voice_action.playwright_client as playwright_module
+from voice_action.playwright_client import PlaywrightMCPClient
 
 import main
-import voice_action.playwright_client as playwright_module
+from tests import runner
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient, ToolRejectedError
 from voice_action.mcp_manager import MCPManager
 from voice_action.planner import (
@@ -24,7 +26,6 @@ from voice_action.planner import (
     PlannerError,
     ToolCall,
 )
-from voice_action.playwright_client import PlaywrightMCPClient
 from voice_action.runtime import RuntimeState
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType
 from voice_action.undo import UndoJournal
@@ -459,10 +460,10 @@ async def test_text_mode_pending_write_closes_without_file_side_effect(
         ),
     ]
     monkeypatch.setattr(main, "_build_mcp_manager", lambda _: manager)
-    monkeypatch.setattr(main, "AsyncOpenAI", lambda **_kwargs: FakeOpenAI())
-    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+    monkeypatch.setattr(runner, "AsyncOpenAI", lambda **_kwargs: FakeOpenAI())
+    monkeypatch.setattr(runner, "OpenAICompatibleModel", lambda _client, _model: model)
 
-    await main.run_text(
+    await runner.run_text(
         config,
         f"{local_page} 내용을 text-pending.md로 저장해줘",
         main.Console(),
@@ -715,11 +716,11 @@ async def test_command_error_closes_both_mcps_and_browser(
         PlannerError("forced command error"),
     ]
     monkeypatch.setattr(main, "_build_mcp_manager", lambda _: manager)
-    monkeypatch.setattr(main, "AsyncOpenAI", lambda **_kwargs: FakeOpenAI())
-    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+    monkeypatch.setattr(runner, "AsyncOpenAI", lambda **_kwargs: FakeOpenAI())
+    monkeypatch.setattr(runner, "OpenAICompatibleModel", lambda _client, _model: model)
 
     with pytest.raises(ExceptionGroup) as error:
-        await main.run_text(
+        await runner.run_text(
             config,
             f"{local_page} 웹 페이지를 읽어줘",
             main.Console(),
@@ -762,11 +763,11 @@ async def test_cancelled_command_closes_both_mcps_and_browser(
 
     model.generate.side_effect = generate
     monkeypatch.setattr(main, "_build_mcp_manager", lambda _: manager)
-    monkeypatch.setattr(main, "AsyncOpenAI", lambda **_kwargs: FakeOpenAI())
-    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+    monkeypatch.setattr(runner, "AsyncOpenAI", lambda **_kwargs: FakeOpenAI())
+    monkeypatch.setattr(runner, "OpenAICompatibleModel", lambda _client, _model: model)
 
     task = asyncio.create_task(
-        main.run_text(
+        runner.run_text(
             config,
             f"{local_page} 웹 페이지를 읽어줘",
             main.Console(),

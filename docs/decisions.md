@@ -2,6 +2,11 @@
 
 오래 유지할 결정만 날짜와 함께 적는다 (최신이 위). 작업 규칙은 `AGENTS.md`, 진행 상황은 `status.md`.
 
+- 2026-10-27 터미널 대화형(`--interactive`)과 Tk UI(`--ui`)를 제거한다. 화면은 SwiftUI 네이티브 앱 하나이고
+  `--text`도 제거해 `main.py`는 lesson 관리(`--lessons` 등)와 공용 헬퍼만 남는다(테스트용 한 번 실행은 `tests/runner.py`). `ui.py`는 네이티브 브리지가 쓰는 worker·presenter만 남기고,
+  Tk 전용 `finder.panel_*`·`tkinterdnd2` 의존성·Tk 테스트를 지웠다. 이전 Finder 패널(Tk)·"Tk와 SwiftUI 둘 다 고친다" 결정을 대체한다.
+  `finder.arrange`/`finder_dock` 설정은 호출처가 없어졌으나 이번에는 남겼다(별도 정리 대상).
+
 - 2026-10-27 GitHub에는 프로그램 파일만 올린다. `CLAUDE.md`·`AGENTS.md`·`native-preview/AGENTS.md`·
   `.claude/settings.json` 같은 AI 규칙 파일은 `.gitignore`로 추적에서 제외하고 로컬에만 둔다(이전 기록에는 남아 있음).
 
@@ -112,7 +117,13 @@
   한도 변경으로 이전 기준선(42/48, 2026-10-04)과 직접 비교할 수 없다.
 - 2026-10-07 UI 테스트: 파괴된 Tk root가 순환참조로 남아 worker 스레드의 GC에서 해제되면 Tcl이 프로세스를
   중단시킨다(SIGTRAP). `tests/test_ui.py`는 테스트마다 메인 스레드에서 `gc.collect()`한다.
-- 2026-10-04 lesson: 분석 결과는 후보로만 저장한다. 평가 비교(지침서 5.2절) 후 사람이 `--lesson-on`으로
+- 2026-10-27 피드백 자율 개선(2026-10-04 lesson 결정과 2026-10-07 "자동 코드 수정 보류"를 **대체**, 사용자 지시):
+  사용자 조언(user_hint)·개발자 기록(dev_report, feedback-report.md)을 없애고 분석 결과는 lesson 또는 code_fix만 남긴다.
+  lesson은 후보 → 자동 live 평가(기준선 2회 대비) → 자동 채택·거절. code_fix는 전용 worktree에서 개발자 에이전트가
+  고치고 diff 검사와 개발 검사 도구(`scripts/check.py`)를 통과하면 사람 확인 없이 main에 fast-forward로 합친다(태그로 되돌림).
+  안전 경계·설정·되돌리기·MCP 경로 검사·채점기·이 루프 자신·의존성은 자동 수정 대상에서 제외한다. 일꾼은 앱과
+  분리된 프로세스로 한 번에 하나만 돈다. 자동 코드 수정은 live 평가 없이 재생 평가까지만 확인한다(상한).
+- 2026-10-04 lesson(위 결정이 대체): 분석 결과는 후보로만 저장한다. 평가 비교(지침서 5.2절) 후 사람이 `--lesson-on`으로
   채택해야 프롬프트에 들어간다. confidence만으로 운영 프롬프트를 바꾸지 않는다.
 - 2026-10-04 도구 실행: 모델 턴마다 노출한 도구만 실행한다. 노출은 곧 실행 권한이다.
 
