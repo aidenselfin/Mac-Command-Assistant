@@ -19,6 +19,19 @@ from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 GIVE_ENDINGS = ("줘요", "줘", "주세요", "줄래요", "줄래")
 GIVE_VERBS = ("가져와", "가져다", "꺼내")
 PARTICLES = ("만", "도", "을", "를", "은", "는")
+FILE_FACTS = ("경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수")
+
+
+def _bare(word):
+    """'찾아만' is still 찾아, '경로를' still 경로."""
+    while word[-1:] in PARTICLES:
+        word = word[:-1]
+    return word
+
+
+def _file_fact(words):
+    """'경로를 가져와'처럼 파일이 아니라 파일에 대한 사실을 달라는 말인지 (마지막 낱말 기준)."""
+    return bool(words) and _bare(words[-1]).endswith(FILE_FACTS)
 
 
 def _verb_form(word):
@@ -36,16 +49,15 @@ def asks_for_file(text):
     last = words[-1]  # what the command finally asks: "가져와서 요약해줘" is a summary
     give = next((ending for ending in GIVE_ENDINGS if last.endswith(ending)), "")
     if not give:
-        return last.endswith(GIVE_VERBS)
+        return last.endswith(GIVE_VERBS) and not _file_fact(words[:-1])
     before = [*words[:-1], last[: -len(give)]]
     before = [word for word in before if word and word != "좀"]  # "찾아 좀 줘" is still 찾아 줘
     stem = before[-1] if before else ""
     if stem.endswith(GIVE_VERBS):  # "꺼내줘", "가져와 줘"
-        return True
-    while stem[-1:] in PARTICLES:  # "찾아만 줘" is still 찾아 줘, "경로를 줘" still 경로 줘
-        stem = stem[:-1]
-    if stem.endswith(("경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수")):
-        return False  # facts about the file, not the file
+        return not _file_fact(before[:-1])
+    if _file_fact(before):
+        return False
+    stem = _bare(stem)
     if stem.endswith(("거", "것")):
         return True
     return not stem or not _verb_form(stem)
