@@ -54,4 +54,8 @@ if [[ "$BUILD_HASH" != "$(cat "$HASH_FILE" 2>/dev/null || true)" ]] || \
     printf '%s\n' "$BUILD_HASH" > "$HASH_FILE"
 fi
 codesign --verify --deep --strict "$APP_DIR"
-open "$APP_DIR"
+if [[ -n "${VOICE_ACTION_BACKGROUND:-}" ]]; then
+    open "$APP_DIR" --args --background  # login start: menu bar only, window stays hidden
+else
+    open "$APP_DIR"
+fi

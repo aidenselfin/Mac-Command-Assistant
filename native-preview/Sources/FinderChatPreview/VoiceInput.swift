@@ -8,6 +8,13 @@ final class VoiceInput: ObservableObject {
     static let shared = VoiceInput()
     @Published var recording = false
     @Published var denied = false
+    /// Menu bar switch: off means the right Option key is ignored. Survives restarts.
+    @Published var enabled = UserDefaults.standard.object(forKey: "voiceKeyEnabled") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(enabled, forKey: "voiceKeyEnabled")
+            if !enabled { discard() }
+        }
+    }
     private var recorder: AVAudioRecorder?
     private var monitors: [Any] = []
     private var started = Date()
@@ -66,7 +73,7 @@ final class VoiceInput: ObservableObject {
 
     private func begin() {
         let backend = Backend.shared
-        guard !recording, backend.canSubmit else { return }
+        guard enabled, !recording, backend.canSubmit else { return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: break
         case .notDetermined:
