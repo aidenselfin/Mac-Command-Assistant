@@ -14,11 +14,13 @@ final class Toast {
 
     /// A reply is shown under the question it answers, so a fast answer does not hide what was heard.
     func show(_ role: String, _ text: String) {
-        let shown = text.count > 160 ? String(text.prefix(160)) + "…" : text
+        let flat = text.replacingOccurrences(of: "\n", with: " ")
+        let shown = flat.count > 160 ? String(flat.prefix(160)) + "…" : flat
         if role == "user" { asked = "나 · " + shown }
         label.stringValue = role == "user" ? asked
             : (asked.isEmpty ? "" : asked + "\n") + (role == "error" ? "오류 · " : "") + shown
         label.textColor = role == "error" ? .systemRed : .labelColor
+        if role != "user" { asked = "" }  // the question belongs to this answer only
         let panel = panel ?? makePanel()
         let height = label.sizeThatFits(NSSize(width: Self.width - 24, height: .greatestFiniteMagnitude)).height + 16
         label.frame = NSRect(x: 12, y: 8, width: Self.width - 24, height: height - 16)
