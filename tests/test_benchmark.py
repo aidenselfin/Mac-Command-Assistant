@@ -469,7 +469,7 @@ def test_compare_skips_a_saved_record_when_tasks_changed_since(monkeypatch, tmp_
     record.write_text(json.dumps({"report": report, "versions": {"tasks": {"a": "000000000000"}}}))
     assert benchmark.main(["--no-save", "--compare", str(record)]) == 0
     out = capsys.readouterr().out
-    assert "과제가 바뀌어" in out and "(+" not in out
+    assert "바뀌거나 지워져" in out and "(+" not in out
 
 
 def test_compare_skips_when_a_task_was_removed_since(monkeypatch, tmp_path, capsys):
@@ -480,3 +480,15 @@ def test_compare_skips_when_a_task_was_removed_since(monkeypatch, tmp_path, caps
     assert benchmark.main(["--no-save", "--compare", str(before)]) == 0
     out = capsys.readouterr().out
     assert "바뀌거나 지워져" in out and "(+" not in out
+
+
+def test_compare_skips_when_this_result_has_tasks_edited_since_its_run(
+        monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    path = next((tmp_path / "results").glob("*.json"))
+    path.write_text(json.dumps({"versions": {"model": "m", "tasks": {"a": "000000000000"}},
+                                "trials": [trial("a")]}))
+    before = tmp_path / "before.json"
+    before.write_text(json.dumps({"versions": {"model": "m"}, "trials": [trial("a", False)]}))
+    benchmark.main(["--no-save", "--compare", str(before)])
+    assert "(+" not in capsys.readouterr().out

@@ -262,8 +262,8 @@ def main(argv=None) -> int:
         if (earlier.get("versions") or {}).get("model") == "scripted":
             print("재생 결과는 비교할 수 없습니다.")
             return 2
-        if drifted(tasks, recorded):  # edited or removed tasks make the two ladders differ
-            print("그 결과 뒤에 과제가 바뀌거나 지워져 점수 변화를 비교하지 않습니다.")
+        if drifted(tasks, recorded) or report["stale"]:  # the two ladders no longer match
+            print("과제가 바뀌거나 지워져 점수 변화를 비교하지 않습니다.")
         else:
             old = earlier["report"] if "report" in earlier else evaluate(
                 tasks, earlier["trials"], config)
