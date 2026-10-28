@@ -28,17 +28,20 @@ def _verb_form(word):
 def asks_for_file(text):
     """'보고서 파일 줘'처럼 파일 자체를 달라는 말인지. '요약해줘'·'찾아 줘'는 아니다."""
     # ponytail: 말끝 규칙만 본다. '데이터 줘'처럼 아/어로 끝나는 명사는 놓친다
-    if any(word in text for word in ("가져와", "가져다", "꺼내")):
-        return True
     words = [word.strip(".,!?~") for word in text.split()]
-    for index, word in enumerate(words):
-        give = next((ending for ending in GIVE_ENDINGS if word.endswith(ending)), None)
-        if give is None:
-            continue
-        stem = word[: -len(give)] or (words[index - 1] if index else "")
-        if not stem or stem.endswith(("거", "것", "좀")) or not _verb_form(stem):
-            return True
-    return False
+    if not words:
+        return False
+    last = words[-1]  # what the command finally asks: "가져와서 요약해줘" is a summary
+    if any(word in last for word in ("가져와", "가져다", "꺼내")):
+        return True
+    give = next((ending for ending in GIVE_ENDINGS if last.endswith(ending)), None)
+    if give is None:
+        return False
+    stem = last[: -len(give)] or (words[-2] if len(words) > 1 else "")
+    if stem.endswith(("거", "것", "좀")):
+        return True
+    stem = stem.removesuffix("만").removesuffix("도")  # "찾아만 줘" is still 찾아 줘
+    return not stem or not _verb_form(stem)
 
 
 class NativeBridge:
