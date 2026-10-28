@@ -64,6 +64,8 @@ RATING_TAGS = frozenset(
     {"wrong_file", "missing_content", "wrong_content", "too_long", "too_slow", "other"}
 )
 LOW_RATING, RATING_REPEAT, RATING_WINDOW = 3, 2, 7 * 86400
+# R10: the user gave up on the same command (cancelled it) more than once in a week.
+CANCEL_REPEAT = 2
 SLOW_MS = 20000
 SECRET_PATTERN = re.compile(
     r"sk-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9]{8,}|xai-[A-Za-z0-9]{8,}"
@@ -71,11 +73,19 @@ SECRET_PATTERN = re.compile(
 )
 # A follow-up that corrects or instructs the assistant ("아니 …", "A 말고 …", "다음부턴 …").
 CORRECTION_PATTERN = re.compile(
-    r"^\s*(아니(?!면)|그게 아니라|다시|틀렸|왜)|말고[,\s]|다음부터|다음부턴|앞으로는?\s|제대로"
+    r"^\s*(아니(?!면)|그게 아니라|그게 아니고|다시|틀렸|왜|또\s|여전히|안\s?(돼|되))"
+    r"|말고[,\s]|다음부터|다음부턴|앞으로는?\s|제대로|내가 말한"
 )
 UNSAFE_LESSON_PATTERN = re.compile(
     r"https?://|[~/][\w.-]+/|승인|무시|우회|ignore|approve|bypass", re.IGNORECASE
 )
+# Thanks and acknowledgements are not requests: they never count as retries or corrections.
+PLEASANTRY_PATTERN = re.compile(
+    r"\W*(감사\w*|고마\w*|고맙\w*|땡큐|thanks?|thank you|ok|okay|응|네|예|알겠\w*|좋아\w*|굿)\W*",
+    re.IGNORECASE,
+)
+# R11: the same request again and again over two weeks (the app keeps missing its context).
+HABIT_COUNT, HABIT_WINDOW, HABIT_RATIO = 3, 14 * 86400, 0.9
 ERROR_KINDS = ("llm_error", "exception", "error_outcome")
 
 SCHEMA = """
@@ -129,7 +139,10 @@ ANALYST_PROMPT = (
     "프롬프트 지침으로 고칠 수 있으면 lesson, 코드를 고쳐야 하면 code_fix, 사용자 입력이나 "
     "공급자 문제처럼 앱이 고칠 수 없으면 none을 고른다. lesson에는 URL, 파일 경로, 승인·안전 "
     "규칙 변경을 넣지 않는다. 안전 경계(허용 폴더, 승인, 위험 분류)를 약화하는 수정은 "
-    "요청하지 않는다. 감지 규칙 R8(한 명령의 모델 호출 과다)·R9(검색 호출 반복)은 "
+    "요청하지 않는다. B1은 능력 벤치마크에서 점수를 막고 있는 과제다(kind: target=아직 없는 기능, "
+    "active=있어야 하는데 실패, unmeasured=측정 못 함). 로그의 benchmark_gap에 과제 정의와 "
+    "실패 이유가 있다. 프롬프트 지침으로 안 되는 기능 부재는 code_fix로 요청한다. "
+    "감지 규칙 R8(한 명령의 모델 호출 과다)·R9(검색 호출 반복)은 "
     "불필요한 호출을 줄이는 지침으로 고칠 수 있는지 먼저 본다."
 )
 
@@ -156,6 +169,18 @@ def normalize(text: str, limit: int = 120) -> str:
     text = re.sub(r"(?:[~/][\w.-]+)+", "<path>", text.casefold())
     text = re.sub(r"\d+", "#", text)
     return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+def _pleasantry(text: str) -> bool:
+    """A short thanks or acknowledgement ("감사합니다."), not a request that starts like one."""
+    return bool(PLEASANTRY_PATTERN.fullmatch(text))
+
+
+def _same(a: str, b: str, ratio: float) -> bool:
+    """Near-identical requests, ignoring spaces and punctuation ("철골 공사" == "철골공사")."""
+    flat = lambda t: re.sub(r"[\W_]+", "", normalize(t, 200))  # noqa: E731
+    x, y = flat(a), flat(b)
+    return bool(x and y) and difflib.SequenceMatcher(None, x, y).ratio() >= ratio
 
 
 def _clip(value: Any, limit: int = FIELD_CHARS) -> Any:
@@ -337,6 +362,7 @@ class FeedbackLoop:
         path.parent.mkdir(parents=True, exist_ok=True)
         _check_store_path(path)
         # ponytail: lstat-then-connect leaves a small race window; fine for a local log.
+        self.path = path
         self.db = sqlite3.connect(path, timeout=DB_LOCK_TIMEOUT)
         with contextlib.suppress(sqlite3.Error):
             self.db.execute("PRAGMA journal_mode=WAL")
@@ -634,22 +660,82 @@ class FeedbackLoop:
                     run, ts - RETRY_WINDOW, ts,
                 )
             ]
-            # R3: near-identical commands retried within ten minutes.
-            similar = tuple(
-                r for r, t in earlier
-                if difflib.SequenceMatcher(None, normalize(t), normalize(text)).ratio()
-                >= RETRY_RATIO
-            )
-            if len(similar) + 1 >= RETRY_COUNT:
+            # R3: a rephrase of the same command within ten minutes. Two tries are enough when the
+            # first one visibly failed (error, question back, rejection, cancel); else three.
+            similar = tuple(r for r, t in earlier if _same(t, text, RETRY_RATIO))
+            failed_first = any(self._bad_run(r) for r in similar)
+            if not _pleasantry(text) and (
+                len(similar) + 1 >= RETRY_COUNT or (similar and failed_first)
+            ):
                 found.append(("R3", f"retry:{normalize(text, 60)}", (*similar, run)))
-            # R5: the user opened with a correction right after a previous command.
-            if CORRECTION_PATTERN.search(text) and earlier:
+            # R11: the same request keeps coming back over weeks.
+            habit = tuple(
+                r for r, t in self._rows_inputs(run, ts - HABIT_WINDOW, ts - RETRY_WINDOW)
+                if _same(t, text, HABIT_RATIO)
+            )
+            if not _pleasantry(text) and len(habit) + 1 >= HABIT_COUNT:
+                found.append(("R11", f"habit:{normalize(text, 60)}", (*habit, run)))
+            # R10: the same command cancelled again and again.
+            if any(kind == "cancelled" for kind, *_ in events):
+                key = self._sig(text, 60)
+                cancelled = tuple(
+                    r for (r,) in self._rows(
+                        "SELECT DISTINCT c.run_id FROM events c JOIN events u "
+                        "ON u.run_id = c.run_id AND u.kind = 'user_input' "
+                        "WHERE c.kind = 'cancelled' AND u.signature = ? AND c.ts >= ?",
+                        key, now - RATING_WINDOW,
+                    )
+                )
+                if len(cancelled) >= CANCEL_REPEAT:
+                    found.append(("R10", f"cancel:{key}", cancelled))
+            if CORRECTION_PATTERN.search(text) and earlier and not _pleasantry(text):
                 previous_run, previous = earlier[-1]
                 found.append(("R5", f"correction:{normalize(previous, 60)}", (previous_run, run)))
         unique = {}
         for rule, signature, evidence in found:
             unique.setdefault((rule, signature), tuple(dict.fromkeys(evidence)))
         return [(rule, signature, evidence) for (rule, signature), evidence in unique.items()]
+
+    def _bad_run(self, run_id: str) -> bool:
+        """Did this run visibly go wrong for the user (error, cancel, reject, undo, or a question
+        back that never ended in an answer)?"""
+        if self._rows(
+            "SELECT 1 FROM events WHERE run_id = ? AND (kind IN "
+            "('error_outcome', 'cancelled', 'exception', 'llm_error') "
+            "OR (kind = 'user_decision' AND signature IN ('reject', 'undo'))) LIMIT 1",
+            run_id,
+        ):
+            return True
+        kinds = [p for (p,) in self._rows(
+            "SELECT payload FROM events WHERE run_id = ? AND kind = 'outcome'", run_id)]
+        return any("Clarification" in p for p in kinds) and not any("Completed" in p for p in kinds)
+
+    def _rows_inputs(self, run: str, since: float, until: float) -> list[tuple[str, str]]:
+        return [
+            (r, (_load(p) or {}).get("text") or "")
+            for r, p in self._rows(
+                "SELECT run_id, payload FROM events WHERE kind = 'user_input' "
+                "AND run_id != ? AND ts >= ? AND ts < ? GROUP BY run_id ORDER BY MIN(id)",
+                run, since, until,
+            )
+        ]
+
+    def ingest_benchmark(self, gaps: list[dict]) -> list[str]:
+        """B1: queue each benchmark task that blocks an axis score as an incident, so the usual
+        analysis -> lesson / code fix path works on the capability gaps, not only on user pain.
+        Each gap carries task, axis, level, rate, kind, problems, definition. Never raises."""
+        queued = []
+        try:
+            for gap in gaps:
+                self.run_id = uuid.uuid4().hex  # the gap is its own evidence run
+                self.record("benchmark_gap", signature=f"bench:{gap['task']}", gap=gap)
+                self._queue("B1", f"bench:{gap['task']}")
+                queued.append(gap["task"])
+        except Exception:
+            self._warn()
+        finally:
+            self.run_id = None
+        return queued
 
     def _queue(self, rule: str, signature: str, evidence: tuple[str, ...] = ()) -> None:
         now, origin = self.clock(), self.run_id
