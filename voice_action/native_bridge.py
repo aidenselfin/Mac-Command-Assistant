@@ -20,7 +20,7 @@ GIVE_ENDINGS = ("줘요", "줘", "주세요", "줄래요", "줄래")
 GIVE_VERBS = ("가져와", "가져다", "꺼내")
 PARTICLES = ("만", "도", "을", "를", "은", "는")
 FILE_FACTS = (
-    "경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수", "정보", "날짜", "수정일",
+    "경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수", "정보", "날짜", "수정일", "생성일", "용량",
 )
 
 
@@ -54,7 +54,7 @@ def asks_for_file(text):
     if stem.endswith(GIVE_VERBS):  # "꺼내줘", "가져와 줘"
         return True
     stem = _bare(stem)
-    if stem.endswith(("거", "것")):
+    if stem.endswith(("거", "것", "서")):  # 보고서·문서 are nouns, not 아/어 verb forms
         return True
     return not stem or not _verb_form(stem)
 
