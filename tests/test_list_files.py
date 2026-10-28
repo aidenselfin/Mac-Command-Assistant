@@ -103,3 +103,13 @@ def test_name_contains_narrows_before_the_limit(tmp_path):
         make(tmp_path, f"other{index}.txt", 1, 0)  # newer unrelated files
     response = listed(tmp_path, name_contains=["계약서"], sort_by="modified", limit=1)
     assert names(response) == ["계약서_v2.txt"]
+
+
+def test_paths_limit_to_candidates_and_roots_keep_same_named_folders_apart(tmp_path):
+    one, two = tmp_path / "one", tmp_path / "two"
+    make(one, "자료/a.txt", 10)
+    make(two, "자료/b.txt", 30)
+    response = list_files({"group_by": "folder"}, (one, two)).structured
+    assert [f["folder"] for f in response["folders"]] == ["two/자료", "one/자료"]
+    only = list_files({"paths": [str(one / "자료/a.txt")]}, (one, two)).structured
+    assert names(only) == ["a.txt"]

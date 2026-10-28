@@ -1045,6 +1045,7 @@ class _LoopState:
     find_tried: bool = False  # local__find_files has run in this command
     find_none: bool = False  # ...and found nothing
     find_override: str | None = None  # what the model is told about the last search instead
+    ranked_candidates: tuple[str, ...] = ()  # one of these must be read before answering
     known_target: bool = False  # an attached file or the previous command's files
 
 
@@ -1622,6 +1623,10 @@ class Planner:
                     return Error("모호한 파일 요청은 안전한 후보 탐색 없이 진행할 수 없습니다.")
                 if state.single_search_candidate is not None and not state.candidate_read:
                     return Error("검증된 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
+                if state.ranked_candidates and not set(state.read_paths) & set(
+                    state.ranked_candidates
+                ):
+                    return Error("고른 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
                 supported = [
                     tool.name for tool in state.tools
                     if (tool.name == DELETE_TOOL and _destructive_request(state.user_text))
@@ -2128,19 +2133,22 @@ class Planner:
             return None
         if (
             RANKED_PICK_PATTERN.search(state.user_text)
-            and response.get("decision") in {"choose", "narrow"}
+            and response.get("decision") == "choose"
             and response.get("stage") != "meaning"  # a guess by similarity is always confirmed
             and response.get("complete", True)  # an incomplete search keeps its stated limits
             and not _destructive_request(state.user_text)
         ):
-            # "가장 최근 계약서" names one file by date or size: the app picks, the user is not
-            # asked which one.
+            # "가장 최근 계약서" names one file by date or size: the model picks among the
+            # candidates by their sizes and dates, the user is not asked which one.
+            paths = [item["path"] for item in response.get("candidates", [])]
+            if not _acts_without_reading(state.user_text):
+                state.ranked_candidates = tuple(paths)
             state.find_override = json.dumps(
                 {
                     "decision": "ranked",
                     "note": "크기·날짜로 하나를 고르는 요청입니다. 사용자에게 묻지 말고 "
-                    "local__list_files(name_contains에 같은 검색어)로 크기·수정 시각을 보고 "
-                    "조건에 맞는 파일을 골라 진행하세요.",
+                    "local__list_files(paths에 아래 후보 경로)로 크기·수정 시각을 보고 "
+                    "조건에 맞는 후보 하나를 골라 진행하세요. 다른 파일은 고르지 마세요.",
                     "candidates": response.get("candidates", []),
                 },
                 ensure_ascii=False,

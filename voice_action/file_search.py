@@ -530,7 +530,8 @@ LIST_DEFINITION = ToolDefinition(
     "최근에 바뀐 파일, 며칠 안/며칠 넘은 파일, 형식별 목록, 폴더별 용량처럼 크기·날짜로 "
     "고르거나 정렬하는 요청에 쓴다. sort_by는 size·modified·name(기본 modified, 큰 것·최근 "
     "것 먼저, ascending이 true면 반대). name_contains는 파일 이름에 들어갈 말(하나만 맞아도 "
-    "됨)이다. modified_within_days=N은 최근 N일 안에 바뀐 파일, "
+    "됨)이다. paths는 이미 찾은 후보 경로만 볼 때 쓴다. "
+    "modified_within_days=N은 최근 N일 안에 바뀐 파일, "
     "not_modified_for_days=N은 N일 넘게 안 바뀐 파일이다. group_by가 folder면 최상위 "
     "폴더별 합계 용량을 큰 순서로 준다. 결과는 사용자에게 보이지 않으므로 답에 이름을 "
     "결과 순서대로 직접 적고, 바이트 크기는 size_bytes를 쓴다. 안 쓰는 인자는 생략한다.",
@@ -542,6 +543,7 @@ LIST_DEFINITION = ToolDefinition(
             "extensions": {"type": ["array", "null"], "items": {"type": "string"}},
             "folder_hint": {"type": ["string", "null"]},
             "name_contains": {"type": ["array", "null"], "items": {"type": "string"}},
+            "paths": {"type": ["array", "null"], "items": {"type": "string"}},
             "modified_within_days": {"type": ["number", "null"]},
             "not_modified_for_days": {"type": ["number", "null"]},
             "group_by": {"type": ["string", "null"], "enum": ["folder", None]},
@@ -564,10 +566,12 @@ def list_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     entries = _filter(entries, arguments, roots)
     words = [_fold(word[:100]) for word in (arguments.get("name_contains") or [])[:MAX_KEYWORDS]]
     words = [word for word in words if word]
+    paths = {str(Path(path)) for path in (arguments.get("paths") or [])[:LIST_MAX]}
     now = time.time()
     entries = [
         entry for entry in entries
-        if (not words or any(word in _fold(entry.name) for word in words))
+        if (not paths or str(entry.path) in paths)
+        and (not words or any(word in _fold(entry.name) for word in words))
         and (within is None or entry.mtime >= now - within * 86400)
         and (idle is None or entry.mtime < now - idle * 86400)
     ]
@@ -578,7 +582,11 @@ def list_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
         totals: dict[str, list[int]] = {}
         for entry in entries:
             if entry.folder:
-                total = totals.setdefault(entry.folder[0], [0, 0])
+                # Two allowed roots may each hold a folder of the same name.
+                label = entry.folder[0]
+                if len(roots) > 1:
+                    label = f"{entry.root.name}/{label}"
+                total = totals.setdefault(label, [0, 0])
                 total[0] += entry.size
                 total[1] += 1
         folders = sorted(totals.items(), key=lambda item: (-item[1][0], item[0]))

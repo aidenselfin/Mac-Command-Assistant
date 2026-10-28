@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from voice_action.mcp_client import ToolDefinition
+from voice_action.mcp_client import ToolDefinition, ToolResult
 from voice_action.planner import (
     Clarification,
     ClarificationContext,
@@ -298,18 +298,60 @@ async def test_a_plain_search_with_a_star_in_it_is_not_taken_for_a_pattern_delet
     assert isinstance(await planner.run("계획* 문서 읽어줘"), Clarification)  # not a delete
 
 
-async def test_ranked_request_lets_the_model_pick_instead_of_asking(config):
+def list_turn(*paths):
+    arguments = json.dumps({"paths": [str(p) for p in paths], "sort_by": "modified"})
+    return ModelTurn(None, [ToolCall("list", "local__list_files", arguments)])
+
+
+async def test_ranked_request_lists_reads_and_answers_without_asking(config):
     root = config.allowed_directories[0]
     for name in ("계약서_v1.txt", "계약서_v2.txt"):
         (root / name).write_text("금액")
-    model = scripted(find_turn("계약서"), ModelTurn("v2입니다", []))
-    planner, _ = make_planner(config, model)
+    v1, v2 = root / "계약서_v1.txt", root / "계약서_v2.txt"
+    model = scripted(
+        find_turn("계약서"), list_turn(v1, v2), read_turn(v2), ModelTurn("v2입니다", [])
+    )
+    planner, gateway = make_planner(config, model)
+    gateway.call_tool.return_value = ToolResult(True, "금액")
 
     outcome = await planner.run("가장 최근에 수정한 계약서의 금액이 얼마야?")
 
     assert outcome == Completed("v2입니다")
     sent = model.generate.await_args_list[1].args[0][-1]["content"]
     assert '"decision": "ranked"' in sent and "계약서_v1.txt" in sent
+
+
+async def test_ranked_request_must_read_a_candidate_before_answering(config):
+    root = config.allowed_directories[0]
+    for name in ("계약서_v1.txt", "계약서_v2.txt"):
+        (root / name).write_text("금액")
+    model = scripted(find_turn("계약서"), ModelTurn("1천만원입니다", []))
+    planner, _ = make_planner(config, model)
+
+    outcome = await planner.run("가장 최근에 수정한 계약서의 금액이 얼마야?")
+
+    assert isinstance(outcome, Error)
+
+
+async def test_ranked_request_still_asks_about_a_meaning_guess(config, monkeypatch):
+    from voice_action import file_search
+
+    root = config.allowed_directories[0]
+    guess = {
+        "stage": "meaning", "decision": "choose", "total": 2, "truncated": False,
+        "complete": True,
+        "candidates": [{"path": str(root / n), "label": n} for n in ("a.jpg", "b.jpg")],
+    }
+    monkeypatch.setattr(
+        file_search, "find_files",
+        lambda *_: ToolResult(True, json.dumps(guess), structured=guess),
+    )
+    model = scripted(find_turn("고양이"))
+    planner, _ = make_planner(config, model)
+
+    outcome = await planner.run("가장 최근 고양이 사진 보여줘")
+
+    assert isinstance(outcome, Clarification)
 
 
 async def test_ranked_request_still_asks_when_the_search_was_incomplete(config, monkeypatch):
