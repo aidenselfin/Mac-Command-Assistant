@@ -267,3 +267,20 @@ def test_main_refuses_to_record_when_mostly_invalid(monkeypatch, tmp_path, capsy
     path.write_text(json.dumps({"versions": {"model": "m"}, "trials": [trial("a", False, False)]}))
     assert benchmark.main([]) == 2
     assert not (tmp_path / "benchmarks").exists()
+
+
+def _write_trials(tmp_path, trials):
+    path = next((tmp_path / "results").glob("*.json"))
+    path.write_text(json.dumps({"versions": {"model": "m"}, "trials": trials}))
+
+
+def test_main_counts_invalid_over_all_trials_including_unclassified(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    _write_trials(tmp_path, [trial("a"), trial("zzz", False, False), trial("zzz", False, False)])
+    assert benchmark.main([]) == 2
+
+
+def test_main_records_when_exactly_half_invalid(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    _write_trials(tmp_path, [trial("a"), trial("a", False, False)])
+    assert benchmark.main([]) == 0

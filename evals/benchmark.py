@@ -208,7 +208,7 @@ def main(argv=None) -> int:
     if args.compare:
         delta = compare(report, json.loads(args.compare.read_text(encoding="utf-8"))["report"])
     print(render(report, guide, delta))
-    if report["invalid_trials"] * 2 > len(data["trials"]):
+    if sum(not r["valid"] for r in data["trials"]) * 2 > len(data["trials"]):
         print("INVALID가 절반을 넘어 점수를 믿을 수 없습니다. 기록하지 않습니다(키·네트워크 확인).")
         return 2
     BENCHMARKS.mkdir(exist_ok=True)
