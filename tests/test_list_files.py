@@ -110,6 +110,11 @@ def test_paths_limit_to_candidates_and_roots_keep_same_named_folders_apart(tmp_p
     make(one, "자료/a.txt", 10)
     make(two, "자료/b.txt", 30)
     response = list_files({"group_by": "folder"}, (one, two)).structured
-    assert [f["folder"] for f in response["folders"]] == ["two/자료", "one/자료"]
+    assert [f["folder"] for f in response["folders"]] == [str(two / "자료"), str(one / "자료")]
     only = list_files({"paths": [str(one / "자료/a.txt")]}, (one, two)).structured
     assert names(only) == ["a.txt"]
+
+
+def test_too_many_paths_are_refused(tmp_path):
+    with pytest.raises(ToolRejectedError):
+        list_files({"paths": [str(tmp_path / f"{i}.txt") for i in range(51)]}, (tmp_path,))

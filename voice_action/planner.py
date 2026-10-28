@@ -41,6 +41,7 @@ from voice_action.mcp_client import (
     ToolResult,
 )
 from voice_action.risk_guard import (
+    WRITE_TOOLS,
     ApprovalChangedError,
     ApprovalInvalidError,
     ForbiddenToolError,
@@ -1962,6 +1963,13 @@ class Planner:
             and not state.candidate_read
         ):
             return "검증된 후보 파일을 읽기 전에는 쓸 수 없습니다."
+        if (
+            call.name in WRITE_TOOLS
+            and state.ranked_candidates
+            and not set(state.read_paths) & set(state.ranked_candidates)
+        ):
+            # Checked before approval, so a resumed approval needs no copy of this state.
+            return "고른 후보 파일을 읽기 전에는 파일을 바꿀 수 없습니다."
         if call.name in CONTENT_READ_TOOLS and state.single_search_candidate is not None:
             try:
                 requested = await self._gateway.validate_result_path(arguments.get("path"))

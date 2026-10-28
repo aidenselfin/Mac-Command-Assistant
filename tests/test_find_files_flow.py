@@ -333,6 +333,27 @@ async def test_ranked_request_must_read_a_candidate_before_answering(config):
     assert isinstance(outcome, Error)
 
 
+async def test_ranked_request_cannot_write_before_reading_a_candidate(config):
+    root = config.allowed_directories[0]
+    for name in ("계약서_v1.txt", "계약서_v2.txt"):
+        (root / name).write_text("금액")
+    write = json.dumps({"path": str(root / "요약.txt"), "content": "x"})
+    model = scripted(
+        find_turn("계약서"),
+        ModelTurn(None, [ToolCall("w", "filesystem__write_file", write)]),
+        ModelTurn("끝", []),
+    )
+    planner, gateway = make_planner(config, model)
+    gateway.list_tools.return_value = [
+        *TOOLS, ToolDefinition("filesystem__write_file", "w", {"type": "object"})
+    ]
+
+    await planner.run("가장 최근 계약서 요약을 요약.txt에 저장해줘")
+
+    sent = model.generate.await_args_list[2].args[0][-1]["content"]
+    assert "읽기 전에는 파일을 바꿀 수 없습니다" in sent
+
+
 async def test_ranked_request_still_asks_about_a_meaning_guess(config, monkeypatch):
     from voice_action import file_search
 

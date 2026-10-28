@@ -566,7 +566,9 @@ def list_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     entries = _filter(entries, arguments, roots)
     words = [_fold(word[:100]) for word in (arguments.get("name_contains") or [])[:MAX_KEYWORDS]]
     words = [word for word in words if word]
-    paths = {str(Path(path)) for path in (arguments.get("paths") or [])[:LIST_MAX]}
+    if len(arguments.get("paths") or []) > LIST_MAX:
+        raise ToolRejectedError(f"paths는 {LIST_MAX}개까지입니다.")
+    paths = {str(Path(path)) for path in arguments.get("paths") or []}
     now = time.time()
     entries = [
         entry for entry in entries
@@ -584,8 +586,8 @@ def list_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
             if entry.folder:
                 # Two allowed roots may each hold a folder of the same name.
                 label = entry.folder[0]
-                if len(roots) > 1:
-                    label = f"{entry.root.name}/{label}"
+                if len(roots) > 1:  # roots may share a name too, so the full path
+                    label = str(entry.root / label)
                 total = totals.setdefault(label, [0, 0])
                 total[0] += entry.size
                 total[1] += 1
