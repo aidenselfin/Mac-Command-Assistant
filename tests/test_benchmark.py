@@ -231,3 +231,14 @@ def test_axis_with_a_run_target_is_measured():
     tasks = [t("a", "see", 5), t("b", "read", 40, status="target")]
     report = benchmark.evaluate(tasks, [trial("a"), trial("b")], CONFIG)
     assert report["axes"]["read"]["score"] == 40
+
+
+def test_overall_100_needs_every_configured_axis_measured():
+    assert benchmark.overall({"a": 100, "b": None}, {"a": 1, "b": 1}) == 99
+
+
+def test_guidance_ignores_unclassified_tasks():
+    tasks = [t("a", "see", 5), {"id": "bad", "axis": "see"}]
+    trials = [trial("a"), trial("bad", False)]
+    report = benchmark.evaluate(tasks, trials, CONFIG)
+    assert benchmark.guidance(report, tasks, trials)["blocked"] == {}

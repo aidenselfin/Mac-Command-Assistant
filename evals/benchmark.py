@@ -59,18 +59,20 @@ def overall(axis_scores: dict[str, int | None], weights: dict[str, float]) -> in
     if not total:
         return None
     value = sum(s * weights.get(a, 1) for a, s in measured.items()) / total
-    if all(s == 100 for s in measured.values()):
+    if len(measured) == len(weights) and all(s == 100 for s in measured.values()):
         return 100
     return min(99, math.floor(value + 0.5))  # 100 is reserved for every axis being 100
+
+
+def is_classified(task: dict, axes) -> bool:
+    level = task.get("level")
+    return task.get("axis") in axes and isinstance(level, int) and 1 <= level <= 100
 
 
 def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
     axes = config["axes"]
     graded = [t for t in tasks if not t.get("negative")]
-    classified = [
-        t for t in graded
-        if t.get("axis") in axes and isinstance(t.get("level"), int) and 1 <= t["level"] <= 100
-    ]
+    classified = [t for t in graded if is_classified(t, axes)]
     rates = task_rates(classified, trials)
     ran_ids = {r["task"] for r in trials}
     pairs, ran = defaultdict(list), set()
@@ -114,7 +116,9 @@ def load_config() -> dict:
 
 def guidance(report: dict, tasks: list[dict], trials: list[dict], threshold: float = 0.8) -> dict:
     """Where to develop next: the weakest axis and, per axis, the lowest unmet task."""
-    classified = [t for t in tasks if not t.get("negative") and t.get("axis") in report["axes"]]
+    classified = [
+        t for t in tasks if not t.get("negative") and is_classified(t, report["axes"])
+    ]
     rates = task_rates(classified, trials)
     blocked = {}
     for axis, info in report["axes"].items():
