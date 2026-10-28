@@ -22,6 +22,10 @@
     ]
   },
   "expect": {
-    "files": {}
+    "files": {},
+    "must_run": [
+      "local__create_directory",
+      "local__move_file"
+    ]
   }
 }

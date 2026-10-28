@@ -242,9 +242,13 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
                      if word not in (text or "")]
         problems += [f"reply: should not mention {word!r}"
                      for word in expect.get("reply_excludes", []) if word in (text or "")]
-        order = [(text or "").find(word) for word in expect.get("reply_order", [])]
-        if order and (min(order) < 0 or order != sorted(order)):
-            problems.append(f"reply: expected order {expect['reply_order']}")
+        position = 0  # the words must appear in this order (later mentions may repeat earlier ones)
+        for word in expect.get("reply_order", []):
+            found = (text or "").find(word, position)
+            if found < 0:
+                problems.append(f"reply: expected order {expect['reply_order']}")
+                break
+            position = found + len(word)
         if not expect.get("undo"):  # what a produced file must say, beyond that it exists
             for path, words in expect.get("files_contain", {}).items():
                 target = root / path

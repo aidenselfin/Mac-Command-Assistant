@@ -180,6 +180,14 @@ async def test_binary_fixture_and_files_contain_are_graded():
     assert bad["problems"] == ["out.md: missing '999억'"]
 
 
+async def test_reply_order_allows_an_intro_that_mentions_a_name_first():
+    script = [{"text": "a.txt를 포함해 정렬하면 b.txt, c.txt, a.txt 순입니다."}]
+    result = await run_eval.run_trial(
+        task(script=script, expect={"files": {}, "reply_order": ["b.txt", "c.txt", "a.txt"]}),
+        None, [])
+    assert result["passed"]
+
+
 async def test_ages_set_modification_time_before_the_run(monkeypatch):
     seen = {}
     real = run_eval.manifest
