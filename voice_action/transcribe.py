@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from openai import OpenAI
@@ -18,9 +19,9 @@ def clip_path(raw):
         return None
     path = Path(raw)
     temp = Path(tempfile.gettempdir()).resolve()
-    if (path.is_symlink() or not path.name.startswith(PREFIX)
-            or path.resolve().parent != temp):
+    if path.is_symlink() or not path.name.startswith(PREFIX) or path.resolve().parent != temp:
         return None
+    path = path.resolve()  # use the checked location, not the caller's spelling
     try:
         info = path.stat()
     except OSError:
@@ -41,5 +42,15 @@ def transcribe(path, api_key, timeout=60):
     finally:
         try:
             os.unlink(path)
+        except OSError:
+            pass
+
+
+def purge_stale(max_age=3600):
+    """Delete clips left behind by an app quit during recording or transcription."""
+    for path in Path(tempfile.gettempdir()).glob(f"{PREFIX}*"):
+        try:
+            if not path.is_symlink() and time.time() - path.stat().st_mtime > max_age:
+                path.unlink()
         except OSError:
             pass

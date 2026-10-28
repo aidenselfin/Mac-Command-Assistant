@@ -13,7 +13,7 @@ from voice_action.config import load_config
 from voice_action.feedback import RATING_TAGS
 from voice_action.planner import ApprovalRequired, Clarification, Completed, Error
 from voice_action.runtime import Busy, RuntimeState
-from voice_action.transcribe import clip_path, transcribe
+from voice_action.transcribe import clip_path, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
 
@@ -181,6 +181,7 @@ def main():
         return 1
     messages = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
+    purge_stale()
     bridge = NativeBridge(worker, emit, config.voice_api_key)
     stopped = False
 

@@ -114,3 +114,12 @@ def test_voice_command_is_refused_when_busy_or_clip_is_not_ours():
     transport.command({"action": "voice", "path": "/etc/passwd"})
     assert events[-1]["type"] == "rejected"
     assert Path("/etc/passwd").exists()
+
+
+def test_purge_stale_removes_only_old_voice_clips():
+    import os
+    old, fresh = clip(f"{tr.PREFIX}old.m4a"), clip(f"{tr.PREFIX}fresh.m4a")
+    os.utime(old, (1, 1))
+    tr.purge_stale()
+    assert not old.exists() and fresh.exists()
+    fresh.unlink()
