@@ -35,6 +35,7 @@ def test_clip_path_rejects_foreign_names_locations_symlinks_and_empty_or_huge_fi
     good = clip()
     assert tr.clip_path(str(good)) == good.resolve()
     assert tr.clip_path(None) is None
+    assert tr.clip_path("/tmp/a\0b") is None
     other = tmp_path / f"{tr.PREFIX}x.m4a"
     other.write_bytes(b"x")
     assert tr.clip_path(str(other)) is None  # not in the temp directory root
@@ -134,6 +135,7 @@ def test_failed_clip_deletion_still_reports_and_frees_the_bridge():
         assert done.wait(5)
         transport.state = RuntimeState.WAITING_APPROVAL
         transport.command({"action": "voice", "path": str(path)})  # refused path must not raise
-    assert events[-1]["type"] == "rejected" or events[0]["text"] == "열어줘"
+    assert events[0] == {"type": "transcript", "text": "열어줘", "error": None}
+    assert events[-1]["type"] == "rejected"
     assert not transport.transcribing
     path.unlink()

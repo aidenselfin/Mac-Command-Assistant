@@ -22,6 +22,7 @@ class NativeBridge:
         self.worker, self.emit, self.voice_key = worker, emit, voice_key
         self.transcribing = False
         self.voice_cancelled = False
+        self.voice_lock = threading.Lock()
         self.voice_thread = None
         self.state = None
         self.in_flight = False
@@ -78,9 +79,10 @@ class NativeBridge:
         if action == "shutdown":
             return False
         if action == "cancel":
-            if self.transcribing:
-                self.voice_cancelled = True
-                return True
+            with self.voice_lock:
+                if self.transcribing:
+                    self.voice_cancelled = True
+                    return True
             if self.state is RuntimeState.WAITING_APPROVAL:
                 return self.command({"action": "reject", "approval_id": self.approval_id})
             if self.state is RuntimeState.WAITING_USER_INPUT:
@@ -164,10 +166,11 @@ class NativeBridge:
                 clip.unlink(missing_ok=True)
             except OSError:
                 pass
+        with self.voice_lock:  # a cancel is either seen here or arrives after the result
+            if self.voice_cancelled:
+                text, problem = "", "음성 명령을 취소했습니다."
+            self.emit({"type": "transcript", "text": text, "error": problem})
             self.transcribing = False
-        if self.voice_cancelled:
-            text, problem = "", "음성 명령을 취소했습니다."
-        self.emit({"type": "transcript", "text": text, "error": problem})
 
     def refuse(self):
         self.emit({"type": "rejected", "text": "현재 상태에서 처리할 수 없는 요청입니다."})
