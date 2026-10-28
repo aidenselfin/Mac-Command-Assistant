@@ -548,8 +548,8 @@ CONFIRM_REQUEST = re.compile(
 MUTATION_PATTERN = re.compile(r"저장|만들|생성|작성|덮어|수정|바꿔|변경")
 CONFIRM_NUDGE = (
     "쓰기·삭제·변환은 앱이 승인 화면에서 사용자 승인을 따로 받습니다. 확인 질문으로 끝내지 말고 "
-    "지금 해당 도구(local__delete_files, local__convert_file, filesystem__write_file)를 "
-    "바로 호출하세요."
+    "지금 해당 도구(local__delete_files, local__convert_file, filesystem__write_file, "
+    "local__move_file, local__copy_file, local__create_directory)를 바로 호출하세요."
 )
 EMPTY_NUDGE = "도구 결과를 바탕으로 사용자에게 한국어로 짧게 최종 응답을 작성하세요."
 CREATE_PATTERN = re.compile(r"만들|생성|새로|작성|저장")

@@ -17,7 +17,7 @@
 | Undo | ✅ | `undo` `되돌리기` | `undo.py` | | `test_undo.py` `test_integration_undo.py` | `overwrite_undo` `create_directory_undo` | |
 | 직전 대화 기억·후속 질문 | ✅ | `그 요약을 파일로 저장해줘` | `planner.py`(Exchange) | | `test_followup.py` `test_free_text.py` | `follow_up_*` | |
 | 자가 피드백(평가·lesson) | ✅ 피드백 on | 1~5 평가 | `feedback.py` | | `test_feedback*.py` `test_lesson_candidates.py` | `evals/run_eval.py --lesson` | 2026-10-04 lesson |
-| Tk UI + Finder 패널 | ✅ `--ui` | | `ui.py` `finder.py` `attachment.py` | | `test_ui.py` `test_ui_review.py` `test_finder.py` | | 2026-10-14 Finder 패널 |
+| Finder 연동(결과 표시·파일 첨부) | ✅ 네이티브 앱 | | `ui.py` `finder.py` `attachment.py` | | `test_ui.py` `test_finder.py` | | 2026-10-14 Finder 패널 |
 | **네이티브 SwiftUI 앱** | ✅ `native-preview/run.sh` | | `native_bridge.py` `native-preview/` | 승인은 Python이 보유 | `test_native_bridge.py` `test_native_preview.py` `test_native_protocol.py` | | 2026-10-14 네이티브 백엔드 |
 | 수정 세션·worktree 도구 | ✅ | | `scripts/vibe.py` | | `test_vibe.py` | | 2026-10-14 병렬 수정 세션 |
 
@@ -25,7 +25,7 @@
 
 ## 기능 사이의 약속 (깨면 안 되는 것)
 
-- 새 쓰기 도구는 `risk_guard.classify_tool`과 `WRITE_TOOLS`에 넣고, 승인 화면을 **Tk와 SwiftUI 둘 다** 표시하게 한다.
+- 새 쓰기 도구는 `risk_guard.classify_tool`과 `WRITE_TOOLS`에 넣고, 승인 화면을 SwiftUI에 표시하게 한다.
 - 선택 기능은 꺼져 있을 때 도구 정의·동작이 이전과 같아야 한다(`test_integration_features.py`가 의미 검색을 확인).
 - 파일 내용·벡터는 채팅 모델에 주지 않는다. 검색 결과는 후보로만 내고 확정은 사용자(또는 정확히 1개인 이름 일치)가 한다.
 - 승인된 작업이 없으면 "이동/삭제했다"고 답하지 않는다(`file_operations`의 회귀 테스트 참고).

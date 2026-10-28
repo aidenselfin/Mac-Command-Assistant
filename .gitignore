@@ -34,3 +34,4 @@ AGENTS.md
 CLAUDE.local.md
 native-preview/AGENTS.md
 .claude/settings.json
+evals/generated/

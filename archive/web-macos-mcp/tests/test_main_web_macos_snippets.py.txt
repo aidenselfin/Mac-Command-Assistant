@@ -111,10 +111,10 @@ async def test_run_text_continues_filesystem_after_bounded_ax_error(
     ]
     FakeOpenAI.instances.clear()
     monkeypatch.setattr(main, "_build_mcp_manager", lambda _config: manager)
-    monkeypatch.setattr(main, "AsyncOpenAI", FakeOpenAI)
-    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+    monkeypatch.setattr(runner, "AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr(runner, "OpenAICompatibleModel", lambda _client, _model: model)
 
-    await main.run_text(config, "활성 앱 확인 후 파일 목록", main.Console())
+    await runner.run_text(config, "활성 앱 확인 후 파일 목록", main.Console())
 
     ax_message = model.generate.await_args_list[1].args[0][-1]
     assert ax_message["role"] == "tool"

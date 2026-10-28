@@ -7,8 +7,7 @@
 
 ```text
 입력 화면 ──► RuntimeController (runtime.py: 한 번에 한 명령, 상태 머신)
-  main.py --text / --interactive          │
-  ui.py (Tk, --ui)                        ▼
+                                          ▼
   native_bridge.py ◄─JSON lines─► SwiftUI Planner (planner.py: 모델 ↔ 도구 루프, 최대 10회)
      (native-preview/)                    │ 모델이 부른 도구마다
                                           ▼
@@ -23,13 +22,13 @@
 - 모델은 **노출된 도구만** 부를 수 있고, 그 도구의 인자는 코드가 다시 검증한다(노출 = 실행 권한).
 - 쓰기·삭제·이동·변환은 `ApprovalRequired`로 멈추고, 화면이 승인하면 `RiskGuard.execute_approved`가 같은 인자인지
   다시 확인해 실행한다. 실행한 쓰기는 `undo.py`의 SQLite journal에 남아 `undo`로 되돌린다.
-- 모든 화면(CLI, Tk, 네이티브)은 같은 `Planner`/`RuntimeController`를 쓴다. 화면별 로직은 보여 주기·입력 변환뿐이다.
+- 화면은 SwiftUI 네이티브 앱 하나이고 `Planner`/`RuntimeController`를 쓴다. 화면별 로직은 보여 주기·입력 변환뿐이다.
 
 ## 파일 지도
 
 | 파일 | 역할 | 크기 주의 |
 |---|---|---|
-| `main.py` | 진입점: `--text` `--interactive` `--ui`, 설정 덮어쓰기, `--lessons/--lesson-on/off` | |
+| `main.py` | lesson 관리 CLI(`--lessons/--lesson-on/off`)와 공용 헬퍼(`print_outcome`·`error_message`) | |
 | `voice_action/config.py` | 설정 검증. 환경변수·`.voice-action/config.env`·`config.json`(키 금지) | |
 | `voice_action/planner.py` | 시스템 프롬프트, 요청별 도구 노출, 모델 루프, 검색·삭제·이동 규칙, 결과 타입(`Completed` `Clarification` `ApprovalRequired` `Error`) | **2,200줄+**: 고칠 함수 주변만 읽는다 |
 | `voice_action/risk_guard.py` | 도구 위험 분류(`classify_tool`), 승인 발급·검증, 읽기 도구 실행 | 새 도구는 여기에 분류를 추가해야 한다 |
@@ -41,12 +40,14 @@
 | `voice_action/conversion.py` | `local__convert_file`(승인 쓰기), `local__read_document`(pdf·docx 읽기) | |
 | `voice_action/undo.py` | Undo journal(쓰기·삭제·이동·폴더 생성), 시각 순서 되돌리기 | |
 | `voice_action/feedback.py` | 평가 기록, 실패 감지 규칙 R*, OpenRouter 분석, lesson | 966줄 |
-| `voice_action/ui.py` | Tk UI + `AsyncRuntimeWorker`(스레드↔asyncio), Finder 옆 패널 | **1,770줄** |
+| `voice_action/ui.py` | `AsyncRuntimeWorker`(스레드↔asyncio)·`UIPresenter`·`render_outcome`. 네이티브 브리지가 쓴다 | |
 | `voice_action/native_bridge.py` | SwiftUI ↔ Python JSON-lines 전송([프로토콜](native-protocol.md)) | |
 | `voice_action/finder.py` | Finder 표시·창 배치(macOS Accessibility) | |
 | `voice_action/attachment.py` | 창에 끌어다 놓은 파일 검사 | |
 | `native-preview/` | SwiftUI 앱(SwiftPM). 규칙은 `native-preview/AGENTS.md` | |
 | `evals/` | JSON 과제 + `run_eval.py`(재생 또는 `--live` 실제 모델) | |
+| `evals/make_cases.py` | 과제를 어렵게 바꾼 변형(L1 말투, L2 무관 파일 20개+비슷한 이름, L3 200개)을 `evals/generated/`에 만든다. 재생 통과한 것만 남김 | 결과는 git 제외 |
+| `scripts/check.py` | 개발 후 한 번에 점검: ruff·pytest·평가 재생·변형 재생. 화면 없이 입력→결과만 본다 (`--fast`는 pytest 생략) | 보고 전에 실행 |
 | `scripts/vibe.py` | 수정 세션 잠금·snapshot·worktree 생성 | |
 
 ## 앱이 쓰는 상태 (모두 git 제외, `.voice-action/` 아래)
@@ -61,6 +62,6 @@
 | 새 로컬 도구 추가 | 도구 모듈(`file_operations.py` 참고) → `risk_guard.py` 분류·승인 → `planner.py` 노출 조건 → 테스트·eval 과제 |
 | 모델이 도구를 못 고르거나 잘못 고른다 | `planner.py` 시스템 프롬프트·노출 조건, `docs/self-improvement-guide.md`, `evals/tasks/` |
 | 검색이 못 찾는다 | `file_search.py`(단계), 안 되면 `semantic_index.py` |
-| 승인 화면을 바꾼다 | Tk `ui.py`(승인 패널) **와** SwiftUI `native-preview/…/App.swift` 둘 다, 필요하면 `native_bridge.py`와 프로토콜 문서 |
+| 승인 화면을 바꾼다 | SwiftUI `native-preview/…/App.swift`, 필요하면 `native_bridge.py`와 프로토콜 문서 |
 | 설정 항목 추가 | `config.py` → README 설정 표 → `tests/test_config.py` |
 | 안전 경계(허용 폴더·symlink) | `risk_guard.py`, 각 도구 모듈의 `_open_below` 계열. 약화하지 않는다 |
