@@ -21,7 +21,7 @@
 | **자율 개선(lesson 자동 채택·코드 자동 수정)** | ✅ `VOICE_ACTION_FEEDBACK_AUTONOMY=on` | (실패 반복 시 자동) | `autonomy.py` `feedback.py` | 보호 파일 목록 | `test_autonomy.py` | `evals/run_eval.py` | 2026-10-27 피드백 자율 개선 |
 | **점수 연동 개선(벤치마크 미달 과제 접수·중도 취소 감지)** | ✅ `autonomy.py bench` (수동) | (벤치 라운드) | `autonomy.py` `feedback.py` | R10 취소 2회 | `test_autonomy.py` | `evals/benchmark.py` | 2026-10-28 점수 연동 |
 | Finder 연동(결과 표시·파일 첨부) | ✅ 네이티브 앱 | | `ui.py` `finder.py` `attachment.py` | | `test_ui.py` `test_finder.py` | | 2026-10-14 Finder 패널 |
-| 찾은 파일 드래그 칩(끌어서 다른 앱에 놓기) | ✅ 네이티브 앱 | | `planner.py` `native_bridge.py` `App.swift` | | `test_native_bridge.py` | | 2026-10-28 클릭 드롭 |
+| 찾은 파일 드래그 칩(끌어서 다른 앱에 놓기, 전체 화면 위 떠 있는 상자) | ✅ 네이티브 앱 | | `planner.py` `native_bridge.py` `App.swift` `FileBox.swift` | | `test_native_bridge.py` | | 2026-10-28 클릭 드롭 |
 | **네이티브 SwiftUI 앱** | ✅ `native-preview/run.sh` | | `native_bridge.py` `native-preview/` | 승인은 Python이 보유 | `test_native_bridge.py` `test_native_preview.py` `test_native_protocol.py` | | 2026-10-14 네이티브 백엔드 |
 | **오른쪽 옵션 키 음성 명령** | ✅ 네이티브 앱 | 꾹 누르는 동안 녹음 → Groq Whisper → 일반 `submit` | `VoiceInput.swift` `transcribe.py` `native_bridge.py` | 마이크 권한 필요, 앱 밖 감지는 입력 모니터링 권한 | `test_voice_input.py` `test_native_protocol.py` | 실제 마이크·Groq 호출은 사람 확인 전 | 2026-10-28 |
 | 능력 점수 벤치마크 | ✅ live 결과로만 | `python evals/benchmark.py` | `evals/benchmark.py` `evals/benchmark.json` | | `test_benchmark.py` `test_eval_runner.py` | 모든 과제의 `axis`·`level`·`status` | 2026-10-28 능력 점수 |
