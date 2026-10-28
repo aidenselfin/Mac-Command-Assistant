@@ -17,6 +17,8 @@ from voice_action.transcribe import clip_path, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
 GIVE_ENDINGS = ("줘요", "줘", "주세요", "줄래요", "줄래")
+GIVE_VERBS = ("가져와", "가져다", "꺼내")
+PARTICLES = ("만", "도", "을", "를", "은", "는")
 
 
 def _verb_form(word):
@@ -33,14 +35,15 @@ def asks_for_file(text):
         return False
     last = words[-1]  # what the command finally asks: "가져와서 요약해줘" is a summary
     give = next((ending for ending in GIVE_ENDINGS if last.endswith(ending)), "")
-    if last[: len(last) - len(give)].endswith(("가져와", "가져다", "꺼내")):
-        return True
     if not give:
-        return False
+        return last.endswith(GIVE_VERBS)
     before = [*words[:-1], last[: -len(give)]]
     before = [word for word in before if word and word != "좀"]  # "찾아 좀 줘" is still 찾아 줘
-    # "찾아만 줘" is still 찾아 줘, "경로도 줘" still 경로 줘
-    stem = before[-1].removesuffix("만").removesuffix("도") if before else ""
+    stem = before[-1] if before else ""
+    if stem.endswith(GIVE_VERBS):  # "꺼내줘", "가져와 줘"
+        return True
+    while stem[-1:] in PARTICLES:  # "찾아만 줘" is still 찾아 줘, "경로를 줘" still 경로 줘
+        stem = stem[:-1]
     if stem.endswith(("경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수")):
         return False  # facts about the file, not the file
     if stem.endswith(("거", "것")):
