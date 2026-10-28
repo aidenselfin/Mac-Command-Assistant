@@ -508,4 +508,5 @@ async def test_a_call_to_a_tool_not_offered_is_retried_once_with_the_real_tool_n
     )
     assert turn.text == "완료"
     retry = client.chat.completions.create.await_args_list[1].kwargs["messages"]
+    assert client.chat.completions.create.await_count == 2
     assert "호출 가능한 도구" in retry[-1]["content"]
