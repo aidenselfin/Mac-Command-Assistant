@@ -7,6 +7,8 @@
 파일 정리·의미 검색·네이티브 UI 세 갈래를 `main`에 통합했다. 다음은 사람이 직접 써 보며 확인하는 일과 이동 과제의 live 성공률 개선(아래 "다음 작업").
 
 # 최근 검증
+- 2026-10-28 **능력 점수 벤치마크 통합**(브랜치 `claude/project-understanding-0a3020`, main 40여 개 병합 뒤): 전체 pytest **742 passed**, ruff 통과,
+  평가 재생 **84/84**, Swift 빌드 통과. 과제 117개(목표 41개), `evals/benchmark.py`·`scripts/check.sh bench`. 새 사다리의 실제 모델 점수는 아직 안 쟀다.
 - 2026-10-28 능력 점수 벤치마크(`evals/benchmark.py`, 설계·계획: `docs/superpowers/`): 시험 25개 추가, 평가 재생 42/42,
   ruff 통과. 과제에 axis·level을 붙였다. **실제 모델 점수는 아직 재지 않았다**
   (`run_eval.py --live --repeat 3` 후 `benchmark.py`). 재생 결과로는 점수를 내지 않는다.
