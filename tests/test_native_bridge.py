@@ -187,3 +187,15 @@ def test_json_stream_rejects_malformed_input_and_closes_worker_on_shutdown(
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [event["type"] for event in events] == ["config", "rejected"]
     assert config.api_key not in json.dumps(events)
+
+
+def test_completed_event_carries_found_paths_for_drag_chip():
+    from voice_action.planner import Completed
+
+    events = []
+    worker = Mock()
+    worker.can_rate.return_value = False
+    NativeBridge(worker, events.append).message(
+        UIMessage(UIMessageType.OUTCOME, Completed("찾았어요", found_paths=("/a/b.txt",)))
+    )
+    assert events[-1]["found_paths"] == ["/a/b.txt"]
