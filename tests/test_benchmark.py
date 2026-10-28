@@ -459,7 +459,7 @@ def test_compare_leaves_out_tasks_edited_since_the_earlier_run(monkeypatch, tmp_
     versions = {"model": "m", "tasks": {"a": "000000000000"}}
     before.write_text(json.dumps({"versions": versions, "trials": [trial("a", False)]}))
     assert benchmark.main(["--no-save", "--compare", str(before)]) == 0
-    assert "(+" not in capsys.readouterr().out  # the stale earlier score is not compared
+    assert "(+" not in capsys.readouterr().out  # an edited task: nothing is compared
 
 
 def test_compare_skips_a_saved_record_when_tasks_changed_since(monkeypatch, tmp_path, capsys):
@@ -470,3 +470,13 @@ def test_compare_skips_a_saved_record_when_tasks_changed_since(monkeypatch, tmp_
     assert benchmark.main(["--no-save", "--compare", str(record)]) == 0
     out = capsys.readouterr().out
     assert "과제가 바뀌어" in out and "(+" not in out
+
+
+def test_compare_skips_when_a_task_was_removed_since(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    before = tmp_path / "before.json"
+    versions = {"model": "m", "tasks": {"gone": "000000000000"}}
+    before.write_text(json.dumps({"versions": versions, "trials": [trial("gone", False)]}))
+    assert benchmark.main(["--no-save", "--compare", str(before)]) == 0
+    out = capsys.readouterr().out
+    assert "바뀌거나 지워져" in out and "(+" not in out

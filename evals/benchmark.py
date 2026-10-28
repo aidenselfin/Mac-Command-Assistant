@@ -116,6 +116,12 @@ def stale_tasks(tasks: list[dict], recorded: dict) -> list[str]:
     return [t["id"] for t in tasks if t["id"] in recorded and recorded[t["id"]] != digest(t)]
 
 
+def drifted(tasks: list[dict], recorded: dict) -> list[str]:
+    """Tasks edited or removed since a result/record was made: the ladders no longer match."""
+    current = {t["id"] for t in tasks}
+    return stale_tasks(tasks, recorded) + [i for i in recorded if i not in current]
+
+
 def latest_live_result(directory: Path, task_ids: set | None = None) -> Path | None:
     """Newest live result that belongs to these tasks (variant runs use other task ids)."""
     for path in reversed(sorted(directory.glob("*.json"))):
@@ -252,21 +258,19 @@ def main(argv=None) -> int:
     delta = None
     if args.compare:
         earlier = json.loads(args.compare.read_text(encoding="utf-8"))
-        if "report" in earlier:  # a saved benchmark record
-            old = earlier["report"]
-            if stale_tasks(tasks, (earlier.get("versions") or {}).get("tasks", {})):
-                print("그 기록 뒤에 과제가 바뀌어 점수 변화를 비교하지 않습니다.")
-                old = {**old, "ladder": "changed"}
-        elif earlier.get("versions", {}).get("model") == "scripted":
+        recorded = (earlier.get("versions") or {}).get("tasks", {})
+        if (earlier.get("versions") or {}).get("model") == "scripted":
             print("재생 결과는 비교할 수 없습니다.")
             return 2
-        else:  # a run_eval result: score it with the same tasks and ladder
-            gone = stale_tasks(tasks, earlier.get("versions", {}).get("tasks", {}))
-            old = evaluate(tasks, [r for r in earlier["trials"] if r["task"] not in gone], config)
-        if old.get("ladder") == report["ladder"]:
-            delta = compare(report, old)
+        if drifted(tasks, recorded):  # edited or removed tasks make the two ladders differ
+            print("그 결과 뒤에 과제가 바뀌거나 지워져 점수 변화를 비교하지 않습니다.")
         else:
-            print("과제 사다리가 달라 이전 기록과 비교하지 않습니다.")
+            old = earlier["report"] if "report" in earlier else evaluate(
+                tasks, earlier["trials"], config)
+            if old.get("ladder") == report["ladder"]:
+                delta = compare(report, old)
+            else:
+                print("과제 사다리가 달라 이전 기록과 비교하지 않습니다.")
     print(render(report, guide, delta))
     if sum(not r["valid"] for r in data["trials"]) * 2 > len(data["trials"]):
         print("INVALID가 절반을 넘어 점수를 믿을 수 없습니다. 기록하지 않습니다(키·네트워크 확인).")
