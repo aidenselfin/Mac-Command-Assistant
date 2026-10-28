@@ -179,7 +179,9 @@ final class Backend: ObservableObject {
     }
 
     func append(_ role: String, _ text: String) {
-        if !text.isEmpty { messages.append(ChatMessage(role: role, text: text)) }
+        guard !text.isEmpty else { return }
+        messages.append(ChatMessage(role: role, text: text))
+        Toast.shared.show(role, text)
     }
 
     @discardableResult
