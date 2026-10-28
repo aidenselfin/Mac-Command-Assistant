@@ -37,8 +37,12 @@ def asks_for_file(text):
     give = next((ending for ending in GIVE_ENDINGS if last.endswith(ending)), None)
     if give is None:
         return False
-    stem = last[: -len(give)] or (words[-2] if len(words) > 1 else "")
-    if stem.endswith(("거", "것", "좀")):
+    before = [*words[:-1], last[: -len(give)]]
+    before = [word for word in before if word and word != "좀"]  # "찾아 좀 줘" is still 찾아 줘
+    stem = before[-1] if before else ""
+    if stem.endswith(("경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수")):
+        return False  # facts about the file, not the file
+    if stem.endswith(("거", "것")):
         return True
     stem = stem.removesuffix("만").removesuffix("도")  # "찾아만 줘" is still 찾아 줘
     return not stem or not _verb_form(stem)

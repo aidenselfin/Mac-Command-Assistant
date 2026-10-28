@@ -209,7 +209,8 @@ def test_floating_file_box_only_when_the_file_itself_is_asked_for():
         assert asks_for_file(text), text
     for text in ("회의록 요약해줘", "보고서 찾아 줘", "파일 위치 알려줘", "사진 지워줘",
                  "pdf로 바꿔줘", "회의록 읽어줘", "보고서 파일 열어 줘",
-                 "보고서 가져와서 요약해줘", "회의록 찾아만 줘"):
+                 "보고서 가져와서 요약해줘", "회의록 찾아만 줘",
+                 "보고서 찾아 좀 줘", "보고서 파일 경로 줘"):
         assert not asks_for_file(text), text
 
 
