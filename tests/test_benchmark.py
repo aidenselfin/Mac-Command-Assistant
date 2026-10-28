@@ -198,3 +198,29 @@ def test_target_tasks_have_expect_and_no_script():
     assert targets
     for task in targets:
         assert "expect" in task and "script" not in task, task["id"]
+
+
+def test_overall_is_100_only_when_every_axis_is_100():
+    assert benchmark.overall({"a": 100, "b": 99}, {"a": 1, "b": 1}) == 99
+    assert benchmark.overall({"a": 100, "b": 100}, {"a": 1, "b": 1}) == 100
+
+
+def test_axis_with_only_unrun_targets_is_unmeasured():
+    tasks = [t("a", "see", 5), t("b", "read", 40, status="target")]
+    report = benchmark.evaluate(tasks, [trial("a")], CONFIG)
+    assert report["axes"]["read"]["measured"] is False and report["overall"] == 5
+
+
+def test_stale_tasks_detects_changed_definition():
+    import hashlib
+
+    task = t("a", "see", 5)
+    good = hashlib.sha256(json.dumps(task, sort_keys=True).encode()).hexdigest()[:12]
+    assert benchmark.stale_tasks([task], {"a": good}) == []
+    assert benchmark.stale_tasks([{**task, "level": 6}], {"a": good}) == ["a"]
+
+
+def test_latest_live_result_skips_newer_replay_files(tmp_path):
+    (tmp_path / "1.json").write_text(json.dumps({"versions": {"model": "live"}, "trials": []}))
+    (tmp_path / "2.json").write_text(json.dumps({"versions": {"model": "scripted"}, "trials": []}))
+    assert benchmark.latest_live_result(tmp_path).name == "1.json"

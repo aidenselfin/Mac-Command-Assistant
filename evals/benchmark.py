@@ -5,7 +5,9 @@ Usage: run `evals/run_eval.py --live --repeat 3`, then `evals/benchmark.py`.
 """
 
 import argparse
+import hashlib
 import json
+import math
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -56,7 +58,8 @@ def overall(axis_scores: dict[str, int | None], weights: dict[str, float]) -> in
     total = sum(weights.get(a, 1) for a in measured)
     if not total:
         return None
-    return round(sum(s * weights.get(a, 1) for a, s in measured.items()) / total)
+    # floor, not round: 100 must mean every measured axis is exactly 100
+    return math.floor(sum(s * weights.get(a, 1) for a, s in measured.items()) / total + 1e-9)
 
 
 def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
@@ -67,11 +70,13 @@ def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
         if t.get("axis") in axes and isinstance(t.get("level"), int) and 1 <= t["level"] <= 100
     ]
     rates = task_rates(classified, trials)
-    pairs = defaultdict(list)
+    pairs, ran = defaultdict(list), set()
     for t in classified:
         if rates.get(t["id"]) is not None:
             pairs[t["axis"]].append((t["level"], rates[t["id"]]))
-    scores = {a: axis_score(pairs[a], config["threshold"]) if pairs[a] else None for a in axes}
+            if t.get("status") != "target":
+                ran.add(t["axis"])  # unrun targets alone must not make an axis "measured"
+    scores = {a: axis_score(pairs[a], config["threshold"]) if a in ran else None for a in axes}
     return {
         "axes": {
             a: {"score": scores[a], "measured": scores[a] is not None, "tasks": len(pairs[a])}
@@ -82,6 +87,22 @@ def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
         "unclassified": [t["id"] for t in graded if t not in classified],
         "invalid_only": [i for i, r in rates.items() if r is None],
     }
+
+
+def stale_tasks(tasks: list[dict], recorded: dict) -> list[str]:
+    """Tasks whose definition changed since the result was produced (hash as in run_eval)."""
+    def digest(t):
+        text = json.dumps(t, sort_keys=True)
+        return hashlib.sha256(text.encode()).hexdigest()[:12]
+    return [t["id"] for t in tasks if t["id"] in recorded and recorded[t["id"]] != digest(t)]
+
+
+def latest_live_result(directory: Path) -> Path | None:
+    live = [
+        p for p in sorted(directory.glob("*.json"))
+        if json.loads(p.read_text(encoding="utf-8")).get("versions", {}).get("model") != "scripted"
+    ]
+    return live[-1] if live else None
 
 
 def load_config() -> dict:
@@ -145,9 +166,10 @@ def render(report: dict, guide: dict, delta: dict | None = None) -> str:
         lines.append(f"가장 약한 축: {guide['weakest_axis']}")
     for axis, b in guide["blocked"].items():
         lines.append(f"막힘 {axis}: {b['task']} (단계 {b['level']}, 통과율 {b['rate']:.0%})")
-    notes = (("not_run", "미실행"), ("unclassified", "미분류"), ("invalid_only", "INVALID뿐"))
+    notes = (("not_run", "미실행"), ("unclassified", "미분류"), ("invalid_only", "INVALID뿐"),
+             ("stale", "과제 바뀜"))
     for key, label in notes:
-        if report[key]:
+        if report.get(key):
             lines.append(f"{label} {len(report[key])}개: {', '.join(report[key])}")
     return "\n".join(lines)
 
@@ -157,7 +179,7 @@ def main(argv=None) -> int:
     parser.add_argument("--result", type=Path, help="run_eval live result (default: latest)")
     parser.add_argument("--compare", type=Path, help="earlier file from evals/benchmarks/")
     args = parser.parse_args(argv)
-    result = args.result or max(RESULTS.glob("*.json"), default=None)
+    result = args.result or latest_live_result(RESULTS)
     if result is None:
         print("결과 없음. 먼저 `python evals/run_eval.py --live --repeat 3`를 실행하세요.")
         return 2
@@ -168,6 +190,7 @@ def main(argv=None) -> int:
     config = load_config()
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(TASKS.glob("*.json"))]
     report = evaluate(tasks, data["trials"], config)
+    report["stale"] = stale_tasks(tasks, data.get("versions", {}).get("tasks", {}))
     guide = guidance(report, tasks, data["trials"], config["threshold"])
     delta = None
     if args.compare:
