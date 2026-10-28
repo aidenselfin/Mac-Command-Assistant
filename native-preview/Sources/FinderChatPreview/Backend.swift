@@ -27,6 +27,7 @@ final class Backend: ObservableObject {
     @Published var choices: [String] = []
     @Published var approval: Approval?
     @Published var attachment: String?
+    @Published var dragFile: URL?  // the one found file, offered as a chip the user drags out
     @Published var online = false
     @Published var pending = false
     @Published var transcribing = false
@@ -137,6 +138,14 @@ final class Backend: ObservableObject {
                 append(type == "error" ? "error" : "assistant", text)
                 ratable = value["ratable"] as? Bool ?? false
                 lowScore = nil
+                if type == "completed", let found = (value["found_paths"] as? [String])?.first {
+                    let url = URL(fileURLWithPath: found).standardizedFileURL
+                    if url == url.resolvingSymlinksInPath(),
+                       folders.contains(where: { url.path.hasPrefix($0 + "/") }),
+                       (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular {
+                        dragFile = url
+                    }
+                }
                 if type == "completed", reveal,
                    let paths = value["changed_paths"] as? [String], !paths.isEmpty {
                     let checked = paths.compactMap { path -> URL? in
@@ -209,6 +218,7 @@ final class Backend: ObservableObject {
             ratable = false
             choices = []
             attachment = nil
+            dragFile = nil
             append("user", text)
         }
     }
@@ -297,7 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openWindow() {
         NSApp.activate()
         // The app also owns small helper windows (status item, 64pt stub): pick the chat window by title.
-        NSApp.windows.first { $0.title == "파일 도우미" }?.makeKeyAndOrderFront(nil)
+        NSApp.windows.first { $0.title == "Symbio" }?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
