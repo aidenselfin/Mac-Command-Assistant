@@ -3,10 +3,11 @@
 Voice Action AI는 자연어 명령을 제한된 MCP(Model Context Protocol) 도구 호출로 변환하는 안전 중심의 Python 애플리케이션입니다. 현재 구현은 이름과 달리 **음성 비서가 아니라 텍스트 명령 기반의 Multi-MCP 실행기**입니다. 터미널 단발 실행, 대화형 터미널, macOS Tkinter UI를 제공하며 다음 세 영역을 하나의 플래너에서 다룹니다.
 
 - 허용된 디렉터리 안의 파일 검색·목록 조회·텍스트 읽기·승인 기반 쓰기/일괄 삭제
-- 사용자가 명시한 HTTP(S) 페이지의 탐색과 읽기 전용 snapshot
-- macOS에서 현재 활성 앱 이름 조회
 
 LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케이션이 노출하는 도구를 고정하고, 모든 파일 경로와 웹 작업을 코드에서 다시 검증하며, 파일 쓰기는 사용자 승인과 Undo journal이 모두 준비된 경우에만 실행합니다.
+
+> **웹(Playwright)·macOS 활성 앱 MCP는 현재 꺼져 있다.** 코드는 [`archive/web-macos-mcp/`](archive/web-macos-mcp/README.md)에 보관했고,
+> 아래 웹·활성 앱 설명은 다시 켤 때를 위한 기록이다.
 
 ## 문서 안내
 개발자·에이전트용: [`AGENTS.md`](AGENTS.md)(작업 규칙) → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)(구조 지도) →
@@ -70,9 +71,6 @@ ruff:   All checks passed!
 | 기존 텍스트 파일 덮어쓰기 | `result.txt 내용을 ...로 바꿔줘` | overwrite로 표시하고 승인 후 실행 |
 | 파일 삭제 | `voice-action-test/result.txt 파일을 삭제해줘` | 정확한 파일 경로를 표시하고 승인·백업 후 삭제 |
 | 일괄 삭제 | `voice-action-test 폴더의 *.txt 파일을 모두 삭제해줘` | 바로 아래 파일 목록 전체를 표시하고 한 번 승인 후 삭제 |
-| 웹 페이지 읽기 | `https://example.com 페이지를 읽고 요약해줘` | URL이 사용자 원문에 정확히 있어야 하며 navigation 뒤 snapshot 필수 |
-| 웹 내용을 파일로 저장 | `https://example.com을 읽고 summary.md에 저장해줘` | URL과 출력 파일명이 원문에 있어야 하며 snapshot 성공 후 승인 필요 |
-| 현재 활성 앱 조회 | `현재 활성 앱을 알려줘` | macOS에서만 제공, Accessibility 권한 필요 |
 | 최근 쓰기/삭제 Undo | 대화형 모드에서 `undo` 또는 `되돌리기` | 최근 쓰기 하나 또는 삭제 batch 전체 복원 |
 
 읽기 전용 도구는 자동 실행됩니다. 파일 쓰기와 삭제는 항상 별도 승인이 필요합니다.

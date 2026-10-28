@@ -281,7 +281,7 @@ raise SystemExit(main.main())
         for line in output.splitlines():
             if line.startswith(b"[MCP-PID]"):
                 child_pids.append(int(line.split()[-1]))
-        assert b"[READY]" in output and len(child_pids) == 2
+        assert b"[READY]" in output and len(child_pids) == 1
         if exit_mode == "sigint":
             process.send_signal(signal.SIGINT)
             tail, errors = process.communicate(timeout=10)

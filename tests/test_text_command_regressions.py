@@ -231,6 +231,8 @@ async def test_non_save_web_request_rejects_hidden_write_before_navigation(confi
     gateway = fake_gateway()
     gateway.list_tools.return_value = [
         ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+        ToolDefinition("web__browser_navigate", "Navigate", {"type": "object"}),
+        ToolDefinition("web__browser_snapshot", "Snapshot", {"type": "object"}),
     ]
     model = AsyncMock()
     model.generate.side_effect = [
@@ -574,3 +576,30 @@ async def test_regression_reapproval_keeps_the_original_model_call_budget(config
     assert isinstance(outcome, Error)
     assert "승인된 파일 변경은 완료" in outcome.message
     assert model.generate.await_count == 1
+
+
+async def test_url_text_is_plain_text_when_no_web_tool_is_connected(config):
+    target = config.allowed_directories[0] / "links.txt"
+    gateway = fake_gateway()
+    gateway.list_tools.return_value = [
+        ToolDefinition("filesystem__write_file", "Write", {"type": "object"}),
+    ]
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "write",
+                    "filesystem__write_file",
+                    json.dumps({"path": str(target), "content": "https://example.com"}),
+                )
+            ],
+        ),
+    ]
+
+    outcome = await planner(config, gateway, model).run(
+        "https://example.com 문자열을 links.txt에 저장해줘"
+    )
+
+    assert isinstance(outcome, ApprovalRequired)

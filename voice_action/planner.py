@@ -660,8 +660,10 @@ def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) ->
     )
 
 
-def _delete_scope_error(arguments: dict, text: str, roots: tuple[Path, ...]) -> str | None:
-    if not _destructive_request(text) or USER_URL_PATTERN.search(text):
+def _delete_scope_error(
+    arguments: dict, text: str, roots: tuple[Path, ...], web: bool = True
+) -> str | None:
+    if not _destructive_request(text) or (web and USER_URL_PATTERN.search(text)):
         return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹 명령과 삭제를 분리하세요."
     text = _without_quoted_text(text, action_pattern=DELETE_ACTION_PATTERN)
     if re.search(r"제외|빼고|남기|\b(?:except|excluding|keep)\b", text, re.IGNORECASE):
@@ -1065,6 +1067,7 @@ class Planner:
         self.timing = timing or PlannerTiming.empty()
         self._event_observer = event_observer
         self._allow_local_web = allow_local_web
+        self._web_active = False  # set per command in _run_loop
 
     def set_event_observer(self, observer: PlannerEventObserver | None) -> None:
         self._event_observer = observer
@@ -1091,6 +1094,11 @@ class Planner:
             return Completed(result.message)
         return Error(result.message)
 
+    async def _web_enabled(self) -> bool:
+        # The web flow exists only while a web MCP is connected; otherwise a URL is plain text.
+        tools = self._tools if self._tools is not None else await self._gateway.list_tools()
+        return any(tool.name == WEB_NAVIGATE_TOOL for tool in tools)
+
     async def run(
         self,
         user_text: str,
@@ -1110,7 +1118,7 @@ class Planner:
                 return Error(str(exc))
             except (MCPError, OSError):
                 return Error("첨부한 파일이 허용 경로 안의 읽을 수 있는 파일이 아닙니다.")
-        if _has_ambiguous_user_url(user_text):
+        if _has_ambiguous_user_url(user_text) and await self._web_enabled():
             return Error(
                 "URL 경계가 모호합니다. 주소를 <https://example.com/경로>처럼 "
                 "꺾쇠로 감싸거나 URL 뒤에 공백을 넣어 다시 요청해 주세요."
@@ -1212,9 +1220,12 @@ class Planner:
     ) -> PlannerOutcome:
         self.timing.reset()
         tools = list(self._tools if self._tools is not None else await self._gateway.list_tools())
-        if _destructive_request(user_text) and not USER_URL_PATTERN.search(user_text):
+        web_enabled = any(tool.name == WEB_NAVIGATE_TOOL for tool in tools)
+        self._web_active = web_enabled
+        has_url = web_enabled and USER_URL_PATTERN.search(user_text) is not None
+        if _destructive_request(user_text) and not has_url:
             tools.append(DELETE_DEFINITION)
-        if not USER_URL_PATTERN.search(user_text):  # web requests keep their own tool set
+        if not has_url:  # web requests keep their own tool set
             for name, definition in DEFINITIONS.items():
                 if _operation_requested(name, user_text) or (
                     name == MKDIR_TOOL and (_operation_requested(MOVE_TOOL, user_text)
@@ -1320,7 +1331,7 @@ class Planner:
             or any(root.name in user_text or str(root) in user_text
                    for root in self.config.allowed_directories)
         )
-        user_urls = _extract_user_urls(user_text)
+        user_urls = _extract_user_urls(user_text) if web_enabled else ()
         state = _LoopState(
             user_text=user_text,
             messages=messages,
@@ -1866,14 +1877,16 @@ class Planner:
             if state.attachment is not None:
                 # The attached file is the named target (checked above to be the only one);
                 # the delete must still be the user's own plain request, not a web command.
-                if not _destructive_request(state.user_text) or USER_URL_PATTERN.search(
-                    state.user_text
+                if not _destructive_request(state.user_text) or (
+                    self._web_active and USER_URL_PATTERN.search(state.user_text)
                 ):
                     return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹과 분리하세요."
                 return None
-            return _delete_scope_error(arguments, state.user_text, self.config.allowed_directories)
+            return _delete_scope_error(
+                arguments, state.user_text, self.config.allowed_directories, self._web_active
+            )
         if call.name == FILESYSTEM_WRITE_TOOL and (
-            state.user_urls or USER_URL_PATTERN.search(state.user_text)
+            state.user_urls or (self._web_active and USER_URL_PATTERN.search(state.user_text))
         ) and not state.web_save_required:
             return "웹 내용의 파일 저장 요청이 확인되지 않아 파일을 쓸 수 없습니다."
         if (
@@ -2098,7 +2111,7 @@ class Planner:
         if response.get("decision") == "single" and _destructive_request(state.user_text):
             found = response["candidates"][0]["path"]
             if _delete_scope_error({"paths": [found]}, state.user_text,
-                                   self.config.allowed_directories):
+                                   self.config.allowed_directories, self._web_active):
                 # A descriptive delete still needs the user to name the exact candidate.
                 response = {**response, "decision": "choose"}
         spec = clarification_spec(response)

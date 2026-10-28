@@ -1,0 +1,143 @@
+# Removed from tests/test_main.py when web/macOS MCP were disabled. Not runnable as is.
+# Restore by re-adding the clients to main._build_mcp_manager and pasting these back.
+class ErrorAXAdapter:
+    def __init__(self, failure_stage, secret):
+        self.failure_stage = failure_stage
+        self.secret = secret
+
+    def is_trusted(self):
+        if self.failure_stage == "permission":
+            raise RuntimeError(self.secret)
+        return True
+
+    def get_active_app_name(self):
+        raise RuntimeError(self.secret)
+
+
+def test_build_manager_registers_full_filesystem_and_web_clients(config, monkeypatch):
+    seen = {}
+    filesystem = object()
+    web = object()
+    manager = object()
+
+    def filesystem_client(actual_config, *, allowed_tools):
+        seen["filesystem"] = (actual_config, allowed_tools)
+        return filesystem
+
+    def web_client(actual_config):
+        seen["web_config"] = actual_config
+        return web
+
+    def manager_factory(clients):
+        seen["clients"] = clients
+        return manager
+
+    monkeypatch.setattr(main.sys, "platform", "linux")
+    monkeypatch.setattr(main, "MCPClient", filesystem_client)
+    monkeypatch.setattr(main, "PlaywrightMCPClient", web_client)
+    monkeypatch.setattr(
+        main,
+        "MacOSAXClient",
+        lambda: pytest.fail("non-macOS에서 AX client를 생성하면 안 됩니다."),
+    )
+    monkeypatch.setattr(main, "MCPManager", manager_factory)
+
+    assert main._build_mcp_manager(config) is manager
+    assert seen["filesystem"] == (config, SUPPORTED_TOOLS)
+    assert seen["web_config"] is config
+    assert seen["clients"] == {"filesystem": filesystem, "web": web}
+
+
+def test_build_manager_registers_macos_client_only_on_darwin(config, monkeypatch):
+    filesystem, web, macos = object(), object(), object()
+    seen = {}
+
+    monkeypatch.setattr(main.sys, "platform", "darwin")
+    monkeypatch.setattr(main, "MCPClient", lambda *_args, **_kwargs: filesystem)
+    monkeypatch.setattr(main, "PlaywrightMCPClient", lambda _config: web)
+    monkeypatch.setattr(main, "MacOSAXClient", lambda: macos)
+    monkeypatch.setattr(
+        main,
+        "MCPManager",
+        lambda clients: seen.setdefault("clients", clients),
+    )
+
+    assert main._build_mcp_manager(config) == {
+        "filesystem": filesystem,
+        "web": web,
+        "macos": macos,
+    }
+    assert seen["clients"] == {
+        "filesystem": filesystem,
+        "web": web,
+        "macos": macos,
+    }
+
+
+@pytest.mark.parametrize("failure_stage", ["permission", "query"])
+async def test_run_text_continues_filesystem_after_bounded_ax_error(
+    config, monkeypatch, capsys, failure_stage
+):
+    secret = "raw-ax-error PID=5137 payload=private-window-title"
+    filesystem = FakeLifecycleClient(
+        [ToolDefinition("list_directory", "List", {"type": "object"})],
+        "[FILE] 한글 메모.txt",
+    )
+    web = FakeLifecycleClient(
+        [ToolDefinition("browser_snapshot", "Snapshot", {"type": "object"})],
+        "page snapshot",
+    )
+    macos = MacOSAXClient(ErrorAXAdapter(failure_stage, secret))
+    manager = MCPManager(
+        {"filesystem": filesystem, "web": web, "macos": macos}
+    )
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(
+            None,
+            [ToolCall("active", "macos__get_active_app", "{}")],
+        ),
+        ModelTurn(
+            None,
+            [
+                ToolCall(
+                    "files",
+                    "filesystem__list_directory",
+                    json.dumps({"path": str(config.allowed_directories[0])}),
+                )
+            ],
+        ),
+        ModelTurn("AX 오류 뒤 파일 목록 조회 완료", []),
+    ]
+    FakeOpenAI.instances.clear()
+    monkeypatch.setattr(main, "_build_mcp_manager", lambda _config: manager)
+    monkeypatch.setattr(main, "AsyncOpenAI", FakeOpenAI)
+    monkeypatch.setattr(main, "OpenAICompatibleModel", lambda _client, _model: model)
+
+    await main.run_text(config, "활성 앱 확인 후 파일 목록", main.Console())
+
+    ax_message = model.generate.await_args_list[1].args[0][-1]
+    assert ax_message["role"] == "tool"
+    assert ax_message["tool_call_id"] == "active"
+    assert ax_message["content"].startswith("tool_error:")
+    assert secret not in ax_message["content"]
+    assert filesystem.calls == [
+        (
+            "list_directory",
+            {"path": str(config.allowed_directories[0])},
+        )
+    ]
+    assert web.calls == []
+    assert filesystem.closed and web.closed
+    assert not macos._connected
+    assert manager.tools == []
+    assert len(FakeOpenAI.instances) == 1
+    assert FakeOpenAI.instances[0].closed
+    output = capsys.readouterr().out
+    assert "[TOOL-ERROR] iteration=1 name=macos__get_active_app" in output
+    assert "[DONE] AX 오류 뒤 파일 목록 조회 완료" in output
+    assert secret not in output
+    assert "PID=5137" not in output
+    assert "private-window-title" not in output
+
+

@@ -4,8 +4,8 @@ import time
 from contextlib import asynccontextmanager
 
 import pytest
-
 from voice_action.macos_client import EMPTY_OBJECT_SCHEMA, MacOSAXClient
+
 from voice_action.mcp_client import (
     MCPToolNotFoundError,
     ToolDefinition,
