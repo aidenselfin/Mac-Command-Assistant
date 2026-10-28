@@ -3,10 +3,11 @@
 Voice Action AI는 자연어 명령을 제한된 MCP(Model Context Protocol) 도구 호출로 변환하는 안전 중심의 Python 애플리케이션입니다. 현재 구현은 이름과 달리 **음성 비서가 아니라 텍스트 명령 기반의 Multi-MCP 실행기**입니다. 터미널 단발 실행, 대화형 터미널, macOS Tkinter UI를 제공하며 다음 세 영역을 하나의 플래너에서 다룹니다.
 
 - 허용된 디렉터리 안의 파일 검색·목록 조회·텍스트 읽기·승인 기반 쓰기/일괄 삭제
-- 사용자가 명시한 HTTP(S) 페이지의 탐색과 읽기 전용 snapshot
-- macOS에서 현재 활성 앱 이름 조회
 
 LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케이션이 노출하는 도구를 고정하고, 모든 파일 경로와 웹 작업을 코드에서 다시 검증하며, 파일 쓰기는 사용자 승인과 Undo journal이 모두 준비된 경우에만 실행합니다.
+
+> **웹(Playwright)·macOS 활성 앱 MCP는 현재 꺼져 있다.** 코드는 [`archive/web-macos-mcp/`](archive/web-macos-mcp/README.md)에 보관했고,
+> 아래 웹·활성 앱 설명은 다시 켤 때를 위한 기록이다.
 
 ## 문서 안내
 개발자·에이전트용: [`AGENTS.md`](AGENTS.md)(작업 규칙) → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)(구조 지도) →
@@ -24,7 +25,7 @@ LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케
 
 ```sh
 uv sync --locked --extra semantic
-VOICE_ACTION_SEMANTIC_SEARCH=on uv run --extra semantic python main.py --ui   # 또는 .voice-action/config.env에 적는다
+echo "VOICE_ACTION_SEMANTIC_SEARCH=on" >> .voice-action/config.env
 ```
 
 - 앱이 시작되면 백그라운드에서 모델을 불러오고(약 20초) 허용 폴더를 색인한다. 파일 20개 기준 약 30초이고,
@@ -70,9 +71,6 @@ ruff:   All checks passed!
 | 기존 텍스트 파일 덮어쓰기 | `result.txt 내용을 ...로 바꿔줘` | overwrite로 표시하고 승인 후 실행 |
 | 파일 삭제 | `voice-action-test/result.txt 파일을 삭제해줘` | 정확한 파일 경로를 표시하고 승인·백업 후 삭제 |
 | 일괄 삭제 | `voice-action-test 폴더의 *.txt 파일을 모두 삭제해줘` | 바로 아래 파일 목록 전체를 표시하고 한 번 승인 후 삭제 |
-| 웹 페이지 읽기 | `https://example.com 페이지를 읽고 요약해줘` | URL이 사용자 원문에 정확히 있어야 하며 navigation 뒤 snapshot 필수 |
-| 웹 내용을 파일로 저장 | `https://example.com을 읽고 summary.md에 저장해줘` | URL과 출력 파일명이 원문에 있어야 하며 snapshot 성공 후 승인 필요 |
-| 현재 활성 앱 조회 | `현재 활성 앱을 알려줘` | macOS에서만 제공, Accessibility 권한 필요 |
 | 최근 쓰기/삭제 Undo | 대화형 모드에서 `undo` 또는 `되돌리기` | 최근 쓰기 하나 또는 삭제 batch 전체 복원 |
 
 읽기 전용 도구는 자동 실행됩니다. 파일 쓰기와 삭제는 항상 별도 승인이 필요합니다.
@@ -103,9 +101,7 @@ batch와 journal 기록이 끝나기를 기다린 뒤 창을 닫습니다. 재�
 
 | 실행 모드 | 쓰기 요청 처리 |
 |---|---|
-| `--text` | 승인 정보를 출력하고 종료합니다. 실제 파일을 쓰거나 삭제하지 않습니다. |
-| `--interactive` | `승인`, `approve`, `yes`, `y` 중 하나를 입력해야 실행합니다. |
-| `--ui` | 표시된 대상·작업·미리보기를 확인하고 `승인` 버튼을 눌러야 실행합니다. |
+| 네이티브 앱(`native-preview/`) | 표시된 대상·작업·미리보기를 확인하고 `승인` 버튼을 눌러야 실행합니다. |
 
 거절 토큰은 `거절`, `reject`, `no`, `n`, `취소`, `cancel`, `c`입니다. 대소문자와 앞뒤 공백은 정규화하지만, 빈 입력이나 알 수 없는 문자열은 승인으로 취급하지 않습니다.
 
@@ -181,80 +177,18 @@ OpenAI를 사용할 때는 provider를 `openai`로 지정하고 `OPENAI_API_KEY`
 
 ## 빠른 시작
 
-### 단발 명령
+### 화면
 
 ```sh
-uv run python main.py --text "voice-action-test 폴더 파일 목록 보여줘"
+./native-preview/run.sh
 ```
 
-단발 모드는 읽기 작업에 적합합니다. 쓰기가 필요하면 승인 정보를 표시하지만 입력을 기다리지 않고 종료합니다.
-
-### 대화형 터미널
-
-```sh
-uv run python main.py --interactive
-```
-
-대화형 모드는 한 번 연결한 MCP 프로세스와 HTTP client를 여러 명령에서 재사용합니다.
-
-```text
-> test1.md를 읽고 summary.txt에 요약해줘
-[APPROVAL REQUIRED]
-...
-> 승인
-[DONE] ...
-> undo
-[DONE] 생성한 파일을 되돌렸습니다.
-> exit
-```
-
-`exit`, `quit`, EOF는 정상 종료하고 Ctrl+C는 종료 코드 130으로 끝납니다.
-
-### Tkinter UI
-
-```sh
-uv run python main.py --ui
-```
-
-UI는 다음을 표시합니다.
-
-- 현재 runtime 상태
-- 실행 중인 namespaced 도구 이름
-- 최종 결과 또는 오류
-- clarification 선택지(버튼·숫자 키)와 답변 평가 버튼(1~5, 숫자 키)
-- 쓰기 대상, create/overwrite 여부, 문자 수, 최대 200자의 미리보기
-- 승인·거절·취소·Undo 제어
-
-Tk main thread와 별도의 non-daemon worker thread가 동작합니다. worker가 하나의 asyncio loop, MCP 세션들, HTTP client를 소유합니다. 실행 중 취소하면 active command를 취소하고 관련 자원을 정리한 뒤 창을 닫습니다. 승인 대기 중 취소는 거절로 처리되어 파일을 쓰지 않습니다.
+화면은 SwiftUI 네이티브 앱 하나입니다(예전 `--interactive`·Tkinter `--ui`는 제거했습니다). 앱은 Python 백엔드(`voice_action/native_bridge.py`)와 JSON lines로 통신하며, 규약은 `docs/native-protocol.md`에 있습니다.
 
 ## 명령행 옵션
 
-세 실행 모드 중 정확히 하나가 필요합니다.
-
-```text
---text TEXT
---interactive
---ui
-```
-
-공통 override:
-
-```text
---provider {openai,groq,openrouter}
---model MODEL
---base-url URL
---allowed-directory PATH   # 반복 가능
-```
-
-예시:
-
-```sh
-uv run python main.py \
-  --interactive \
-  --provider openai \
-  --model gpt-4o-mini \
-  --allowed-directory /absolute/path/to/documents
-```
+`main.py`는 피드백 lesson 관리 전용입니다(아래 "lesson 관리"). 명령 실행은 네이티브 앱에서 합니다.
+provider·모델·허용 폴더는 `config.json`과 `.voice-action/config.env`로 정합니다.
 
 허용 디렉터리는 실행 시 존재하는 실제 디렉터리여야 합니다. 상대경로는 현재 작업 디렉터리를 기준으로 해석되므로 일반적으로 저장소 root에서 실행해야 합니다.
 
@@ -485,34 +419,17 @@ local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
 
 파일 작업을 Finder와 이어 줍니다. 모든 작업은 허용 폴더 안에서만 일어납니다.
 
-**파일 첨부(드래그).** `--ui` 창 어디에나 Finder의 파일 하나를 끌어다 놓으면 `📎 파일명`이 표시되고, **다음 명령 하나**의 대상이 됩니다. 놓는다고 실행되지는 않습니다.
+**파일 첨부(드래그).** 앱 창 어디에나 Finder의 파일 하나를 끌어다 놓으면 `📎 파일명`이 표시되고, **다음 명령 하나**의 대상이 됩니다. 놓는다고 실행되지는 않습니다.
 
 - 허용 폴더 밖의 파일, 링크, 폴더, 없는 파일은 첨부하지 않고 이유와 함께 **요청을 거부**합니다. 파일을 둘 이상 놓아도 거부합니다. 앞서 첨부한 파일은 유지됩니다.
 - 경로는 놓을 때와 명령을 실행하기 직전에 두 번 확인합니다. 그 사이 링크로 바뀌면 모델을 부르기 전에 거부합니다.
 - 첨부하면 그 파일이 곧 대상이라 `local__find_files`를 쓰지 않고, 그 파일만 읽을 수 있으며, 내용에 관한 요청은 읽기 전에 끝낼 수 없습니다. 삭제·변환은 첨부한 파일 하나로 제한되고(`이 파일 삭제해줘`처럼 파일명을 적지 않아도 됨) 승인·Undo는 그대로입니다.
 - 질문(clarification)에 답하는 동안에는 첨부가 유지되고, 새 명령을 보내면 비워집니다. `✕ 해제`로 직접 지울 수도 있습니다.
-- 터미널에서는 `attach <경로>`(공백이 있으면 따옴표)와 `detach`가 같은 일을 합니다.
-- 드래그에는 `tkinterdnd2`를 씁니다. 없거나 초기화에 실패하면 드롭 없이 창이 그대로 열립니다.
 
 **Finder에서 결과 보기.** 파일을 만들거나 바꾸는 작업(텍스트 쓰기, 변환)이 **성공**하면 그 파일을 Finder에서 선택한 채로 보여 줍니다. 경로는 모델의 답변이 아니라 앱이 실제로 쓴 경로(`Completed.changed_paths`)이고, 표시 직전에 허용 폴더 안인지·링크가 아닌지·존재하는지 다시 확인합니다. 승인 대기·거절·실패·삭제·Undo에서는 열지 않습니다. Finder를 열지 못해도 작업 결과는 그대로입니다. `VOICE_ACTION_FINDER_REVEAL=off`로 끕니다(기본 on).
 
-**Finder 옆의 작은 대화 패널.** `--ui`는 360×560pt 창(최소 360×480)으로 열립니다.
-macOS 기본 버튼과 밝은/어두운 시스템 색상을 사용합니다. 승인 목록은 작은 창에서도
-전체 내용을 스크롤로 확인하며, 파일 선택과 평가 원인 버튼은 세로로 배치됩니다.
-
-앱 실행 중 Finder가 활성화되면 0.5초 간격으로 현재 Finder 창을 확인하고 같은 화면의
-오른쪽(공간이 부족하면 왼쪽)에 패널을 놓습니다. Finder 창은 이동하지 않습니다.
-다른 앱으로 전환하면 대기 중이고 입력창이 빈 패널을 숨기고, Finder로 돌아오면 다시 표시합니다.
-실행·질문·승인 대기 중에는 숨기지 않습니다. 표시 과정에서 키보드 포커스를 강제로 가져오지 않습니다.
-공간 부족·권한 없음·창 정보 조회 실패 시에는 독립 창으로 사용할 수 있습니다.
-상단 `−`는 최소화이며 제목 막대 닫기는 앱을 종료합니다.
-
-- 자동 배치는 손쉬운 사용(Accessibility) 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 >
-  손쉬운 사용에서 실행한 터미널 또는 Python을 허용하세요. 권한이 없으면 안내를 한 번 표시합니다.
-- `VOICE_ACTION_FINDER_DOCK=off`로 자동 배치·숨김을 끕니다. Finder 결과 표시는
-  `VOICE_ACTION_FINDER_REVEAL=off`로 별도로 끕니다.
+- 자동 배치를 끄려면 `VOICE_ACTION_FINDER_DOCK=off`, Finder 결과 표시를 끄려면 `VOICE_ACTION_FINDER_REVEAL=off`입니다.
 - 현재 Finder 폴더에 따라 파일 접근 권한이 바뀌지는 않습니다. `allowed_directories`가 그대로 적용됩니다.
-- 앱이 실행되어 있어야 자동 표시됩니다. 로그인 자동 실행은 설정하지 않습니다.
 
 ## 처리 흐름
 
@@ -648,7 +565,7 @@ Undo 동작:
 기존 `undo_entries` 테이블과 쓰기 이력은 유지합니다. 삭제는 같은 DB의 `delete_batches`와
 `delete_files`에 별도로 기록하며, 쓰기/삭제 중 가장 최근 활성 작업부터 Undo합니다.
 
-`--interactive`에서는 IDLE 상태에서 정확히 `undo` 또는 `되돌리기`를 입력합니다. UI에서는 IDLE일 때만 Undo 버튼이 활성화됩니다. `--text`는 자연어 Undo를 특별 처리하지 않습니다.
+네이티브 앱에서는 IDLE일 때만 Undo 버튼이 활성화됩니다. 
 
 ## 오류, 제한 및 자원 정리
 
@@ -666,7 +583,7 @@ Undo 동작:
 ## 프로젝트 구조
 
 ```text
-main.py                         CLI entry point
+main.py                         피드백 lesson 관리 CLI
 voice_action/
   config.py                    설정 병합·검증과 secret 정책
   mcp_client.py                Filesystem MCP client와 경로 경계
@@ -677,7 +594,7 @@ voice_action/
   risk_guard.py                고정 위험 분류와 쓰기 승인
   runtime.py                   single-flight 상태 머신
   undo.py                      SQLite write-ahead Undo journal
-  ui.py                        Tkinter presenter/view와 async worker
+  ui.py                        presenter와 async worker(네이티브 브리지 공용)
 tests/                         단위·통합 테스트
 voice-action-test/             기본 허용 root와 예제 파일
 config.example.json            설정 예시
@@ -735,11 +652,11 @@ journal은 `$TMP_WORKDIR/.voice-action/undo.sqlite3`에만 생성되고, 기존 
 
 ```sh
 cd "$TMP_WORKDIR"
-PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/main.py" \
-  --interactive --allowed-directory "$TMP_ROOT"
+PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/llm_mcp_transcript.py" \
+  "<아래 입력>" --allowed-directory "$TMP_ROOT"
 ```
 
-대화형 세션에서 다음 시나리오를 **서로 분리해** 확인합니다.
+다음 시나리오를 **서로 분리해** 한 번씩 확인합니다. 승인 후 실행과 Undo는 이 도구가 승인 정보만 출력하고 끝나므로 네이티브 앱에서 확인합니다.
 
 | 시나리오 | 입력 및 판정할 안전 불변식 |
 |---|---|

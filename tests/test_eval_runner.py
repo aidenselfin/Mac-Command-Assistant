@@ -106,3 +106,13 @@ async def test_live_runs_leave_out_negative_control_tasks(monkeypatch):
 def test_code_hash_covers_entry_point_and_harness():
     names = {p.name for p in run_eval.code_files()}
     assert {"main.py", "run_eval.py", "planner.py"} <= names
+
+
+def test_auto_answer_picks_the_option_the_request_names_and_gives_up_otherwise():
+    from types import SimpleNamespace
+
+    ask = lambda *options: SimpleNamespace(options=options)  # noqa: E731
+    t = {"request": "a.txt 지워줘", "expect": {"files": {}}}
+    assert run_eval.auto_answer(ask("/r/a_old.txt", "/r/a.txt"), t, Path("/r")) == "2번"
+    assert run_eval.auto_answer(ask("/r/x.txt", "/r/y.txt"), t, Path("/r")) is None
+    assert "/r" in run_eval.auto_answer(ask(), t, Path("/r"))
