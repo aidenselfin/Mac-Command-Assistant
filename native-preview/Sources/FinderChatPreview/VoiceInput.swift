@@ -54,7 +54,8 @@ final class VoiceInput: ObservableObject {
     }
 
     private func flagsChanged(key: UInt16, flags: UInt) {
-        guard key == Self.rightOptionKey else { return }
+        // Another modifier joining the hold (Shift, Command, ...) makes it a shortcut, not speech.
+        guard key == Self.rightOptionKey else { discard(); return }
         if flags & Self.rightOptionBit != 0 { begin() } else { finish() }
     }
 
@@ -92,7 +93,7 @@ final class VoiceInput: ObservableObject {
         }
     }
 
-    private func discard() {
+    func discard() {
         guard recording, let current = recorder else { return }
         recording = false
         badge?.orderOut(nil)

@@ -241,6 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        VoiceInput.shared.discard()  // a clip still being recorded must not stay in the temp folder
         guard Backend.shared.running else { return .terminateNow }
         Backend.shared.shutdown { sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
