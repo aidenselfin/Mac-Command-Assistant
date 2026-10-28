@@ -10,10 +10,14 @@ final class Toast {
     private var hide: Task<Void, Never>?
     private static let width: CGFloat = 320
 
+    private var asked = ""
+
+    /// A reply is shown under the question it answers, so a fast answer does not hide what was heard.
     func show(_ role: String, _ text: String) {
         let shown = text.count > 160 ? String(text.prefix(160)) + "…" : text
-        let prefix = role == "user" ? "나 · " : role == "error" ? "오류 · " : ""
-        label.stringValue = prefix + shown
+        if role == "user" { asked = "나 · " + shown }
+        label.stringValue = role == "user" ? asked
+            : (asked.isEmpty ? "" : asked + "\n") + (role == "error" ? "오류 · " : "") + shown
         label.textColor = role == "error" ? .systemRed : .labelColor
         let panel = panel ?? makePanel()
         let height = label.sizeThatFits(NSSize(width: Self.width - 24, height: .greatestFiniteMagnitude)).height + 16
@@ -47,7 +51,7 @@ final class Toast {
         box.layer?.cornerRadius = 10
         box.layer?.masksToBounds = true
         label.font = .systemFont(ofSize: 12)
-        label.maximumNumberOfLines = 4
+        label.maximumNumberOfLines = 6
         label.lineBreakMode = .byTruncatingTail
         box.addSubview(label)
         panel.contentView = box
