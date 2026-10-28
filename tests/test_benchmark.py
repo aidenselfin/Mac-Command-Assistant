@@ -202,6 +202,7 @@ def test_target_tasks_have_expect_and_no_script():
 
 def test_overall_is_100_only_when_every_axis_is_100():
     assert benchmark.overall({"a": 100, "b": 99}, {"a": 1, "b": 1}) == 99
+    assert benchmark.overall({"a": 15, "b": 34}, {"a": 1, "b": 1}) == 25
     assert benchmark.overall({"a": 100, "b": 100}, {"a": 1, "b": 1}) == 100
 
 
@@ -224,3 +225,9 @@ def test_latest_live_result_skips_newer_replay_files(tmp_path):
     (tmp_path / "1.json").write_text(json.dumps({"versions": {"model": "live"}, "trials": []}))
     (tmp_path / "2.json").write_text(json.dumps({"versions": {"model": "scripted"}, "trials": []}))
     assert benchmark.latest_live_result(tmp_path).name == "1.json"
+
+
+def test_axis_with_a_run_target_is_measured():
+    tasks = [t("a", "see", 5), t("b", "read", 40, status="target")]
+    report = benchmark.evaluate(tasks, [trial("a"), trial("b")], CONFIG)
+    assert report["axes"]["read"]["score"] == 40

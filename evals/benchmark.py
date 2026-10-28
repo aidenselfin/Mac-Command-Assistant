@@ -58,8 +58,10 @@ def overall(axis_scores: dict[str, int | None], weights: dict[str, float]) -> in
     total = sum(weights.get(a, 1) for a in measured)
     if not total:
         return None
-    # floor, not round: 100 must mean every measured axis is exactly 100
-    return math.floor(sum(s * weights.get(a, 1) for a, s in measured.items()) / total + 1e-9)
+    value = sum(s * weights.get(a, 1) for a, s in measured.items()) / total
+    if all(s == 100 for s in measured.values()):
+        return 100
+    return min(99, math.floor(value + 0.5))  # 100 is reserved for every axis being 100
 
 
 def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
@@ -70,11 +72,12 @@ def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
         if t.get("axis") in axes and isinstance(t.get("level"), int) and 1 <= t["level"] <= 100
     ]
     rates = task_rates(classified, trials)
+    ran_ids = {r["task"] for r in trials}
     pairs, ran = defaultdict(list), set()
     for t in classified:
         if rates.get(t["id"]) is not None:
             pairs[t["axis"]].append((t["level"], rates[t["id"]]))
-            if t.get("status") != "target":
+            if t.get("status") != "target" or t["id"] in ran_ids:
                 ran.add(t["axis"])  # unrun targets alone must not make an axis "measured"
     scores = {a: axis_score(pairs[a], config["threshold"]) if a in ran else None for a in axes}
     return {

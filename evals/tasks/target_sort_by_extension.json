@@ -9,7 +9,7 @@
     "b.png": "B",
     "c.txt": "C"
   },
-  "request": "확장자별로 폴더를 만들어 나눠 정리해줘",
+  "request": "확장자별로 txt, png 폴더를 만들어 나눠 정리해줘",
   "user": {
     "approve": [
       true,
@@ -25,9 +25,9 @@
       "a.txt": null,
       "c.txt": null,
       "b.png": null,
-      "문서/a.txt": "A",
-      "문서/c.txt": "C",
-      "이미지/b.png": "B"
+      "txt/a.txt": "A",
+      "txt/c.txt": "C",
+      "png/b.png": "B"
     },
     "must_run": [
       "local__move_file"
