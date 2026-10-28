@@ -2,7 +2,7 @@
   "id": "delete_approve",
   "family": "file.delete",
   "axis": "organize",
-  "level": 66,
+  "level": 56,
   "status": "active",
   "files": {
     "old.log": "x",

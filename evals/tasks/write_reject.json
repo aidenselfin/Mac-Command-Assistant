@@ -2,7 +2,7 @@
   "id": "write_reject",
   "family": "file.write.create",
   "axis": "organize",
-  "level": 55,
+  "level": 6,
   "status": "active",
   "files": {
     "notes.txt": "회의 결론: 금요일 배포"

@@ -1,0 +1,35 @@
+{
+  "id": "see_nested_search",
+  "family": "file.find",
+  "axis": "see",
+  "level": 66,
+  "status": "active",
+  "files": {
+    "프로젝트/하위/깊은/영수증.txt": "x",
+    "a.txt": "y"
+  },
+  "request": "영수증 파일이 어디 있어?",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__find_files",
+          "args": {
+            "keywords": [
+              "영수증"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "text": "프로젝트/하위/깊은/영수증.txt에 있습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "영수증.txt"
+    ]
+  }
+}

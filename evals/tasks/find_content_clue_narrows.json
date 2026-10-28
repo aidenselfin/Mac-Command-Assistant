@@ -2,7 +2,7 @@
   "id": "find_content_clue_narrows",
   "family": "file.find.ask",
   "axis": "read",
-  "level": 32,
+  "level": 54,
   "status": "active",
   "files": {
     "proposal-1.txt": "일반 내용",

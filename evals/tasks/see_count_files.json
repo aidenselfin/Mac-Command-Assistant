@@ -1,0 +1,35 @@
+{
+  "id": "see_count_files",
+  "family": "file.list",
+  "axis": "see",
+  "level": 28,
+  "status": "active",
+  "files": {
+    "a.txt": "1",
+    "b.txt": "2",
+    "c.md": "3",
+    "d.csv": "4"
+  },
+  "request": "이 폴더에 파일이 모두 몇 개야?",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}"
+          }
+        }
+      ]
+    },
+    {
+      "text": "파일은 모두 4개입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "4개"
+    ]
+  }
+}

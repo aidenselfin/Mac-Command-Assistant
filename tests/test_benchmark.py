@@ -107,7 +107,7 @@ def test_guidance_picks_lowest_failing_level_per_axis():
     trials = [trial("a"), {**trial("b", False), "problems": ["files: x"]}, trial("c", False)]
     guide = benchmark.guidance(benchmark.evaluate(tasks, trials, CONFIG), tasks, trials)
     assert guide["blocked"]["see"] == {
-        "task": "b", "level": 9, "rate": 0.0, "problems": ["files: x"]
+        "task": "b", "level": 9, "rate": 0.0, "problems": ["files: x"], "kind": "active"
     }
 
 
@@ -284,3 +284,74 @@ def test_main_records_when_exactly_half_invalid(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     _write_trials(tmp_path, [trial("a"), trial("a", False, False)])
     assert benchmark.main([]) == 0
+
+
+def test_every_axis_ladder_is_filled_from_easy_to_hard():
+    config = benchmark.load_config()
+    for axis in config["axes"]:
+        levels = sorted(
+            t["level"] for t in _tasks() if not t.get("negative") and t.get("axis") == axis
+        )
+        assert len(levels) >= 8, axis
+        assert levels[0] <= 15 and levels[-1] >= 90, axis
+        assert max(b - a for a, b in zip(levels, levels[1:], strict=False)) <= 25, axis
+
+
+def test_active_tasks_have_scripts_so_replay_checks_the_grader():
+    for task in _tasks():
+        if task.get("status") == "active" and not task.get("negative"):
+            assert "script" in task, task["id"]
+
+
+def test_guidance_marks_unbuilt_targets_apart_from_broken_tasks():
+    tasks = [t("a", "see", 5), t("b", "read", 40, status="target")]
+    trials = [trial("a"), trial("b", False)]
+    guide = benchmark.guidance(benchmark.evaluate(tasks, trials, CONFIG), tasks, trials)
+    assert guide["blocked"]["read"]["kind"] == "target"
+
+
+def test_render_lists_next_goals_by_level_with_cost():
+    tasks = [t("a", "see", 30), t("b", "read", 10)]
+    trials = [{**trial("a", False), "model_calls": 3, "seconds": 120},
+              {**trial("b", False), "model_calls": 2, "seconds": 60}]
+    report = benchmark.evaluate(tasks, trials, CONFIG)
+    text = benchmark.render(report, benchmark.guidance(report, tasks, trials))
+    assert text.index("b (read 10") < text.index("a (see 30")
+    assert "모델 호출 5회" in text and "3분" in text
+
+
+def test_compare_is_skipped_when_the_ladder_changed(monkeypatch, tmp_path, capsys):
+    _setup(monkeypatch, tmp_path)
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps({"report": {"ladder": 1, "overall": 1, "axes": {}}}))
+    assert benchmark.main(["--compare", str(old)]) == 0
+    assert "사다리가 달라" in capsys.readouterr().out
+
+
+def test_no_save_keeps_no_record(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    assert benchmark.main(["--no-save"]) == 0
+    assert not (tmp_path / "benchmarks").exists()
+
+
+def test_render_shortens_long_name_lists():
+    report = benchmark.evaluate([t("a", "see", 5)], [trial("a")], CONFIG)
+    report["not_run"] = [f"t{i}" for i in range(9)]
+    line = [x for x in benchmark.render(report, {"weakest_axis": None, "blocked": {}}).split("\n")
+            if x.startswith("미실행")][0]
+    assert "외 4개" in line and "t8" not in line
+
+
+def test_tasks_edited_after_the_run_are_not_scored(monkeypatch, tmp_path, capsys):
+    import hashlib
+
+    _setup(monkeypatch, tmp_path)
+    task = t("a", "see", 5)
+    edited = json.dumps({**task, "level": 9}, sort_keys=True).encode()
+    stale = hashlib.sha256(edited).hexdigest()[:12]
+    path = next((tmp_path / "results").glob("*.json"))
+    versions = {"model": "m", "tasks": {"a": stale}}
+    path.write_text(json.dumps({"versions": versions, "trials": [trial("a")]}))
+    benchmark.main(["--no-save"])
+    out = capsys.readouterr().out
+    assert "측정 안 됨" in out and "측정 뒤 바뀐 과제" in out

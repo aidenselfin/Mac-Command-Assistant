@@ -91,6 +91,12 @@ def evaluate(tasks: list[dict], trials: list[dict], config: dict) -> dict:
         "not_run": [t["id"] for t in classified if t["id"] not in rates],
         "unclassified": [t["id"] for t in graded if t not in classified],
         "invalid_only": [i for i, r in rates.items() if r is None],
+        "ladder": config.get("ladder"),
+        "cost": {
+            "trials": len(trials),
+            "calls": sum(r.get("model_calls") or 0 for r in trials),
+            "seconds": round(sum(r.get("seconds") or 0 for r in trials)),
+        },
         "invalid_trials": sum(
             1 for r in trials if not r["valid"] and r["task"] in {t["id"] for t in classified}
         ),
@@ -138,7 +144,9 @@ def guidance(report: dict, tasks: list[dict], trials: list[dict], threshold: flo
                 for p in r.get("problems", []) + r.get("violations", [])
             })
             blocked[axis] = {
-                "task": t["id"], "level": t["level"], "rate": rates[t["id"]], "problems": problems
+                "task": t["id"], "level": t["level"], "rate": rates[t["id"]], "problems": problems,
+                # active = something that should work is broken (fix); target = not built yet
+                "kind": "target" if t.get("status") == "target" else "active",
             }
     measured = {a: i["score"] for a, i in report["axes"].items() if i["measured"]}
     weakest = min(measured, key=measured.get) if measured else None
@@ -176,13 +184,21 @@ def render(report: dict, guide: dict, delta: dict | None = None) -> str:
         lines.append(f"INVALID 시도 {report['invalid_trials']}회는 통과율에서 제외")
     if guide["weakest_axis"]:
         lines.append(f"가장 약한 축: {guide['weakest_axis']}")
-    for axis, b in guide["blocked"].items():
-        lines.append(f"막힘 {axis}: {b['task']} (단계 {b['level']}, 통과율 {b['rate']:.0%})")
+    ordered = sorted(guide["blocked"].items(), key=lambda kv: kv[1]["level"])
+    for axis, b in ordered[:3]:
+        what = "만들 것" if b["kind"] == "target" else "고칠 것"
+        lines.append(f"{what}: {b['task']} ({axis} {b['level']}단계, 통과 {b['rate']:.0%})")
+    cost = report.get("cost")
+    if cost and cost["trials"]:
+        lines.append(f"측정 비용: 시도 {cost['trials']}회, 모델 호출 {cost['calls']}회, "
+                     f"{cost['seconds'] // 60}분")
     notes = (("not_run", "미실행"), ("unclassified", "미분류"), ("invalid_only", "INVALID뿐"),
-             ("stale", "과제 바뀜"))
+             ("stale", "측정 뒤 바뀐 과제(미실행 처리)"))
     for key, label in notes:
         if report.get(key):
-            lines.append(f"{label} {len(report[key])}개: {', '.join(report[key])}")
+            names = report[key]
+            more = f" 외 {len(names) - 5}개" if len(names) > 5 else ""
+            lines.append(f"{label} {len(names)}개: {', '.join(names[:5])}{more}")
     return "\n".join(lines)
 
 
@@ -190,6 +206,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--result", type=Path, help="run_eval live result (default: latest)")
     parser.add_argument("--compare", type=Path, help="earlier file from evals/benchmarks/")
+    parser.add_argument("--no-save", action="store_true", help="print only; keep no record")
     args = parser.parse_args(argv)
     result = args.result or latest_live_result(RESULTS)
     if result is None:
@@ -201,16 +218,25 @@ def main(argv=None) -> int:
         return 2
     config = load_config()
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(TASKS.glob("*.json"))]
-    report = evaluate(tasks, data["trials"], config)
-    report["stale"] = stale_tasks(tasks, data.get("versions", {}).get("tasks", {}))
-    guide = guidance(report, tasks, data["trials"], config["threshold"])
+    # a task edited after the run no longer matches its result: score it as not run
+    stale = stale_tasks(tasks, data.get("versions", {}).get("tasks", {}))
+    trials = [r for r in data["trials"] if r["task"] not in stale]
+    report = evaluate(tasks, trials, config)
+    report["stale"] = stale
+    guide = guidance(report, tasks, trials, config["threshold"])
     delta = None
     if args.compare:
-        delta = compare(report, json.loads(args.compare.read_text(encoding="utf-8"))["report"])
+        old = json.loads(args.compare.read_text(encoding="utf-8"))["report"]
+        if old.get("ladder") == report["ladder"]:
+            delta = compare(report, old)
+        else:
+            print("과제 사다리가 달라 이전 기록과 비교하지 않습니다.")
     print(render(report, guide, delta))
     if sum(not r["valid"] for r in data["trials"]) * 2 > len(data["trials"]):
         print("INVALID가 절반을 넘어 점수를 믿을 수 없습니다. 기록하지 않습니다(키·네트워크 확인).")
         return 2
+    if args.no_save:
+        return 0
     BENCHMARKS.mkdir(exist_ok=True)
     record = json.dumps(
         {"versions": data.get("versions"), "source": result.name, "report": report,

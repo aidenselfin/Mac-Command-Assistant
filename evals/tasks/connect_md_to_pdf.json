@@ -1,0 +1,37 @@
+{
+  "id": "connect_md_to_pdf",
+  "family": "file.convert",
+  "axis": "connect",
+  "level": 50,
+  "status": "active",
+  "files": {
+    "memo.md": "# 제목\n본문입니다."
+  },
+  "request": "memo.md를 pdf로 변환해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/memo.md",
+            "target_format": "pdf"
+          }
+        }
+      ]
+    },
+    {
+      "text": "memo.pdf를 만들었습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "memo.pdf": "*"
+    }
+  }
+}

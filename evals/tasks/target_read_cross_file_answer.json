@@ -1,0 +1,19 @@
+{
+  "id": "target_read_cross_file_answer",
+  "family": "file.read",
+  "axis": "read",
+  "level": 95,
+  "status": "target",
+  "files": {
+    "인사.txt": "김하늘 팀장은 영업팀 소속이다.",
+    "팀.txt": "영업팀의 연간 예산은 3천만원이다.",
+    "잡담.txt": "점심 메뉴는 김밥"
+  },
+  "request": "김하늘 팀장이 속한 팀의 예산은 얼마야?",
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "3천만원"
+    ]
+  }
+}

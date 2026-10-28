@@ -1,0 +1,24 @@
+{
+  "id": "target_finder_make_alias",
+  "family": "finder.alias",
+  "axis": "finder",
+  "level": 56,
+  "status": "target",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "a.txt의 바로가기(별칭)를 만들어줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "a 별칭": "*"
+    },
+    "must_run": [
+      "local__create_alias"
+    ]
+  }
+}

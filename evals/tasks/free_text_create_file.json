@@ -2,7 +2,7 @@
   "id": "free_text_create_file",
   "family": "file.write.ask",
   "axis": "organize",
-  "level": 56,
+  "level": 14,
   "status": "active",
   "files": {
     "a.txt": "x"

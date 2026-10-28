@@ -29,5 +29,6 @@ case "${1:-quick}" in
   native|네이티브) $RUN pytest -q tests/test_native_bridge.py tests/test_native_protocol.py tests/test_native_preview.py && swift build --package-path native-preview ;;
   feedback|피드백) $RUN pytest -q tests/test_feedback.py tests/test_feedback_review.py tests/test_lesson_candidates.py ;;
   eval|평가) $RUN python evals/run_eval.py ;;
-  *) echo "사용법: $0 quick|full|search|semantic|fileops|delete|convert|write|ui|native|feedback|eval"; exit 2 ;;
+  bench|점수) $RUN python evals/benchmark.py --no-save ;;
+  *) echo "사용법: $0 quick|full|search|semantic|fileops|delete|convert|write|ui|native|feedback|eval|bench"; exit 2 ;;
 esac

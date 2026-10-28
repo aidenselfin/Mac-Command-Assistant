@@ -1,4 +1,5 @@
 {
+  "ladder": 2,
   "threshold": 0.8,
   "axes": {"see": 1, "read": 1, "summarize": 1, "organize": 1, "connect": 1, "finder": 1}
 }

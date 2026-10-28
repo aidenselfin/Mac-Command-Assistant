@@ -1,0 +1,32 @@
+{
+  "id": "target_organize_by_age",
+  "family": "file.organize",
+  "axis": "organize",
+  "level": 94,
+  "status": "target",
+  "files": {
+    "a.txt": "A",
+    "b.txt": "B",
+    "c.txt": "C"
+  },
+  "request": "30일 넘게 안 바뀐 파일은 오래됨 폴더로 옮겨줘",
+  "ages": {
+    "a.txt": 2,
+    "b.txt": 40,
+    "c.txt": 100
+  },
+  "user": {
+    "approve": [
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "b.txt": null,
+      "c.txt": null,
+      "오래됨/b.txt": "B",
+      "오래됨/c.txt": "C"
+    }
+  }
+}

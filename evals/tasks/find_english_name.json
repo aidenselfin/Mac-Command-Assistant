@@ -2,7 +2,7 @@
   "id": "find_english_name",
   "family": "file.find",
   "axis": "read",
-  "level": 22,
+  "level": 18,
   "status": "active",
   "files": {
     "Team_Meeting_Notes.md": "# Notes\nShip on Friday",

@@ -2,7 +2,7 @@
   "id": "find_unclear_name",
   "family": "file.find",
   "axis": "read",
-  "level": 20,
+  "level": 22,
   "status": "active",
   "files": {
     "기획/예산안-v2.md": "# 예산안\n총액 3천만원",

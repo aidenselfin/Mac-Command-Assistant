@@ -2,7 +2,7 @@
   "id": "read_summary",
   "family": "file.read",
   "axis": "summarize",
-  "level": 40,
+  "level": 16,
   "status": "active",
   "files": {
     "notes.txt": "회의 결론: 금요일 배포"

@@ -2,7 +2,7 @@
   "id": "target_set_tag",
   "family": "target",
   "axis": "finder",
-  "level": 90,
+  "level": 48,
   "status": "target",
   "files": {
     "memo.txt": "x"

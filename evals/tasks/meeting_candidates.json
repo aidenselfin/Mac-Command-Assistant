@@ -2,7 +2,7 @@
   "id": "meeting_candidates",
   "family": "file.read.candidates",
   "axis": "summarize",
-  "level": 46,
+  "level": 40,
   "status": "active",
   "files": {
     "회의록-2026-10-01.md": "# 10월 1일\n결정: 금요일 배포",

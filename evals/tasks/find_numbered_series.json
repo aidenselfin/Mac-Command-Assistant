@@ -2,7 +2,7 @@
   "id": "find_numbered_series",
   "family": "file.find.ask",
   "axis": "see",
-  "level": 12,
+  "level": 42,
   "status": "active",
   "files": {
     "임시-1.txt": "임시 메모 1",

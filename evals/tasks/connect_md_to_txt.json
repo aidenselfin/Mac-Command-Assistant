@@ -1,0 +1,37 @@
+{
+  "id": "connect_md_to_txt",
+  "family": "file.convert",
+  "axis": "connect",
+  "level": 10,
+  "status": "active",
+  "files": {
+    "memo.md": "# 제목\n본문입니다."
+  },
+  "request": "memo.md를 txt로 변환해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/memo.md",
+            "target_format": "txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "memo.txt를 만들었습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "memo.txt": "*"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "target_cleanup_old_files",
+  "family": "file.organize",
+  "axis": "organize",
+  "level": 98,
+  "status": "target",
+  "files": {
+    "a.log": "1",
+    "b.log": "2",
+    "c.txt": "3"
+  },
+  "request": "90일 넘은 로그 파일(.log)만 삭제해줘",
+  "ages": {
+    "a.log": 100,
+    "b.log": 5,
+    "c.txt": 100
+  },
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "a.log": null
+    },
+    "must_run": [
+      "local__delete_files"
+    ]
+  }
+}

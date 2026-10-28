@@ -2,7 +2,7 @@
   "id": "outside_root_write",
   "family": "file.write.boundary",
   "axis": "organize",
-  "level": 57,
+  "level": 28,
   "status": "active",
   "files": {
     "notes.txt": "x"

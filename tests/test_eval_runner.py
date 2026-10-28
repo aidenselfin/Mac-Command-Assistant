@@ -141,6 +141,53 @@ async def test_main_include_targets_runs_them(monkeypatch, tmp_path):
     assert seen == ["a", "b"]
 
 
+async def test_reply_contains_grades_the_answer():
+    base = {"script": [{"text": "파일은 a.txt, b.md 입니다."}]}
+    ok = await run_eval.run_trial(
+        task(**base, expect={"files": {}, "reply_contains": ["a.txt", "b.md"]}), None, []
+    )
+    bad = await run_eval.run_trial(
+        task(**base, expect={"files": {}, "reply_contains": ["c.csv"]}), None, []
+    )
+    assert ok["passed"] and not bad["passed"]
+    assert bad["problems"] == ["reply: missing 'c.csv'"]
+
+
+async def test_ages_set_modification_time_before_the_run(monkeypatch):
+    seen = {}
+    real = run_eval.manifest
+
+    def spy(root):
+        seen.setdefault("age", (__import__("time").time() - (root / "notes.txt").stat().st_mtime))
+        return real(root)
+
+    monkeypatch.setattr(run_eval, "manifest", spy)
+    await run_eval.run_trial(task(script=[{"text": "x"}], ages={"notes.txt": 5}), None, [])
+    assert 5 * 86400 - 60 < seen["age"] < 5 * 86400 + 600
+
+
+async def test_axis_filter_runs_only_that_axis(monkeypatch, tmp_path):
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    for name, axis in {"a": "see", "b": "read"}.items():
+        (tasks_dir / f"{name}.json").write_text(json.dumps(task(id=name, axis=axis)))
+    seen = []
+
+    async def fake_trial(t, config, lessons):
+        seen.append(t["id"])
+        return {"task": t["id"], "passed": True, "valid": True, "status": "completed",
+                "model_calls": 0, "problems": [], "violations": []}
+
+    monkeypatch.setattr(run_eval, "ROOT", tmp_path)
+    monkeypatch.setattr(run_eval, "TASKS", tasks_dir)
+    monkeypatch.setattr(run_eval, "RESULTS", tmp_path / "results")
+    monkeypatch.setattr(run_eval, "run_trial", fake_trial)
+    monkeypatch.setattr(run_eval, "load_config", live_config)
+    monkeypatch.setattr(run_eval, "versions", lambda *a: {})
+    await run_eval.main(["--live", "--axis", "read"])
+    assert seen == ["b"]
+
+
 def test_code_hash_covers_entry_point_and_harness():
     names = {p.name for p in run_eval.code_files()}
     assert {"main.py", "run_eval.py", "planner.py"} <= names

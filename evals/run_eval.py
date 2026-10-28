@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -120,6 +121,9 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         for path, content in task["files"].items():
             (root / path).parent.mkdir(parents=True, exist_ok=True)
             (root / path).write_text(content, encoding="utf-8")
+        for path, days in task.get("ages", {}).items():  # modification time, for date-based tasks
+            aged = time.time() - days * 86400
+            os.utime(root / path, (aged, aged))
         initial = manifest(root)
         client = None
         if config is None:
@@ -230,6 +234,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         problems = diff(expected_manifest(initial, files), manifest(root))
         problems += [f"{name}: not run" for name in expect.get("must_run", [])
                      if name not in tools_run]
+        problems += [f"reply: missing {word!r}" for word in expect.get("reply_contains", [])
+                     if word not in (text or "")]
         want = sorted(expect.get("changed_paths", []))
         if "changed_paths" in expect and sorted(changed) != want:
             problems.append(f"changed_paths: {sorted(changed)} != {want}")
@@ -306,11 +312,15 @@ async def main(argv=None) -> int:
     parser.add_argument("--live", action="store_true", help="use the configured LLM")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--lesson", action="append", default=[])
+    parser.add_argument("--axis", action="append",
+                        help="only this capability axis (cheaper partial run; repeatable)")
     parser.add_argument("--include-targets", action="store_true",
                         help="also run status=target tasks (abilities the app does not have yet)")
     args = parser.parse_args(argv)
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(TASKS.glob("*.json"))]
     tasks = [t for t in tasks if not args.task or t["id"] in args.task]
+    if args.axis:
+        tasks = [t for t in tasks if t.get("axis") in args.axis]
     if not args.include_targets:
         tasks = [t for t in tasks if t.get("status") != "target"]
     if not args.live:

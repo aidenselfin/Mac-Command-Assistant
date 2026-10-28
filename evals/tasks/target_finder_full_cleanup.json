@@ -1,0 +1,40 @@
+{
+  "id": "target_finder_full_cleanup",
+  "family": "finder.compose",
+  "axis": "finder",
+  "level": 100,
+  "status": "target",
+  "files": {
+    "a.txt": "A",
+    "b.png": "B",
+    "c.txt": "C",
+    "d.png": "D"
+  },
+  "request": "다운로드 정리: 확장자별 폴더(txt, png)로 나누고, 90일 넘은 파일은 보관 폴더로 옮겨줘",
+  "ages": {
+    "a.txt": 2,
+    "b.png": 3,
+    "c.txt": 200,
+    "d.png": 5
+  },
+  "user": {
+    "approve": [
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "a.txt": null,
+      "b.png": null,
+      "c.txt": null,
+      "d.png": null,
+      "txt/a.txt": "A",
+      "png/b.png": "B",
+      "png/d.png": "D",
+      "보관/c.txt": "C"
+    }
+  }
+}

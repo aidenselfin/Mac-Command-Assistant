@@ -2,7 +2,7 @@
   "id": "create_directory_undo",
   "family": "file.directory",
   "axis": "organize",
-  "level": 58,
+  "level": 18,
   "status": "active",
   "files": {
     "keep.txt": "keep"

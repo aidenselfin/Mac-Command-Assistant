@@ -2,7 +2,7 @@
   "id": "meeting_many_numbered",
   "family": "file.find.ask",
   "axis": "summarize",
-  "level": 50,
+  "level": 52,
   "status": "active",
   "files": {
     "회의록-1.md": "# 1번 회의",

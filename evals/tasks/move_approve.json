@@ -2,7 +2,7 @@
   "id": "move_approve",
   "family": "file.move",
   "axis": "organize",
-  "level": 65,
+  "level": 48,
   "status": "active",
   "files": {
     "a.txt": "original",

@@ -2,7 +2,7 @@
   "id": "target_sort_by_extension",
   "family": "target",
   "axis": "organize",
-  "level": 72,
+  "level": 80,
   "status": "target",
   "files": {
     "a.txt": "A",

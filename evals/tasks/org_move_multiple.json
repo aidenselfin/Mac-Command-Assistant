@@ -1,0 +1,62 @@
+{
+  "id": "org_move_multiple",
+  "family": "file.move",
+  "axis": "organize",
+  "level": 74,
+  "status": "active",
+  "files": {
+    "a.txt": "A",
+    "b.txt": "B",
+    "c.md": "C",
+    "보관/keep.txt": "k"
+  },
+  "request": "a.txt와 b.txt를 보관 폴더로 이동해줘",
+  "user": {
+    "approve": [
+      true,
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/a.txt",
+            "destination": "{root}/보관"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/b.txt",
+            "destination": "{root}/보관"
+          }
+        }
+      ]
+    },
+    {
+      "text": "두 파일을 옮겼습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "a.txt": null,
+      "b.txt": null,
+      "보관/a.txt": "A",
+      "보관/b.txt": "B"
+    },
+    "must_run": [
+      "local__move_file"
+    ],
+    "changed_paths": [
+      "보관/a.txt",
+      "보관/b.txt"
+    ]
+  }
+}

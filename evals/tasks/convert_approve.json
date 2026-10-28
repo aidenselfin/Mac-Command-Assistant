@@ -2,7 +2,7 @@
   "id": "convert_approve",
   "family": "file.convert",
   "axis": "connect",
-  "level": 75,
+  "level": 20,
   "status": "active",
   "files": {
     "table.csv": "name,amount\nlunch,12000\n"

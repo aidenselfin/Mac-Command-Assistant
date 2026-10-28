@@ -2,7 +2,7 @@
   "id": "target_find_duplicates",
   "family": "target",
   "axis": "organize",
-  "level": 75,
+  "level": 90,
   "status": "target",
   "files": {
     "a.txt": "same",

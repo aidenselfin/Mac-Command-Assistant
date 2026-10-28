@@ -2,7 +2,7 @@
   "id": "clarify_cancel",
   "family": "file.write.ambiguous",
   "axis": "organize",
-  "level": 54,
+  "level": 24,
   "status": "active",
   "files": {
     "report.txt": "draft  text"

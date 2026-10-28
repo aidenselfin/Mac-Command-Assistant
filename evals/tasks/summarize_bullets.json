@@ -1,0 +1,34 @@
+{
+  "id": "summarize_bullets",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 28,
+  "status": "active",
+  "files": {
+    "회의록.txt": "1) 배포는 금요일. 2) 예산은 20% 증액. 3) 신규 채용은 12월로 연기."
+  },
+  "request": "회의록.txt를 핵심 3가지로 정리해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/회의록.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "- 배포는 금요일\n- 예산 20% 증액\n- 신규 채용 12월 연기"
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "금요일",
+      "20%",
+      "12월"
+    ]
+  }
+}

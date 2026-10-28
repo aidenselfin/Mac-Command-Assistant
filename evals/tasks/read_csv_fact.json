@@ -1,0 +1,32 @@
+{
+  "id": "read_csv_fact",
+  "family": "file.read",
+  "axis": "read",
+  "level": 30,
+  "status": "active",
+  "files": {
+    "table.csv": "name,amount\nlunch,12000\ntaxi,8000\n"
+  },
+  "request": "table.csv에서 taxi 금액이 얼마야?",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/table.csv"
+          }
+        }
+      ]
+    },
+    {
+      "text": "taxi는 8000입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "8000"
+    ]
+  }
+}

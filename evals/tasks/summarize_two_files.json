@@ -1,0 +1,40 @@
+{
+  "id": "summarize_two_files",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 68,
+  "status": "active",
+  "files": {
+    "기획.txt": "신제품은 3월 출시 예정이다.",
+    "마케팅.txt": "광고 예산은 5천만원이다."
+  },
+  "request": "기획.txt와 마케팅.txt를 합쳐서 요약해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/기획.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/마케팅.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "신제품은 3월에 출시하고 광고 예산은 5천만원입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "3월",
+      "5천만원"
+    ]
+  }
+}
