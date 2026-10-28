@@ -2144,13 +2144,13 @@ class Planner:
             and response.get("decision") == "choose"
             and response.get("stage") != "meaning"  # a guess by similarity is always confirmed
             and response.get("complete", True)  # an incomplete search keeps its stated limits
-            and not _destructive_request(state.user_text)
+            and not _acts_without_reading(state.user_text)  # move/delete keep asking
         ):
             # "가장 최근 계약서" names one file by date or size: the model picks among the
             # candidates by their sizes and dates, the user is not asked which one.
-            paths = [item["path"] for item in response.get("candidates", [])]
-            if not _acts_without_reading(state.user_text):
-                state.ranked_candidates = tuple(paths)
+            state.ranked_candidates = tuple(
+                item["path"] for item in response.get("candidates", [])
+            )
             state.find_override = json.dumps(
                 {
                     "decision": "ranked",

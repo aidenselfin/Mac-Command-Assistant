@@ -388,3 +388,15 @@ async def test_ranked_request_still_asks_when_the_search_was_incomplete(config, 
     outcome = await planner.run("가장 최근에 수정한 계약서의 금액이 얼마야?")
 
     assert isinstance(outcome, Clarification)
+
+
+async def test_ranked_move_still_asks_which_file(config):
+    root = config.allowed_directories[0]
+    for name in ("계약서_v1.txt", "계약서_v2.txt"):
+        (root / name).write_text("금액")
+    model = scripted(find_turn("계약서"))
+    planner, _ = make_planner(config, model)
+
+    outcome = await planner.run("가장 최근 계약서를 보관 폴더로 옮겨줘")
+
+    assert isinstance(outcome, Clarification)
