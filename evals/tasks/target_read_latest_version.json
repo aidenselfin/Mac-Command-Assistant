@@ -1,0 +1,27 @@
+{
+  "id": "target_read_latest_version",
+  "family": "file.read",
+  "axis": "read",
+  "level": 92,
+  "status": "target",
+  "files": {
+    "계약서_v1.txt": "금액 1천만원",
+    "계약서_v2.txt": "금액 1천2백만원",
+    "계약서_최종.txt": "금액 1천5백만원"
+  },
+  "request": "가장 최근에 수정한 계약서의 금액이 얼마야?",
+  "ages": {
+    "계약서_v1.txt": 40,
+    "계약서_v2.txt": 5,
+    "계약서_최종.txt": 20
+  },
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "1천2백만원"
+    ],
+    "reply_excludes": [
+      "1천5백만원"
+    ]
+  }
+}

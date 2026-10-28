@@ -1,0 +1,26 @@
+{
+  "id": "target_finder_sort_by_size",
+  "family": "finder.sort",
+  "axis": "finder",
+  "level": 52,
+  "status": "target",
+  "files": {
+    "a.txt": "xxxxxxxxxx",
+    "b.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "c.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "request": "용량이 큰 순서대로 파일 목록을 보여줘",
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "b.txt",
+      "c.txt",
+      "a.txt"
+    ],
+    "reply_order": [
+      "b.txt",
+      "c.txt",
+      "a.txt"
+    ]
+  }
+}

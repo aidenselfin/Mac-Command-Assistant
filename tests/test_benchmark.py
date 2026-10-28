@@ -402,3 +402,21 @@ def test_compare_skips_overall_when_measured_axes_differ():
     new = {"overall": 10, "axes": {"see": {"score": 10}, "read": {"score": None}}}
     old = {"overall": 55, "axes": {"see": {"score": 10}, "read": {"score": 100}}}
     assert benchmark.compare(new, old) == {"overall_delta": None, "axis_delta": {"see": 0}}
+
+
+def test_each_axis_has_a_demanding_top_of_the_ladder():
+    """Finishing a ladder must mean something: several hard rungs, not one token task."""
+    for axis in benchmark.load_config()["axes"]:
+        top = [t for t in _tasks() if not t.get("negative") and t.get("axis") == axis
+               and t["level"] >= 85]
+        assert len(top) >= 3, axis
+        assert any(t["level"] == 100 for t in top), axis
+
+
+def test_the_top_of_the_ladders_covers_real_world_difficulty():
+    top = [t for t in _tasks() if not t.get("negative") and t["level"] >= 60]
+    assert sum(1 for t in top if len(t["files"]) >= 8) >= 3          # folders of real size
+    assert any(isinstance(v, dict) for t in top for v in t["files"].values())  # real file types
+    assert sum(1 for t in top if t.get("ages")) >= 5                  # date-based work
+    assert sum(1 for t in top if t.get("followups") or t["expect"].get("undo")) >= 2  # multi-step
+    assert any(t["expect"].get("reply_excludes") for t in top)        # traps, not just hits

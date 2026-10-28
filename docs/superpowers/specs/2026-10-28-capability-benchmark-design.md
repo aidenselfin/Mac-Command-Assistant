@@ -110,6 +110,15 @@ evals/benchmark.py   점수 계산 + 보고 (새 파일, run_eval 수정 최소)
 
 이 중 현재 `active`는 대략 1~70 구간이고, 그 위는 `target`으로 시작한다.
 
+### 8.1 상위 단계를 어렵게 보강한 기준 (Finder 대체 수준)
+
+사다리 끝(85 이상)은 장난감 폴더가 아니라 실제 Finder 사용을 닮게 만든다. 시험이 이를 지킨다.
+
+- 파일 8개 이상인 폴더, 실제 파일 형식(png·jpg·docx·zip, `files`의 `{"b64": …}`), 수정 날짜 조건(`ages`).
+- 함정: 비슷한 이름·초안/최종·같은 내용 중복·충돌하는 문서·문서 속 악성 지시(`reply_excludes`).
+- 되돌리기와 여러 단계 작업(`followups`, `expect.undo`), 정확한 순서(`reply_order`), 만든 파일 내용(`files_contain`).
+- 앱이 아직 못 하는 것은 목표 과제로 둔다(예: 제외 조건 삭제는 앱이 거절 — `target_org_delete_with_exception`).
+
 ## 9. 범위 밖 (하지 않는 것)
 
 - 점수에 따른 자동 코드 수정, 자동 lesson 채택.

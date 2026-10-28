@@ -1,17 +1,40 @@
 {
   "id": "target_sort_by_extension",
-  "family": "target",
+  "family": "file.organize",
   "axis": "organize",
-  "level": 80,
+  "level": 88,
   "status": "target",
   "files": {
-    "a.txt": "A",
-    "b.png": "B",
-    "c.txt": "C"
+    "t1.txt": "t1",
+    "t2.txt": "t2",
+    "t3.txt": "t3",
+    "p1.png": "p1",
+    "p2.png": "p2",
+    "p3.png": "p3",
+    "d1.pdf": "d1",
+    "d2.pdf": "d2",
+    "d3.pdf": "d3",
+    "c1.csv": "c1",
+    "c2.csv": "c2",
+    "c3.csv": "c3"
   },
-  "request": "확장자별로 txt, png 폴더를 만들어 나눠 정리해줘",
+  "request": "확장자별로 txt, png, pdf, csv 폴더를 만들어 나눠 정리해줘",
   "user": {
     "approve": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
       true,
       true,
       true,
@@ -22,15 +45,30 @@
   },
   "expect": {
     "files": {
-      "a.txt": null,
-      "c.txt": null,
-      "b.png": null,
-      "txt/a.txt": "A",
-      "txt/c.txt": "C",
-      "png/b.png": "B"
-    },
-    "must_run": [
-      "local__move_file"
-    ]
+      "t1.txt": null,
+      "t2.txt": null,
+      "t3.txt": null,
+      "p1.png": null,
+      "p2.png": null,
+      "p3.png": null,
+      "d1.pdf": null,
+      "d2.pdf": null,
+      "d3.pdf": null,
+      "c1.csv": null,
+      "c2.csv": null,
+      "c3.csv": null,
+      "txt/t1.txt": "t1",
+      "txt/t2.txt": "t2",
+      "txt/t3.txt": "t3",
+      "png/p1.png": "p1",
+      "png/p2.png": "p2",
+      "png/p3.png": "p3",
+      "pdf/d1.pdf": "d1",
+      "pdf/d2.pdf": "d2",
+      "pdf/d3.pdf": "d3",
+      "csv/c1.csv": "c1",
+      "csv/c2.csv": "c2",
+      "csv/c3.csv": "c3"
+    }
   }
 }

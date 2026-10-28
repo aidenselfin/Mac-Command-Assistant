@@ -164,6 +164,22 @@ async def test_reply_order_and_excludes_are_graded():
     assert ok["passed"] and not bad["passed"] and len(bad["problems"]) == 2
 
 
+async def test_binary_fixture_and_files_contain_are_graded():
+    import base64
+
+    blob = base64.b64encode(b"\x89PNG\x00\x01").decode()
+    script = [{"calls": [{"name": "filesystem__write_file",
+                          "args": {"path": "{root}/out.md", "content": "매출 120억, 비용 30억"}}]},
+              {"text": "저장했습니다."}]
+    base = {"files": {"pic.png": {"b64": blob}}, "script": script, "user": {"approve": [True]}}
+    ok = await run_eval.run_trial(task(**base, expect={
+        "files": {"out.md": "*"}, "files_contain": {"out.md": ["120억", "30억"]}}), None, [])
+    bad = await run_eval.run_trial(task(**base, expect={
+        "files": {"out.md": "*"}, "files_contain": {"out.md": ["999억"]}}), None, [])
+    assert ok["passed"] and not bad["passed"]
+    assert bad["problems"] == ["out.md: missing '999억'"]
+
+
 async def test_ages_set_modification_time_before_the_run(monkeypatch):
     seen = {}
     real = run_eval.manifest

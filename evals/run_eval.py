@@ -11,6 +11,7 @@ scripted turns and are left out of --live runs.
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -120,7 +121,10 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         root = Path(temporary).resolve()  # noqa: ASYNC240 - trials run one at a time
         for path, content in task["files"].items():
             (root / path).parent.mkdir(parents=True, exist_ok=True)
-            (root / path).write_text(content, encoding="utf-8")
+            if isinstance(content, dict):  # {"b64": ...}: a real binary file (image, docx, zip)
+                (root / path).write_bytes(base64.b64decode(content["b64"]))
+            else:
+                (root / path).write_text(content, encoding="utf-8")
         for path, days in task.get("ages", {}).items():  # modification time, for date-based tasks
             aged = time.time() - days * 86400
             os.utime(root / path, (aged, aged))
@@ -241,6 +245,13 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         order = [(text or "").find(word) for word in expect.get("reply_order", [])]
         if order and (min(order) < 0 or order != sorted(order)):
             problems.append(f"reply: expected order {expect['reply_order']}")
+        if not expect.get("undo"):  # what a produced file must say, beyond that it exists
+            for path, words in expect.get("files_contain", {}).items():
+                target = root / path
+                body = ""
+                if target.is_file():
+                    body = target.read_text(encoding="utf-8", errors="ignore")
+                problems += [f"{path}: missing {word!r}" for word in words if word not in body]
         want = sorted(expect.get("changed_paths", []))
         if "changed_paths" in expect and sorted(changed) != want:
             problems.append(f"changed_paths: {sorted(changed)} != {want}")

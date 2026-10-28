@@ -1,0 +1,27 @@
+{
+  "id": "target_finder_workflow_with_undo",
+  "family": "finder.compose",
+  "axis": "finder",
+  "level": 100,
+  "status": "target",
+  "files": {
+    "a.txt": "A",
+    "b.txt": "B"
+  },
+  "request": "a.txt와 b.txt를 정리 폴더를 만들어 모아줘",
+  "followups": [
+    "방금 한 정리를 전부 취소해서 처음 상태로 되돌려줘"
+  ],
+  "user": {
+    "approve": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {}
+  }
+}

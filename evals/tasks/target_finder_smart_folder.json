@@ -1,0 +1,34 @@
+{
+  "id": "target_finder_smart_folder",
+  "family": "finder.smart",
+  "axis": "finder",
+  "level": 90,
+  "status": "target",
+  "files": {
+    "new1.pdf": "1",
+    "new2.pdf": "2",
+    "old.pdf": "3",
+    "new.txt": "4"
+  },
+  "request": "최근 7일 안에 수정한 pdf만 '이번주 PDF' 폴더에 복사해줘",
+  "ages": {
+    "new1.pdf": 1,
+    "new2.pdf": 3,
+    "old.pdf": 60,
+    "new.txt": 1
+  },
+  "user": {
+    "approve": [
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "이번주 PDF/new1.pdf": "1",
+      "이번주 PDF/new2.pdf": "2"
+    }
+  }
+}

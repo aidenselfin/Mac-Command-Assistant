@@ -1,0 +1,29 @@
+{
+  "id": "target_connect_web_to_table",
+  "family": "web.read",
+  "axis": "connect",
+  "level": 86,
+  "status": "target",
+  "files": {
+    "notes.txt": "x"
+  },
+  "request": "http://localhost:8000/prices 페이지의 가격표를 읽어서 prices.csv로 저장하고, 가장 비싼 항목을 알려줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "note": "평가 하네스에 web MCP 연결이 있어야 풀 수 있다(지금은 filesystem만)",
+  "expect": {
+    "files": {
+      "prices.csv": "*"
+    },
+    "must_run": [
+      "web__browser_navigate",
+      "filesystem__write_file"
+    ],
+    "reply_contains": [
+      "가장 비싼"
+    ]
+  }
+}
