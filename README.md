@@ -277,9 +277,8 @@ OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합
 
 감지되면 백그라운드에서 OpenRouter 모델이 그 사건의 근거 run만 보고 원인을 분석해 다음 중 하나를 적용합니다. 메인 LLM 설정과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
 
-- lesson: 분석 결과는 **후보**로만 저장됩니다. 사람이 평가(`evals/run_eval.py --live`)로 비교한 뒤 `--lesson-on ID`로 채택하면 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
-- user_hint: `[FEEDBACK] …` 한 줄 출력
-- dev_report: `.voice-action/feedback-report.md`(권한 600)에 기록, 코드 수정은 사람이 판단
+- lesson: 분석 결과는 먼저 **후보**로 저장되고, 백그라운드 일꾼이 `evals/run_eval.py --live --repeat 3`을 후보와 같은 코드의 기준선 2회(캐시 재사용)와 비교합니다. 기준선 최고 점수를 넘고 한 번도 안 지던 과제가 지지 않으면 **자동 채택**, 그런 회귀가 있으면 자동 거절, 그 밖에는 후보로 보류합니다(수동 `--lesson-on/--lesson-off ID`). 채택하면 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
+- code_fix: 코드를 고쳐야 하는 원인이면 일꾼이 별도 worktree·브랜치(`work/autofix-<사건 번호>`)에서 개발자 에이전트(`codex exec`, 없으면 `claude -p`)에게 수정과 회귀 테스트 추가를 맡깁니다. diff가 허용 범위(`voice_action/`·`tests/`·`docs/`·새 평가 과제)를 벗어나거나 보호 파일(`risk_guard.py`·`config.py`·`undo.py`·`mcp_client.py`·`playwright_client.py`·`feedback.py`·`autonomy.py`·`evals/run_eval.py`·`scripts/`·`native-preview/`·의존성 파일)을 건드리거나 기존 테스트·평가 과제를 고치면 버립니다. 개발 검사 도구(`scripts/check.py`: ruff·pytest·평가 재생·변형 케이스)가 모두 통과하면 `main`에 fast-forward로 합치고(main이 그새 움직였으면 main을 가져와 다시 검사한 뒤 한 번 더 시도) 되돌릴 지점으로 태그 `autofix-pre-<번호>`를 남깁니다. 합칠 수 없으면 브랜치만 남깁니다. 하루 코드 수정 3회·평가 2회 한도, 같은 signature는 하루 한 번. 끄려면 `VOICE_ACTION_FEEDBACK_AUTONOMY=off`. 결과는 `--lessons`의 `[자동 개선]`과 `.voice-action/autonomy.log`에 남습니다.
 
 URL·경로·승인 관련 단어가 든 lesson과 credential이 섞인 분석 결과는 채택하지 않습니다. 이 키워드 필터는 보조 장치이지 보안 경계가 아니며, 실제 안전은 코드의 RiskGuard·URL·경로 검증이 보장합니다.
 
@@ -287,6 +286,7 @@ URL·경로·승인 관련 단어가 든 lesson과 credential이 섞인 분석 �
 
 ```
 OPENROUTER_API_KEY=...                     # 없으면 기록·감지만 하고 분석은 생략
+VOICE_ACTION_FEEDBACK_AUTONOMY=on          # off면 lesson 자동 평가·코드 자동 수정을 끔
 VOICE_ACTION_FEEDBACK=on                   # off면 전부 끔
 VOICE_ACTION_FEEDBACK_MODEL=anthropic/claude-sonnet-5.5  # OpenRouter의 아무 모델 ID
 VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 최근 24시간 분석 요청 한도 (취소된 요청 포함)
