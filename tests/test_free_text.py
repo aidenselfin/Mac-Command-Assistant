@@ -492,3 +492,20 @@ async def test_asking_again_for_a_named_file_that_was_just_not_found_is_turned_b
     outcome = await planner.run("없는파일.txt 읽어줘")
     assert outcome == Completed("없는파일.txt는 없습니다.")
     assert "그 파일이 없다고" in model.generate.await_args_list[2].args[0][-1]["content"]
+
+
+async def test_a_call_to_a_tool_not_offered_is_retried_once_with_the_real_tool_names():
+    ok = AsyncMock()
+    ok.choices = [AsyncMock(message=AsyncMock(content="완료", tool_calls=None))]
+    client = AsyncMock(spec=AsyncOpenAI)
+    client.chat = AsyncMock()
+    client.chat.completions.create.side_effect = [
+        bad_request({"code": "tool_use_failed", "message": "tool not in request.tools"}),
+        ok,
+    ]
+    turn = await OpenAICompatibleModel(client, "m").generate(
+        [{"role": "user", "content": "x"}], [], allow_tools=True
+    )
+    assert turn.text == "완료"
+    retry = client.chat.completions.create.await_args_list[1].kwargs["messages"]
+    assert "호출 가능한 도구" in retry[-1]["content"]
