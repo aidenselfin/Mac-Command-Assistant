@@ -245,6 +245,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         return {
             "task": task["id"],
             "family": task.get("family"),
+            "axis": task.get("axis"),
+            "level": task.get("level"),
             "status": status,
             "passed": passed,
             "valid": valid,
@@ -304,9 +306,13 @@ async def main(argv=None) -> int:
     parser.add_argument("--live", action="store_true", help="use the configured LLM")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--lesson", action="append", default=[])
+    parser.add_argument("--include-targets", action="store_true",
+                        help="also run status=target tasks (abilities the app does not have yet)")
     args = parser.parse_args(argv)
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(TASKS.glob("*.json"))]
     tasks = [t for t in tasks if not args.task or t["id"] in args.task]
+    if not args.include_targets:
+        tasks = [t for t in tasks if t.get("status") != "target"]
     if not args.live:
         tasks = [t for t in tasks if "script" in t]
     else:  # controls pass only when a run goes wrong; they would invert a live score

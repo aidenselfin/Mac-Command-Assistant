@@ -103,6 +103,43 @@ async def test_live_runs_leave_out_negative_control_tasks(monkeypatch):
             out.unlink()  # the stub run's results file
 
 
+async def test_trial_result_carries_axis_and_level():
+    result = await run_eval.run_trial(
+        task(script=[{"text": "x"}], axis="see", level=10), None, []
+    )
+    assert (result["axis"], result["level"]) == ("see", 10)
+
+
+async def _main_seen(monkeypatch, tmp_path, argv):
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    for name, extra in {"a": {}, "b": {"status": "target"}}.items():
+        (tasks_dir / f"{name}.json").write_text(json.dumps(task(id=name, **extra)))
+    seen = []
+
+    async def fake_trial(t, config, lessons):
+        seen.append(t["id"])
+        return {"task": t["id"], "passed": True, "valid": True, "status": "completed",
+                "model_calls": 0, "problems": [], "violations": []}
+
+    monkeypatch.setattr(run_eval, "TASKS", tasks_dir)
+    monkeypatch.setattr(run_eval, "RESULTS", tmp_path / "results")
+    monkeypatch.setattr(run_eval, "run_trial", fake_trial)
+    monkeypatch.setattr(run_eval, "load_config", live_config)
+    monkeypatch.setattr(run_eval, "versions", lambda *a: {})
+    await run_eval.main(argv)
+    return seen
+
+
+async def test_main_skips_target_tasks_by_default(monkeypatch, tmp_path):
+    assert await _main_seen(monkeypatch, tmp_path, ["--live"]) == ["a"]
+
+
+async def test_main_include_targets_runs_them(monkeypatch, tmp_path):
+    seen = await _main_seen(monkeypatch, tmp_path, ["--live", "--include-targets"])
+    assert seen == ["a", "b"]
+
+
 def test_code_hash_covers_entry_point_and_harness():
     names = {p.name for p in run_eval.code_files()}
     assert {"main.py", "run_eval.py", "planner.py"} <= names
