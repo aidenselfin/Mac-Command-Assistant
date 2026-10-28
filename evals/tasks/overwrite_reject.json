@@ -1,6 +1,9 @@
 {
   "id": "overwrite_reject",
   "family": "file.write.overwrite",
+  "axis": "organize",
+  "level": 60,
+  "status": "active",
   "files": {
     "todo.txt": "before"
   },

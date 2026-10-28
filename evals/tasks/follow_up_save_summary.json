@@ -1,6 +1,9 @@
 {
   "id": "follow_up_save_summary",
   "family": "file.followup",
+  "axis": "summarize",
+  "level": 45,
+  "status": "active",
   "files": {
     "정리전메모.txt": "배포는 금요일, 담당은 서연",
     "잡담.txt": "점심"

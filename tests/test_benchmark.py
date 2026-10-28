@@ -161,3 +161,35 @@ def test_main_without_results_explains_how_to_get_them(monkeypatch, tmp_path, ca
     next((tmp_path / "results").glob("*.json")).unlink()
     assert benchmark.main([]) == 2
     assert "run_eval.py --live" in capsys.readouterr().out
+
+
+# --- task files ---
+
+TASK_FILES = sorted((ROOT / "evals" / "tasks").glob("*.json"))
+
+
+def _tasks():
+    return [json.loads(p.read_text(encoding="utf-8")) for p in TASK_FILES]
+
+
+def test_every_task_is_classified():
+    axes = benchmark.load_config()["axes"]
+    for task in _tasks():
+        if task.get("negative"):
+            continue
+        assert task.get("axis") in axes, task["id"]
+        assert isinstance(task.get("level"), int) and 1 <= task["level"] <= 100, task["id"]
+        assert task.get("status") in {"active", "target"}, task["id"]
+
+
+def test_task_ids_unique_and_match_filename():
+    ids = [t["id"] for t in _tasks()]
+    assert len(ids) == len(set(ids))
+    assert ids == [p.stem for p in TASK_FILES]
+
+
+def test_target_tasks_have_expect_and_no_script():
+    targets = [t for t in _tasks() if t.get("status") == "target"]
+    assert targets
+    for task in targets:
+        assert "expect" in task and "script" not in task, task["id"]

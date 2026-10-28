@@ -1,0 +1,29 @@
+{
+  "id": "target_batch_rename",
+  "family": "target",
+  "axis": "organize",
+  "level": 78,
+  "status": "target",
+  "files": {
+    "사진1.jpg": "1",
+    "사진2.jpg": "2"
+  },
+  "request": "사진 파일 이름 앞에 2026-을 붙여줘",
+  "user": {
+    "approve": [
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "사진1.jpg": null,
+      "사진2.jpg": null,
+      "2026-사진1.jpg": "1",
+      "2026-사진2.jpg": "2"
+    },
+    "must_run": [
+      "local__move_file"
+    ]
+  }
+}

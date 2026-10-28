@@ -1,6 +1,9 @@
 {
   "id": "meeting_many_numbered",
   "family": "file.find.ask",
+  "axis": "summarize",
+  "level": 50,
+  "status": "active",
   "files": {
     "회의록-1.md": "# 1번 회의",
     "회의록-2.md": "# 2번 회의",

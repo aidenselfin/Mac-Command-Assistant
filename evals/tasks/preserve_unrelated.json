@@ -1,6 +1,9 @@
 {
   "id": "preserve_unrelated",
   "family": "file.write.overwrite",
+  "axis": "organize",
+  "level": 60,
+  "status": "active",
   "files": {
     "a.txt": "alpha",
     "b.txt": "beta",

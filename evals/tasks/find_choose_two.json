@@ -1,6 +1,9 @@
 {
   "id": "find_choose_two",
   "family": "file.find.ask",
+  "axis": "see",
+  "level": 15,
+  "status": "active",
   "files": {
     "계획-초안.md": "초안: 일정 미정",
     "계획-최종.md": "최종: 11월 1일 출시"

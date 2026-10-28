@@ -1,6 +1,9 @@
 {
   "id": "delete_pattern",
   "family": "file.delete.batch",
+  "axis": "organize",
+  "level": 70,
+  "status": "active",
   "files": {
     "삭제연습/임시-1.txt": "1",
     "삭제연습/임시-2.txt": "2",

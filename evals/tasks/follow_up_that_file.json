@@ -1,6 +1,9 @@
 {
   "id": "follow_up_that_file",
   "family": "file.followup",
+  "axis": "read",
+  "level": 25,
+  "status": "active",
   "files": {
     "예산 계획.md": "총액 3천만원",
     "다른.md": "무관"
