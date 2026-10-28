@@ -3,7 +3,7 @@
   "family": "file.read",
   "axis": "read",
   "level": 92,
-  "status": "target",
+  "status": "active",
   "files": {
     "계약서_v1.txt": "금액 1천만원",
     "계약서_v2.txt": "금액 1천2백만원",
@@ -23,5 +23,30 @@
     "reply_excludes": [
       "1천5백만원"
     ]
-  }
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "sort_by": "modified"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/계약서_v2.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "가장 최근에 수정한 계약서_v2.txt의 금액은 1천2백만원입니다."
+    }
+  ]
 }

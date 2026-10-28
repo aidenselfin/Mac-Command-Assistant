@@ -73,6 +73,9 @@ final class Backend: ObservableObject {
             child.currentDirectoryURL = URL(fileURLWithPath: runtime.project)
             var environment = ProcessInfo.processInfo.environment
             environment["PYTHONPATH"] = runtime.project
+            // 앱 아이콘으로 켜면 PATH가 최소라 filesystem MCP가 쓰는 node를 못 찾는다.
+            let extra = "/opt/homebrew/bin:/usr/local/bin"
+            environment["PATH"] = extra + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
             child.environment = environment
             child.standardInput = stdin
             child.standardOutput = stdout

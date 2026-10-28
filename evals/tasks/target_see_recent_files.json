@@ -3,7 +3,7 @@
   "family": "file.info",
   "axis": "see",
   "level": 88,
-  "status": "target",
+  "status": "active",
   "files": {
     "old.txt": "o",
     "a.txt": "a",
@@ -27,5 +27,20 @@
     "reply_excludes": [
       "old.txt"
     ]
-  }
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "modified_within_days": 7
+          }
+        }
+      ]
+    },
+    {
+      "text": "최근 일주일 안에 바뀐 파일: a.txt, b.txt, c.txt"
+    }
+  ]
 }

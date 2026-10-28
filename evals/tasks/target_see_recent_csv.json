@@ -3,7 +3,7 @@
   "family": "file.info",
   "axis": "see",
   "level": 100,
-  "status": "target",
+  "status": "active",
   "files": {
     "new.csv": "1",
     "old.csv": "2",
@@ -24,5 +24,23 @@
       "old.csv",
       "new.txt"
     ]
-  }
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "extensions": [
+              "csv"
+            ],
+            "modified_within_days": 3
+          }
+        }
+      ]
+    },
+    {
+      "text": "최근 3일 안에 바뀐 csv: new.csv"
+    }
+  ]
 }

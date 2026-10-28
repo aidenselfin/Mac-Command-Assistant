@@ -30,6 +30,7 @@ from voice_action.file_search import (
     FIND_FILES_DEFINITION,
     FIND_FILES_SEMANTIC_DEFINITION,
     FIND_FILES_TOOL,
+    LIST_DEFINITION,
     clarification_spec,
 )
 from voice_action.mcp_client import (
@@ -40,6 +41,7 @@ from voice_action.mcp_client import (
     ToolResult,
 )
 from voice_action.risk_guard import (
+    WRITE_TOOLS,
     ApprovalChangedError,
     ApprovalInvalidError,
     ForbiddenToolError,
@@ -756,6 +758,12 @@ def _acts_without_reading(text: str) -> bool:
                 or _operation_requested(MOVE_TOOL, text) or _operation_requested(COPY_TOOL, text))
 
 
+RANKED_PICK_PATTERN = re.compile(
+    r"(?:가장|제일)\s*(?:최근|최신|나중|오래|큰|작은|용량)|최신|newest|latest|largest|oldest",
+    re.IGNORECASE,
+)
+
+
 def _is_pattern_delete(text: str) -> bool:
     """A delete named by a glob, such as `삭제연습 폴더의 *.txt 파일을 모두 삭제해줘`."""
     return bool(_destructive_request(text) and re.search(r"\*", text))
@@ -1061,6 +1069,7 @@ class _LoopState:
     find_tried: bool = False  # local__find_files has run in this command
     find_none: bool = False  # ...and found nothing
     find_override: str | None = None  # what the model is told about the last search instead
+    ranked_candidates: tuple[str, ...] = ()  # one of these must be read before answering
     known_target: bool = False  # an attached file or the previous command's files
 
 
@@ -1262,6 +1271,7 @@ class Planner:
                     if self.config.semantic_search
                     else FIND_FILES_DEFINITION
                 )
+                tools.append(LIST_DEFINITION)
                 # The raw search lists every match to the model, which then reads them all
                 # instead of asking; every file lookup goes through find_files.
                 tools = [tool for tool in tools if tool.name != FILESYSTEM_SEARCH_TOOL]
@@ -1318,6 +1328,12 @@ class Planner:
                     "사용자 원문에 확장자까지 정확한 파일명이 있으면 검색 없이 바로 읽거나 "
                     "삭제·변환 도구를 쓰고, 폴더와 *.txt 같은 패턴을 말했으면 검색하지 말고 "
                     "local__delete_files의 directory·pattern을 쓰세요. "
+                    "크기·수정일로 고르거나 정렬하는 목록 요청(가장 큰 파일, 최근 N일, "
+                    "N일 넘은 파일, 폴더별 용량, 파일 크기·정보)은 local__list_files로 "
+                    "답하세요. 그 결과는 사용자에게 따로 보이지 않으니 답에 파일·폴더 이름을 "
+                    "결과 순서대로 크기·날짜와 함께 직접 적으세요. '가장 최근 계약서'처럼 "
+                    "크기·날짜로 하나를 고르는 요청은 사용자에게 묻지 말고 local__list_files "
+                    "결과에서 골라 진행하세요. "
                     "정확한 파일명이 없는 파일 요청은 사용자에게 되묻기 전에 "
                     "반드시 local__find_files를 먼저 호출하세요. 안 쓰는 선택 인자는 "
                     "생략하세요(빈 문자열 금지). keywords에는 파일명·주제어와 "
@@ -1634,6 +1650,10 @@ class Planner:
                     return Error("모호한 파일 요청은 안전한 후보 탐색 없이 진행할 수 없습니다.")
                 if state.single_search_candidate is not None and not state.candidate_read:
                     return Error("검증된 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
+                if state.ranked_candidates and not set(state.read_paths) & set(
+                    state.ranked_candidates
+                ):
+                    return Error("고른 후보 파일을 읽지 않아 요청을 완료할 수 없습니다.")
                 supported = [
                     tool.name for tool in state.tools
                     if (tool.name == DELETE_TOOL and _destructive_request(state.user_text))
@@ -1973,6 +1993,13 @@ class Planner:
             and not state.candidate_read
         ):
             return "검증된 후보 파일을 읽기 전에는 쓸 수 없습니다."
+        if (
+            call.name in WRITE_TOOLS
+            and state.ranked_candidates
+            and not set(state.read_paths) & set(state.ranked_candidates)
+        ):
+            # Checked before approval, so a resumed approval needs no copy of this state.
+            return "고른 후보 파일을 읽기 전에는 파일을 바꿀 수 없습니다."
         if call.name in CONTENT_READ_TOOLS and state.single_search_candidate is not None:
             try:
                 requested = await self._gateway.validate_result_path(arguments.get("path"))
@@ -2140,6 +2167,29 @@ class Planner:
                     "decision": "pattern",
                     "note": "폴더와 패턴으로 정하는 삭제입니다. 파일을 고르게 하지 말고 "
                     "local__delete_files의 directory와 pattern으로 바로 요청하세요.",
+                },
+                ensure_ascii=False,
+            )
+            return None
+        if (
+            RANKED_PICK_PATTERN.search(state.user_text)
+            and response.get("decision") == "choose"
+            and response.get("stage") != "meaning"  # a guess by similarity is always confirmed
+            and response.get("complete", True)  # an incomplete search keeps its stated limits
+            and not _acts_without_reading(state.user_text)  # move/delete keep asking
+        ):
+            # "가장 최근 계약서" names one file by date or size: the model picks among the
+            # candidates by their sizes and dates, the user is not asked which one.
+            state.ranked_candidates = tuple(
+                item["path"] for item in response.get("candidates", [])
+            )
+            state.find_override = json.dumps(
+                {
+                    "decision": "ranked",
+                    "note": "크기·날짜로 하나를 고르는 요청입니다. 사용자에게 묻지 말고 "
+                    "local__list_files(paths에 아래 후보 경로)로 크기·수정 시각을 보고 "
+                    "조건에 맞는 후보 하나를 골라 진행하세요. 다른 파일은 고르지 마세요.",
+                    "candidates": response.get("candidates", []),
                 },
                 ensure_ascii=False,
             )
