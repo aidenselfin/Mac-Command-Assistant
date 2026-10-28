@@ -205,7 +205,8 @@ def test_floating_file_box_only_when_the_file_itself_is_asked_for():
     from voice_action.native_bridge import asks_for_file
 
     for text in ("보고서 파일 줘", "회의록 줘", "계약서파일줘", "그거 좀 줘", "사진 꺼내줘",
-                 "견적서 가져와", "발표 자료 주세요", "회의록만 줘", "견적서 가져다줘",
+                 "견적서 가져와", "발표 자료 주세요", "회의록만 줘",
+                 "회의록_요약본.pdf 파일 줘", "위치도.png 파일 줘", "견적서 가져다줘",
                  "보고서 파일 가져와 줘", "견적서 꺼내 주세요", "회의록을 줘"):
         assert asks_for_file(text), text
     for text in ("회의록 요약해줘", "보고서 찾아 줘", "파일 위치 알려줘", "사진 지워줘",

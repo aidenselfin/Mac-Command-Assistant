@@ -19,7 +19,9 @@ from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 GIVE_ENDINGS = ("줘요", "줘", "주세요", "줄래요", "줄래")
 GIVE_VERBS = ("가져와", "가져다", "꺼내")
 PARTICLES = ("만", "도", "을", "를", "은", "는")
-FILE_FACTS = ("경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수", "정보", "날짜", "수정일")
+FILE_FACTS = (
+    "경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수", "정보", "날짜", "수정일",
+)
 
 
 def _bare(word):
@@ -39,7 +41,8 @@ def asks_for_file(text):
     """'보고서 파일 줘'처럼 파일 자체를 달라는 말인지. '요약해줘'·'찾아 줘'는 아니다."""
     # ponytail: 말끝 규칙만 본다. "데이터 줘", 이름에 "요약"이 든 파일은 놓친다
     words = [word.strip(".,!?~") for word in text.split()]
-    if not words or any(fact in text for fact in FILE_FACTS):
+    plain = [word for word in words if "." not in word and "_" not in word]  # not file names
+    if not words or any(fact in word for word in plain for fact in FILE_FACTS):
         return False  # "경로 좀 가져와": facts about the file, not the file
     last = words[-1]  # what the command finally asks: "가져와서 요약해줘" is a summary
     give = next((ending for ending in GIVE_ENDINGS if last.endswith(ending)), "")
