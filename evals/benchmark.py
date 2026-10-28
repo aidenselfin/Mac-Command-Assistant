@@ -209,19 +209,21 @@ def main(argv=None) -> int:
         delta = compare(report, json.loads(args.compare.read_text(encoding="utf-8"))["report"])
     print(render(report, guide, delta))
     BENCHMARKS.mkdir(exist_ok=True)
-    out = BENCHMARKS / time.strftime("%Y%m%d-%H%M%S.json")
-    for n in range(2, 100):  # never overwrite an earlier record taken in the same second
-        if not out.exists():
-            break
-        out = BENCHMARKS / time.strftime(f"%Y%m%d-%H%M%S-{n}.json")
-    out.write_text(
-        json.dumps(
-            {"versions": data.get("versions"), "source": result.name, "report": report,
-             "guidance": guide},
-            ensure_ascii=False, indent=2,
-        ),
-        encoding="utf-8",
+    record = json.dumps(
+        {"versions": data.get("versions"), "source": result.name, "report": report,
+         "guidance": guide},
+        ensure_ascii=False, indent=2,
     )
+    n = 1
+    while True:  # exclusive create: never overwrite a record, even from a concurrent run
+        suffix = "" if n == 1 else f"-{n}"
+        out = BENCHMARKS / time.strftime(f"%Y%m%d-%H%M%S{suffix}.json")
+        try:
+            with out.open("x", encoding="utf-8") as fh:
+                fh.write(record)
+            break
+        except FileExistsError:
+            n += 1
     print(f"saved {out.name}")
     return 0
 
