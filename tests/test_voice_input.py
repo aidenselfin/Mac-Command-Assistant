@@ -123,3 +123,17 @@ def test_purge_stale_removes_only_old_voice_clips():
     tr.purge_stale()
     assert not old.exists() and fresh.exists()
     fresh.unlink()
+
+
+def test_failed_clip_deletion_still_reports_and_frees_the_bridge():
+    transport, events, done = bridge()
+    path = clip(f"{tr.PREFIX}undeletable.m4a")
+    with patch("voice_action.native_bridge.transcribe", return_value="열어줘"), \
+            patch.object(Path, "unlink", side_effect=PermissionError):
+        transport.command({"action": "voice", "path": str(path)})
+        assert done.wait(5)
+        transport.state = RuntimeState.WAITING_APPROVAL
+        transport.command({"action": "voice", "path": str(path)})  # refused path must not raise
+    assert events[-1]["type"] == "rejected" or events[0]["text"] == "열어줘"
+    assert not transport.transcribing
+    path.unlink()

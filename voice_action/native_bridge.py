@@ -106,7 +106,10 @@ class NativeBridge:
             if (clip is None or self.transcribing or self.state not in
                     {RuntimeState.IDLE, RuntimeState.WAITING_USER_INPUT}):
                 if clip is not None:
-                    clip.unlink(missing_ok=True)
+                    try:
+                        clip.unlink(missing_ok=True)
+                    except OSError:
+                        pass
                 return self.refuse()
             self.transcribing, self.voice_cancelled = True, False
             self.voice_thread = threading.Thread(
