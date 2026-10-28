@@ -14,9 +14,9 @@ final class Toast {
 
     /// A reply is shown under the question it answers, so a fast answer does not hide what was heard.
     func show(_ role: String, _ text: String) {
-        let flat = text.replacingOccurrences(of: "\n", with: " ")
+        let flat = text.components(separatedBy: .newlines).joined(separator: " ")
         let shown = flat.count > 160 ? String(flat.prefix(160)) + "…" : flat
-        if role == "user" { asked = "나 · " + shown }
+        if role == "user" { asked = "나 · " + (flat.count > 60 ? String(flat.prefix(60)) + "…" : flat) }  // short, so the answer fits below
         label.stringValue = role == "user" ? asked
             : (asked.isEmpty ? "" : asked + "\n") + (role == "error" ? "오류 · " : "") + shown
         label.textColor = role == "error" ? .systemRed : .labelColor
