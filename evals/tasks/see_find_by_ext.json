@@ -31,6 +31,10 @@
     "reply_contains": [
       "a.csv",
       "b.csv"
+    ],
+    "reply_excludes": [
+      "c.txt",
+      "d.md"
     ]
   }
 }

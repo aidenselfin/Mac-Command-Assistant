@@ -32,6 +32,9 @@
   "expect": {
     "files": {
       "data.csv": "*"
-    }
+    },
+    "must_run": [
+      "local__convert_file"
+    ]
   }
 }

@@ -32,6 +32,9 @@
   "expect": {
     "files": {
       "memo.pdf": "*"
-    }
+    },
+    "must_run": [
+      "local__convert_file"
+    ]
   }
 }
