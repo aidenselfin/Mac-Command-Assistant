@@ -2,14 +2,12 @@
 
 import argparse
 import sqlite3
-import sys
 from pathlib import Path
 
 from rich.console import Console
 
 from voice_action.config import ConfigError
 from voice_action.feedback import DEFAULT_DB_PATH, FeedbackLoop
-from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient, MCPError
 from voice_action.mcp_manager import MCPManager
 from voice_action.planner import (
@@ -19,7 +17,6 @@ from voice_action.planner import (
     Error,
     PlannerError,
 )
-from voice_action.playwright_client import PlaywrightMCPClient
 from voice_action.runtime import Busy, RuntimeResult
 from voice_action.undo import UndoJournal, UndoJournalError
 
@@ -66,10 +63,7 @@ def print_outcome(console: Console, outcome: RuntimeResult) -> None:
 def _build_mcp_manager(config) -> MCPManager:
     clients = {
         "filesystem": MCPClient(config, allowed_tools=SUPPORTED_TOOLS),
-        "web": PlaywrightMCPClient(config),
     }
-    if sys.platform == "darwin":
-        clients["macos"] = MacOSAXClient()
     return MCPManager(clients)
 
 

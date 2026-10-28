@@ -15,8 +15,8 @@
                                           │
               ┌───────────────┬───────────┴──────────┬──────────────────┐
               ▼               ▼                      ▼                  ▼
-     local__* 도구(앱 내부)   MCPManager ─► filesystem(Node) / web(Playwright) / macos(AX)
-     (아래 표)                (mcp_manager.py, mcp_client.py, playwright_client.py, macos_client.py)
+     local__* 도구(앱 내부)   MCPManager ─► filesystem(Node)  (web·macos는 꺼짐, archive/web-macos-mcp)
+     (아래 표)                (mcp_manager.py, mcp_client.py)
 ```
 
 - 모델은 **노출된 도구만** 부를 수 있고, 그 도구의 인자는 코드가 다시 검증한다(노출 = 실행 권한).

@@ -15,6 +15,7 @@ struct FinderChatPreviewApp: App {
 
 private struct ChatPanel: View {
     @StateObject private var backend = Backend.shared
+    @StateObject private var voice = VoiceInput.shared
     @State private var input = ""
 
     var body: some View {
@@ -76,7 +77,7 @@ private struct ChatPanel: View {
                 } label: { Image(systemName: "ellipsis") }
             }
         }
-        .task { backend.start() }
+        .task { backend.start(); voice.install() }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard backend.idle, providers.count == 1 else { return false }
             _ = providers[0].loadObject(ofClass: URL.self) { url, _ in
@@ -100,6 +101,8 @@ private struct ChatPanel: View {
     }
 
     private var statusText: String {
+        if voice.recording { return "듣는 중 · 오른쪽 옵션 키를 떼면 전송돼요" }
+        if backend.transcribing { return "음성을 글로 바꾸는 중" }
         if !backend.tool.isEmpty { return "작업 중 · \(backend.tool)" }
         switch backend.state {
         case "IDLE": return "준비됨"

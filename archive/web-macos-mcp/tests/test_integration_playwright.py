@@ -11,9 +11,10 @@ from unittest.mock import AsyncMock
 
 import anyio
 import pytest
+import voice_action.playwright_client as playwright_module
+from voice_action.playwright_client import PlaywrightMCPClient
 
 import main
-import voice_action.playwright_client as playwright_module
 from tests import runner
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient, ToolRejectedError
 from voice_action.mcp_manager import MCPManager
@@ -25,7 +26,6 @@ from voice_action.planner import (
     PlannerError,
     ToolCall,
 )
-from voice_action.playwright_client import PlaywrightMCPClient
 from voice_action.runtime import RuntimeState
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType
 from voice_action.undo import UndoJournal

@@ -29,12 +29,15 @@ final class Backend: ObservableObject {
     @Published var attachment: String?
     @Published var online = false
     @Published var pending = false
+    @Published var transcribing = false
     @Published var ratable = false
     @Published var lowScore: Int?
     private var process: Process?
     private var input: FileHandle?
     private var buffer = Data()
     private var reveal = false
+    private var voiceClip: URL?
+    private var voiceCancelled = false
     private var session = UUID()
 
     var running: Bool { process != nil }
@@ -88,6 +91,7 @@ final class Backend: ObservableObject {
                     self.input = nil
                     self.online = false
                     self.pending = false
+                    self.transcribing = false
                     self.approval = nil
                     self.choices = []
                     self.state = "STOPPED"
@@ -156,7 +160,17 @@ final class Backend: ObservableObject {
                 else { lowScore = score }
             case "rejected":
                 pending = false
+                transcribing = false
+                if let clip = voiceClip { try? FileManager.default.removeItem(at: clip) }
                 append("error", text)
+            case "transcript":
+                pending = false
+                transcribing = false
+                let cancelled = voiceCancelled
+                voiceCancelled = false
+                if cancelled { break }
+                if let problem = value["error"] as? String { append("error", problem) }
+                else { submit(text) }
             case "notice": append("notice", text)
             case "stopped": online = false; pending = false; approval = nil; choices = []
             default: break
@@ -171,6 +185,7 @@ final class Backend: ObservableObject {
     @discardableResult
     func send(_ action: String, fields: [String: Any] = [:]) -> Bool {
         guard let input else { return false }
+        if action == "cancel", transcribing { voiceCancelled = true }
         do {
             var value = fields
             value["action"] = action
@@ -196,6 +211,18 @@ final class Backend: ObservableObject {
         }
     }
 
+    /// Hand a finished recording to the backend; it comes back as a `transcript` event.
+    func sendVoice(_ clip: URL) {
+        guard canSubmit, send("voice", fields: ["path": clip.path]) else {
+            try? FileManager.default.removeItem(at: clip)
+            return
+        }
+        voiceClip = clip
+        voiceCancelled = false
+        pending = true
+        transcribing = true
+    }
+
     func decide(_ approve: Bool) {
         guard !pending, let approval else { return }
         if send(approve ? "approve" : "reject", fields: ["approval_id": approval.approval_id]) {
@@ -217,9 +244,69 @@ final class Backend: ObservableObject {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    private var statusItem: NSStatusItem?
+
+    // The menu bar icon keeps the app alive after the window is closed.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
+        Backend.shared.start()
+        VoiceInput.shared.install()
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.target = self
+        item.button?.action = #selector(statusClicked)
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusItem = item
+        refreshIcon()
+        // Login launch (--background) starts hidden; the window opens from the menu.
+        if CommandLine.arguments.contains("--background") {
+            DispatchQueue.main.async { NSApp.windows.forEach { $0.orderOut(nil) } }
+        }
+    }
+
+    private func refreshIcon() {
+        let on = VoiceInput.shared.enabled
+        let image = NSImage(systemSymbolName: on ? "mic.fill" : "mic.slash", accessibilityDescription: "음성 키")
+        image?.isTemplate = true
+        statusItem?.button?.image = image
+        statusItem?.button?.toolTip = on ? "음성 키 감지 켜짐 · 누르면 끔" : "음성 키 감지 꺼짐 · 누르면 켬"
+    }
+
+    /// Click toggles the voice key; right-click or Control-click opens the menu.
+    @objc private func statusClicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            let menu = NSMenu()
+            let toggle = menu.addItem(withTitle: VoiceInput.shared.enabled ? "음성 키 끄기" : "음성 키 켜기",
+                                      action: #selector(toggleVoice), keyEquivalent: "")
+            toggle.target = self
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "창 열기", action: #selector(openWindow), keyEquivalent: "").target = self
+            menu.addItem(withTitle: "종료", action: #selector(quit), keyEquivalent: "").target = self
+            statusItem?.menu = menu
+            statusItem?.button?.performClick(nil)
+            statusItem?.menu = nil
+        } else {
+            toggleVoice()
+        }
+    }
+
+    @objc private func toggleVoice() {
+        VoiceInput.shared.enabled.toggle()
+        refreshIcon()
+    }
+
+    @objc private func openWindow() {
+        NSApp.activate()
+        // The app also owns small helper windows (status item, 64pt stub): pick the chat window by title.
+        NSApp.windows.first { $0.title == "파일 도우미" }?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func quit() { NSApp.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        VoiceInput.shared.discard()  // a clip still being recorded must not stay in the temp folder
         guard Backend.shared.running else { return .terminateNow }
         Backend.shared.shutdown { sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater

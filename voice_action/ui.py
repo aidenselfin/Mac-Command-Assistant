@@ -2,7 +2,6 @@
 
 import asyncio
 import queue
-import sys
 import threading
 from collections.abc import Callable
 from contextlib import suppress
@@ -14,7 +13,6 @@ from openai import AsyncOpenAI
 
 from voice_action.attachment import AttachmentError
 from voice_action.feedback import LOW_RATING, build_feedback
-from voice_action.macos_client import MacOSAXClient
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
 from voice_action.planner import (
@@ -28,7 +26,6 @@ from voice_action.planner import (
     PlannerEvent,
     PlannerEventType,
 )
-from voice_action.playwright_client import PlaywrightMCPClient
 from voice_action.runtime import Busy, RuntimeController, RuntimeResult, RuntimeState
 from voice_action.undo import UndoJournal, UndoJournalError
 
@@ -414,10 +411,7 @@ class UIPresenter:
 def _manager_factory(config) -> MCPManager:
     clients = {
         "filesystem": MCPClient(config, allowed_tools=SUPPORTED_TOOLS),
-        "web": PlaywrightMCPClient(config),
     }
-    if sys.platform == "darwin":
-        clients["macos"] = MacOSAXClient()
     return MCPManager(clients)
 
 

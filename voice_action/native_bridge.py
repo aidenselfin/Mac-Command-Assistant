@@ -6,18 +6,24 @@ import queue
 import selectors
 import signal
 import sys
+import threading
 import uuid
 
 from voice_action.config import load_config
 from voice_action.feedback import RATING_TAGS
 from voice_action.planner import ApprovalRequired, Clarification, Completed, Error
 from voice_action.runtime import Busy, RuntimeState
+from voice_action.transcribe import clip_path, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
 
 class NativeBridge:
-    def __init__(self, worker, emit):
-        self.worker, self.emit = worker, emit
+    def __init__(self, worker, emit, voice_key=None):
+        self.worker, self.emit, self.voice_key = worker, emit, voice_key
+        self.transcribing = False
+        self.voice_cancelled = False
+        self.voice_lock = threading.Lock()
+        self.voice_thread = None
         self.state = None
         self.in_flight = False
         self.approval_id = None
@@ -73,6 +79,10 @@ class NativeBridge:
         if action == "shutdown":
             return False
         if action == "cancel":
+            with self.voice_lock:
+                if self.transcribing:
+                    self.voice_cancelled = True
+                    return True
             if self.state is RuntimeState.WAITING_APPROVAL:
                 return self.command({"action": "reject", "approval_id": self.approval_id})
             if self.state is RuntimeState.WAITING_USER_INPUT:
@@ -93,6 +103,21 @@ class NativeBridge:
                 self.in_flight = True
                 return True
             return self.refuse()
+        if action == "voice":
+            clip = clip_path(request.get("path"))
+            if (clip is None or self.transcribing or self.state not in
+                    {RuntimeState.IDLE, RuntimeState.WAITING_USER_INPUT}):
+                if clip is not None:
+                    try:
+                        clip.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                return self.refuse()
+            self.transcribing, self.voice_cancelled = True, False
+            self.voice_thread = threading.Thread(
+                target=self.transcribe_clip, args=(clip,), daemon=True)
+            self.voice_thread.start()
+            return True
         if action == "submit":
             text = request.get("text")
             if (self.state not in {RuntimeState.IDLE, RuntimeState.WAITING_USER_INPUT}
@@ -124,6 +149,29 @@ class NativeBridge:
                 return True
         return self.refuse()
 
+    def transcribe_clip(self, clip):
+        """Worker thread: the text goes back to Swift, which submits it like typed input."""
+        text, problem = "", None
+        try:
+            if not self.voice_key:
+                problem = "음성 명령에는 Groq API 키(GROQ_API_KEY)가 필요합니다."
+            else:
+                text = transcribe(clip, self.voice_key)
+                if not text:
+                    problem = "음성을 알아듣지 못했어요. 다시 말해 주세요."
+        except Exception as exc:
+            problem = f"음성을 글로 바꾸지 못했습니다 ({type(exc).__name__})."
+        finally:
+            try:
+                clip.unlink(missing_ok=True)
+            except OSError:
+                pass
+        with self.voice_lock:  # a cancel is either seen here or arrives after the result
+            if self.voice_cancelled:
+                text, problem = "", "음성 명령을 취소했습니다."
+            self.emit({"type": "transcript", "text": text, "error": problem})
+            self.transcribing = False
+
     def refuse(self):
         self.emit({"type": "rejected", "text": "현재 상태에서 처리할 수 없는 요청입니다."})
         return True
@@ -142,7 +190,8 @@ def main():
         return 1
     messages = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
-    bridge = NativeBridge(worker, emit)
+    purge_stale()
+    bridge = NativeBridge(worker, emit, config.voice_api_key)
     stopped = False
 
     def stop(_signum, _frame):
@@ -190,6 +239,8 @@ def main():
     except (BrokenPipeError, OSError):
         pass
     finally:
+        if bridge.voice_thread:
+            bridge.voice_thread.join(timeout=5)
         worker.shutdown()  # waits for cancellation and durable deletion/Undo cleanup
     return 0
 

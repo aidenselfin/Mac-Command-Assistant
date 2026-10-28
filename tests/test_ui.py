@@ -139,33 +139,13 @@ def presenter_at(state):
     return presenter, adapter, view
 
 
-def test_manager_factory_registers_macos_only_on_darwin(config, monkeypatch):
-    created = []
-    filesystem, web, macos = object(), object(), object()
+def test_manager_factory_registers_only_the_filesystem_client(config, monkeypatch):
+    filesystem = object()
 
     monkeypatch.setattr(ui_module, "MCPClient", lambda *_args, **_kwargs: filesystem)
-    monkeypatch.setattr(ui_module, "PlaywrightMCPClient", lambda _config: web)
-    monkeypatch.setattr(
-        ui_module,
-        "MacOSAXClient",
-        lambda: (created.append("macos"), macos)[1],
-    )
     monkeypatch.setattr(ui_module, "MCPManager", lambda clients: clients)
 
-    monkeypatch.setattr(ui_module.sys, "platform", "linux")
-    assert ui_module._manager_factory(config) == {
-        "filesystem": filesystem,
-        "web": web,
-    }
-    assert created == []
-
-    monkeypatch.setattr(ui_module.sys, "platform", "darwin")
-    assert ui_module._manager_factory(config) == {
-        "filesystem": filesystem,
-        "web": web,
-        "macos": macos,
-    }
-    assert created == ["macos"]
+    assert ui_module._manager_factory(config) == {"filesystem": filesystem}
 
 
 def test_runtime_state_mapping_is_exact():
