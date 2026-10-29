@@ -2357,9 +2357,13 @@ def test_folder_question_is_refused_so_the_default_folder_is_used():
 
     state = SimpleNamespace(
         user_text="폴더 안에 뭐 있는지 알려줘",
-        find_tried=False, find_none=False, known_target=False,
+        find_tried=True, find_none=False, known_target=False,
     )
     ask = "어느 폴더의 내용을 알려드릴까요? 경로를 알려주세요."
     assert "기본 폴더" in _free_text_refusal(state, ask)
+    assert "기본 폴더" in _free_text_refusal(state, "어느 폴더인가요?")
+    state.user_text = "a.txt를 다른 폴더로 옮겨줘"
+    assert _free_text_refusal(state, "대상 폴더의 경로를 알려주세요.") is None
+    state.user_text = "폴더 안에 뭐 있는지 알려줘"
     state.user_text = "/Users/a/docs 안에 뭐 있어?"
     assert _free_text_refusal(state, ask) is None

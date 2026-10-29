@@ -613,15 +613,18 @@ def _free_text_refusal(state: "_LoopState", question: str) -> str | None:
             "clarification_error: 대상 파일을 모르면 사용자에게 묻기 전에 local__find_files로 "
             "먼저 찾으세요."
         )
-    if FOLDER_QUESTION.search(question) and "/" not in state.user_text:
+    if FOLDER_QUESTION.search(question)
+        and not FOLDER_EXEMPT.search(state.user_text):
         return (
             "clarification_error: 작업 폴더는 묻지 않습니다. 첫 번째 Allowed root를 기본 폴더로 "
             "local__list_files나 local__find_files를 바로 호출하세요."
         )
     return None
 FOLDER_QUESTION = re.compile(
-    r"(폴더|경로|디렉터리|디렉토리|어디).*(알려|어느|어디|지정|입력|말씀|무엇|뭐)"
+    r"어느 (폴더|경로|디렉터리|디렉토리)|(폴더|경로|디렉터리|디렉토리|어디).*(알려|지정|입력|말씀|무엇|뭐)"
 )
+# A typed path, or a command that writes somewhere, may really need the folder asked.
+FOLDER_EXEMPT = re.compile(r"(^|\s)[/~]\S|옮|이동|복사|저장|만들|삭제|지워|변환|바꿔")
 # A request only to locate a file needs no read; anything about its content does.
 LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")
