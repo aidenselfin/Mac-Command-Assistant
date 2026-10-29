@@ -97,8 +97,9 @@ final class Toast {
             : (asked.isEmpty ? "" : asked + "\n") + (role == "error" ? "오류 · " : "") + shown
         label.textColor = role == "error" ? .systemRed : .labelColor
         if role != "user" && role != "notice" { asked = "" }  // the question belongs to this answer only
-        thinkingText = nil  // an answer or error ends the waiting
+        if !(role == "notice" && thinkingText != nil) { thinkingText = nil }  // a notice does not end the waiting
         layout()
+        if thinkingText != nil { return }
         scheduleHide(seconds: max(5, Double(shown.count) / 12))
     }
 
