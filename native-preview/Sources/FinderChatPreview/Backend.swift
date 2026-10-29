@@ -239,13 +239,14 @@ final class Backend: ObservableObject {
         voiceCancelled = false
         pending = true
         transcribing = true
-        Toast.shared.thinking("음성을 글로 바꾸는 중…")
+        Toast.shared.thinking("음성을 글로 바꾸는 중…", fresh: true)
     }
 
     func decide(_ approve: Bool) {
         guard !pending, let approval else { return }
         if send(approve ? "approve" : "reject", fields: ["approval_id": approval.approval_id]) {
             pending = true
+            Toast.shared.thinking("처리하는 중…")
             self.approval = nil
         }
     }

@@ -74,8 +74,9 @@ final class Toast {
     private var asked = ""
 
     /// Shows the spinner row under the last question; nil removes it and lets the note fade out.
-    func thinking(_ text: String?) {
+    func thinking(_ text: String?, fresh: Bool = false) {
         thinkingText = text
+        if fresh { asked = ""; label.stringValue = "" }  // a new voice input must not show the previous exchange
         guard text != nil else {
             spinner.isHidden = true
             wait.isHidden = true
