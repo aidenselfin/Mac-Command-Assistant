@@ -620,7 +620,8 @@ def _free_text_refusal(state: "_LoopState", question: str) -> str | None:
         )
     return None
 FOLDER_QUESTION = re.compile(
-    r"어느 (폴더|경로|디렉터리|디렉토리)|(폴더|경로|디렉터리|디렉토리|어디).*(알려|지정|입력|말씀|무엇|뭐)"
+    r"어느 (폴더|경로|디렉터리|디렉토리)"
+    r"|(폴더|경로|디렉터리|디렉토리|어디).*(알려|지정|입력|말씀|무엇|뭐)"
 )
 # A typed path, or a command that writes somewhere, may really need the folder asked.
 FOLDER_EXEMPT = re.compile(r"(^|\s)[/~]\S|옮|이동|복사|저장|만들|삭제|지워|변환|바꿔")
