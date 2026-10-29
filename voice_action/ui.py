@@ -574,6 +574,7 @@ class AsyncRuntimeWorker:
                         spare = await stack.enter_async_context(
                             AsyncOpenAI(
                                 api_key=self.config.fallback_api_key,
+                                base_url="https://api.openai.com/v1",
                                 timeout=self.config.llm_timeout_seconds,
                                 max_retries=0,
                             )
