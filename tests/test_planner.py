@@ -2355,8 +2355,10 @@ def test_folder_question_is_refused_so_the_default_folder_is_used():
 
     from voice_action.planner import _free_text_refusal
 
-    state = SimpleNamespace(user_text="폴더 안에 뭐 있는지 알려줘", find_tried=False, find_none=False,
-                            known_target=False)
-    assert "기본 폴더" in _free_text_refusal(state, "어느 폴더의 내용을 알려드릴까요? 경로를 알려주세요.")
+    state = SimpleNamespace(
+        user_text="폴더 안에 뭐 있는지 알려줘", find_tried=False, find_none=False, known_target=False
+    )
+    ask = "어느 폴더의 내용을 알려드릴까요? 경로를 알려주세요."
+    assert "기본 폴더" in _free_text_refusal(state, ask)
     state.user_text = "/Users/a/docs 안에 뭐 있어?"
-    assert _free_text_refusal(state, "어느 폴더인가요? 경로를 알려주세요.") is None
+    assert _free_text_refusal(state, ask) is None

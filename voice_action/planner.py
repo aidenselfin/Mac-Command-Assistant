@@ -619,7 +619,9 @@ def _free_text_refusal(state: "_LoopState", question: str) -> str | None:
             "local__list_files나 local__find_files를 바로 호출하세요."
         )
     return None
-FOLDER_QUESTION = re.compile(r"(폴더|경로|디렉터리|디렉토리|어디).*(알려|어느|어디|지정|입력|말씀|무엇|뭐)")
+FOLDER_QUESTION = re.compile(
+    r"(폴더|경로|디렉터리|디렉토리|어디).*(알려|어느|어디|지정|입력|말씀|무엇|뭐)"
+)
 # A request only to locate a file needs no read; anything about its content does.
 LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")
