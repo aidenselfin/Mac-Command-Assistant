@@ -31,6 +31,7 @@ from voice_action.file_search import (
     FIND_FILES_SEMANTIC_DEFINITION,
     FIND_FILES_TOOL,
     LIST_DEFINITION,
+    LIST_FILES_TOOL,
     clarification_spec,
 )
 from voice_action.mcp_client import (
@@ -2154,6 +2155,10 @@ class Planner:
                 return outcome
             if state.find_override is not None:
                 result_text, state.find_override = state.find_override, None
+        elif call.name == LIST_FILES_TOOL and result.structured is not None:
+            files = result.structured.get("files") or []
+            if len(files) == 1:  # "가장 최근 파일 줘": one pick is a draggable file too
+                state.found_paths = (files[0]["path"],)
         elif (
             call.name in CONTENT_READ_TOOLS
             and state.single_search_candidate is not None

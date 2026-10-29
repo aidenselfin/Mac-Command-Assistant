@@ -400,3 +400,15 @@ async def test_ranked_move_still_asks_which_file(config):
     outcome = await planner.run("가장 최근 계약서를 보관 폴더로 옮겨줘")
 
     assert isinstance(outcome, Clarification)
+
+
+async def test_single_list_files_pick_becomes_a_draggable_found_path(config):
+    root = config.allowed_directories[0]
+    (root / "최근.txt").write_text("내용")
+    arguments = json.dumps({"limit": 1, "sort_by": "modified"})
+    pick = ModelTurn(None, [ToolCall("list", "local__list_files", arguments)])
+    planner, _ = make_planner(config, scripted(pick, ModelTurn("최근 파일입니다", [])))
+
+    outcome = await planner.run("가장 최근 파일 줘")
+
+    assert outcome.found_paths == (str(root / "최근.txt"),)
