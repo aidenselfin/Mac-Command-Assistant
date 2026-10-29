@@ -75,12 +75,13 @@ final class Toast {
 
     /// Shows the spinner row under the last question; nil removes it and lets the note fade out.
     func thinking(_ text: String?, fresh: Bool = false) {
+        let wasWaiting = thinkingText != nil
         thinkingText = text
         if fresh { asked = ""; label.stringValue = "" }  // a new voice input must not show the previous exchange
         guard text != nil else {
             spinner.isHidden = true
             wait.isHidden = true
-            if let panel, panel.isVisible { layout(); scheduleHide(seconds: 3) }
+            if wasWaiting, let panel, panel.isVisible { layout(); scheduleHide(seconds: 3) }  // a shown reply keeps its own timer
             return
         }
         layout()
