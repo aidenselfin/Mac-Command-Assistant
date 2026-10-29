@@ -41,6 +41,8 @@ class Config:
     feedback_enabled: bool = True
     feedback_api_key: str | None = field(default=None, repr=False)
     voice_api_key: str | None = field(default=None, repr=False)  # Groq Whisper (push-to-talk)
+    fallback_api_key: str | None = field(default=None, repr=False)  # second provider on LLM failure
+    fallback_model: str = "gpt-4o-mini"
     feedback_model: str = "anthropic/claude-sonnet-5.5"
     feedback_daily_limit: int = 20
     feedback_autonomy: bool = True
@@ -184,6 +186,10 @@ def load_config(
         feedback_enabled=feedback == "on",
         feedback_api_key=(env.get("OPENROUTER_API_KEY") or "").strip() or None,
         voice_api_key=(env.get("GROQ_API_KEY") or "").strip() or None,
+        fallback_api_key=(
+            None if provider == "openai" else (env.get("OPENAI_API_KEY") or "").strip() or None
+        ),
+        fallback_model=(env.get("VOICE_ACTION_FALLBACK_MODEL") or "").strip() or "gpt-4o-mini",
         feedback_model=feedback_model,
         feedback_daily_limit=daily_limit,
         feedback_autonomy=autonomy == "on",

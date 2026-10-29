@@ -20,6 +20,7 @@ from voice_action.planner import (
     Clarification,
     Completed,
     Error,
+    FallbackModel,
     OpenAICompatibleModel,
     Planner,
     PlannerError,
@@ -568,6 +569,15 @@ class AsyncRuntimeWorker:
                 async with self._client_factory(self.config) as client:
                     tools = await manager.list_tools()
                     model = self._model_factory(client, self.config.model)
+                    if self.config.fallback_api_key:
+                        spare = AsyncOpenAI(
+                            api_key=self.config.fallback_api_key,
+                            timeout=self.config.llm_timeout_seconds,
+                            max_retries=0,
+                        )
+                        model = FallbackModel(
+                            model, self._model_factory(spare, self.config.fallback_model)
+                        )
                     planner = Planner(
                         self.config,
                         manager,

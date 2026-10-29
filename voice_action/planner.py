@@ -422,6 +422,21 @@ def _provider_error_detail(exc: APIError) -> str:
     return ": " + " — ".join(parts) if parts else ""
 
 
+class FallbackModel:
+    """Retry a failed provider call once on a second provider."""
+
+    def __init__(self, primary, fallback):
+        self.primary, self.fallback = primary, fallback
+
+    async def generate(self, *args, **kwargs) -> ModelTurn:
+        try:
+            return await self.primary.generate(*args, **kwargs)
+        except PlannerError as exc:
+            if not str(exc).startswith("LLM"):
+                raise
+        return await self.fallback.generate(*args, **kwargs)
+
+
 class OpenAICompatibleModel:
     def __init__(self, client: AsyncOpenAI, model: str):
         self.client, self.model = client, model
