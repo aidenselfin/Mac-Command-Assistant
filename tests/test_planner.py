@@ -2348,3 +2348,15 @@ async def test_mkdir_prompt_forbids_asking_location_or_confirmation(config):
     assert "허용 루트가 하나뿐이면 위치를 묻지 말고" in system
     assert "만들까요" in system
     assert "폴더 이름은 '새'와 '폴더'를 뺀" in system
+
+
+def test_folder_question_is_refused_so_the_default_folder_is_used():
+    from types import SimpleNamespace
+
+    from voice_action.planner import _free_text_refusal
+
+    state = SimpleNamespace(user_text="폴더 안에 뭐 있는지 알려줘", find_tried=False, find_none=False,
+                            known_target=False)
+    assert "기본 폴더" in _free_text_refusal(state, "어느 폴더의 내용을 알려드릴까요? 경로를 알려주세요.")
+    state.user_text = "/Users/a/docs 안에 뭐 있어?"
+    assert _free_text_refusal(state, "어느 폴더인가요? 경로를 알려주세요.") is None
