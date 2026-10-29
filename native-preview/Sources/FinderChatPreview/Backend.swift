@@ -147,8 +147,10 @@ final class Backend: ObservableObject {
                     if url == url.resolvingSymlinksInPath(),
                        folders.contains(where: { url.path.hasPrefix($0 + "/") }),
                        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular {
-                        dragFile = url
-                        if value["offer_file"] as? Bool == true { FileBox.shared.show(url) }
+                        if value["offer_file"] as? Bool == true {  // "회의록 줘": only then offer a drag
+                            dragFile = url
+                            if !NSApp.isActive { FileBox.shared.show(url) }  // spoken from another app
+                        }
                     }
                 }
                 if type == "completed", reveal,

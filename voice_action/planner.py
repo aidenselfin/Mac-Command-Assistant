@@ -31,6 +31,7 @@ from voice_action.file_search import (
     FIND_FILES_SEMANTIC_DEFINITION,
     FIND_FILES_TOOL,
     LIST_DEFINITION,
+    LIST_FILES_TOOL,
     clarification_spec,
 )
 from voice_action.mcp_client import (
@@ -422,6 +423,21 @@ def _provider_error_detail(exc: APIError) -> str:
     return ": " + " — ".join(parts) if parts else ""
 
 
+class FallbackModel:
+    """Retry a failed provider call once on a second provider."""
+
+    def __init__(self, primary, fallback):
+        self.primary, self.fallback = primary, fallback
+
+    async def generate(self, *args, **kwargs) -> ModelTurn:
+        try:
+            return await self.primary.generate(*args, **kwargs)
+        except PlannerError as exc:
+            if not str(exc).startswith("LLM"):
+                raise
+        return await self.fallback.generate(*args, **kwargs)
+
+
 class OpenAICompatibleModel:
     def __init__(self, client: AsyncOpenAI, model: str):
         self.client, self.model = client, model
@@ -613,7 +629,18 @@ def _free_text_refusal(state: "_LoopState", question: str) -> str | None:
             "clarification_error: 대상 파일을 모르면 사용자에게 묻기 전에 local__find_files로 "
             "먼저 찾으세요."
         )
+    if FOLDER_QUESTION.search(question) and not FOLDER_EXEMPT.search(state.user_text):
+        return (
+            "clarification_error: 작업 폴더는 묻지 않습니다. 첫 번째 Allowed root를 기본 폴더로 "
+            "local__list_files나 local__find_files를 바로 호출하세요."
+        )
     return None
+FOLDER_QUESTION = re.compile(
+    r"어느 (폴더|경로|디렉터리|디렉토리)"
+    r"|(폴더|경로|디렉터리|디렉토리|어디).*(알려|지정|입력|말씀|무엇|뭐)"
+)
+# A typed path, or a command that writes somewhere, may really need the folder asked.
+FOLDER_EXEMPT = re.compile(r"(^|\s)[/~]\S|옮|이동|복사|저장|만들|삭제|지워|변환|바꿔")
 # A request only to locate a file needs no read; anything about its content does.
 LOCATE_PATTERN = re.compile(r"찾|어디|위치|경로|있는지")
 CONTENT_PATTERN = re.compile(r"읽|요약|내용|번역|분석|추출|비교|수정|바꿔|저장|변환|삭제|설명")
@@ -2128,6 +2155,10 @@ class Planner:
                 return outcome
             if state.find_override is not None:
                 result_text, state.find_override = state.find_override, None
+        elif call.name == LIST_FILES_TOOL and result.structured is not None:
+            files = result.structured.get("files") or []
+            if len(files) == 1:  # "가장 최근 파일 줘": one pick is a draggable file too
+                state.found_paths = (files[0]["path"],)
         elif (
             call.name in CONTENT_READ_TOOLS
             and state.single_search_candidate is not None
