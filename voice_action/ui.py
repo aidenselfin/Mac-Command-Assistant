@@ -4,7 +4,7 @@ import asyncio
 import queue
 import threading
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Protocol
@@ -566,14 +566,17 @@ class AsyncRuntimeWorker:
                 self.config, lambda text: self.messages.put(UIMessage(UIMessageType.NOTICE, text))
             )
             async with manager.connect():
-                async with self._client_factory(self.config) as client:
+                async with AsyncExitStack() as stack:
+                    client = await stack.enter_async_context(self._client_factory(self.config))
                     tools = await manager.list_tools()
                     model = self._model_factory(client, self.config.model)
                     if self.config.fallback_api_key:
-                        spare = AsyncOpenAI(
-                            api_key=self.config.fallback_api_key,
-                            timeout=self.config.llm_timeout_seconds,
-                            max_retries=0,
+                        spare = await stack.enter_async_context(
+                            AsyncOpenAI(
+                                api_key=self.config.fallback_api_key,
+                                timeout=self.config.llm_timeout_seconds,
+                                max_retries=0,
+                            )
                         )
                         model = FallbackModel(
                             model, self._model_factory(spare, self.config.fallback_model)
