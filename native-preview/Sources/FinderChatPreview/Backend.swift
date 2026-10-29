@@ -30,7 +30,7 @@ final class Backend: ObservableObject {
     // The one found file, offered as a chip the user drags out; "파일 줘" also floats it over other apps.
     @Published var dragFile: URL? { didSet { if dragFile == nil { FileBox.shared.show(nil) } } }
     @Published var online = false
-    @Published var pending = false
+    @Published var pending = false { didSet { if !pending { Toast.shared.thinking(nil) } } }
     @Published var transcribing = false
     @Published var ratable = false
     @Published var lowScore: Int?
@@ -225,6 +225,7 @@ final class Backend: ObservableObject {
             attachment = nil
             dragFile = nil
             append("user", text)
+            Toast.shared.thinking("생각하는 중…")
         }
     }
 
@@ -238,6 +239,7 @@ final class Backend: ObservableObject {
         voiceCancelled = false
         pending = true
         transcribing = true
+        Toast.shared.thinking("음성을 글로 바꾸는 중…")
     }
 
     func decide(_ approve: Bool) {
