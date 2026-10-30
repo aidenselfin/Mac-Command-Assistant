@@ -20,6 +20,10 @@ final class VoiceInput: ObservableObject {
     private var started = Date()
     private var limit: Task<Void, Never>?
     private var badge: NSPanel?
+    private var meter: Timer?
+    private var loudest: Float = -160
+    /// Peak level (dB) below which a clip is room noise, not speech.
+    private static let speechFloor: Float = -40
 
     /// Right Option is key code 61; the device-dependent bit 0x40 tells it apart from the left one.
     private static let rightOptionKey: UInt16 = 61
@@ -96,6 +100,16 @@ final class VoiceInput: ObservableObject {
             return
         }
         recorder = new
+        new.isMeteringEnabled = true
+        loudest = -160
+        meter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            Task { @MainActor in
+                let voice = VoiceInput.shared
+                guard let rec = voice.recorder else { return }
+                rec.updateMeters()
+                voice.loudest = max(voice.loudest, rec.peakPower(forChannel: 0))
+            }
+        }
         started = Date()
         recording = true
         showBadge()
@@ -110,6 +124,7 @@ final class VoiceInput: ObservableObject {
         guard recording, let current = recorder else { return }
         recording = false
         badge?.orderOut(nil)
+        meter?.invalidate()
         limit?.cancel()
         recorder = nil
         current.stop()
@@ -120,11 +135,13 @@ final class VoiceInput: ObservableObject {
         guard recording, let current = recorder else { return }
         recording = false
         badge?.orderOut(nil)
+        meter?.invalidate()
         limit?.cancel()
         recorder = nil
         current.stop()
         // A tap shorter than this is an accidental press, not a command.
-        if Date().timeIntervalSince(started) < 0.4 {
+        // Nothing but silence: drop it so no "transcribing" state or wrong text ever appears.
+        if Date().timeIntervalSince(started) < 0.4 || loudest < Self.speechFloor {
             try? FileManager.default.removeItem(at: current.url)
             return
         }

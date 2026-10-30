@@ -61,7 +61,7 @@ def test_voice_command_transcribes_deletes_clip_and_reports_text():
 
 
 def test_voice_command_reports_missing_key_empty_text_and_failure_without_submitting():
-    for key, result, expected in [(None, "x", "GROQ_API_KEY"), ("k", "", "알아듣지"),
+    for key, result, expected in [(None, "x", "GROQ_API_KEY"),
                                   ("k", RuntimeError("boom"), "RuntimeError")]:
         transport, events, done = bridge(key)
         path = clip(f"{tr.PREFIX}bad.m4a")
@@ -72,6 +72,17 @@ def test_voice_command_reports_missing_key_empty_text_and_failure_without_submit
             assert done.wait(5)
         assert expected in events[-1]["error"] and events[-1]["text"] == ""
         assert not path.exists()
+        transport.worker.submit.assert_not_called()
+
+
+def test_voice_command_shows_nothing_for_empty_or_stock_phrase_text():
+    for result in ["", "감사합니다.", "시청해 주셔서 감사합니다"]:
+        transport, events, done = bridge("k")
+        path = clip(f"{tr.PREFIX}quiet.m4a")
+        with patch("voice_action.native_bridge.transcribe", return_value=result):
+            transport.command({"action": "voice", "path": str(path)})
+            assert done.wait(5)
+        assert events[-1] == {"type": "transcript", "text": "", "error": None}
         transport.worker.submit.assert_not_called()
 
 

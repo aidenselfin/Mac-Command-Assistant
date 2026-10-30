@@ -13,6 +13,16 @@ MAX_BYTES = 20 * 1024 * 1024  # Groq rejects larger uploads
 PREFIX = "voice-action-voice-"
 
 
+# Whisper invents these stock phrases from silence or room noise.
+HALLUCINATIONS = (
+    "감사합니다", "시청해 주셔서 감사합니다", "구독과 좋아요", "구독과 좋아요 부탁드립니다",
+    "다음 영상에서 만나요", "MBC 뉴스 이덕영입니다")
+
+
+def is_hallucination(text):
+    return text.strip(" .!?~,").replace("  ", " ") in HALLUCINATIONS
+
+
 def clip_path(raw):
     """Return the clip only if it is a plain file the app just wrote into the temp directory."""
     if not isinstance(raw, str):
