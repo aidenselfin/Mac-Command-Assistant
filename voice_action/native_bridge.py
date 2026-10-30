@@ -55,7 +55,7 @@ def asks_for_file(text):
     if stem.endswith(GIVE_VERBS):  # "꺼내줘", "가져와 줘"
         return True
     stem = _bare(stem)
-    if stem.endswith(("거", "것", "서", "나", "개", "명")):  # 보고서·하나·두 개: nouns, not verb forms
+    if stem.endswith(("거", "것", "서", "나", "개", "명")):  # 보고서·하나·두 개: nouns
         return True
     return not stem or not _verb_form(stem)
 
