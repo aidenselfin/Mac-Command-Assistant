@@ -27,11 +27,6 @@ Python은 이 폴더의 `.venv`를 먼저 쓰고, 없으면 같은 저장소 원
 Finder 옆 자동 배치는 아직 네이티브 화면에 옮기지 않았다. 창을 직접 옆에 놓아 시험한다.
 기존 `main.py --interactive`·Tk `--ui`는 그대로 사용할 수 있다.
 
-## 의미 검색 (선택)
-이름·내용으로 못 찾을 때 뜻이 비슷한 파일을 후보로 보여 준다. `uv sync --locked --extra semantic`로 설치하고
-`.voice-action/config.env`에 `VOICE_ACTION_SEMANTIC_SEARCH=on`을 적는다(앱 재시작 필요). 첫 실행에는 모델 로딩과
-색인에 시간이 걸린다. 자세한 내용은 저장소 README의 "의미 검색".
-
 ## 실행 오류 복구
 앱 패키지 전체를 로컬 ad-hoc 서명하고 strict 검사를 통과한 뒤 연다.
 빌드 hash가 같으면 실행 중인 앱을 덮어쓰거나 새 인스턴스를 만들지 않는다.

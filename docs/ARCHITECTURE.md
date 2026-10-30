@@ -33,8 +33,7 @@
 | `voice_action/planner.py` | 시스템 프롬프트, 요청별 도구 노출, 모델 루프, 검색·삭제·이동 규칙, 결과 타입(`Completed` `Clarification` `ApprovalRequired` `Error`) | **2,200줄+**: 고칠 함수 주변만 읽는다 |
 | `voice_action/risk_guard.py` | 도구 위험 분류(`classify_tool`), 승인 발급·검증, 읽기 도구 실행 | 새 도구는 여기에 분류를 추가해야 한다 |
 | `voice_action/runtime.py` | 단일 실행 상태 머신(IDLE→PLANNING→…), 취소, 피드백 연결 | |
-| `voice_action/file_search.py` | `local__find_files`: 이름→폴더→내용 단계 검색, 의미 검색 보조 단계 | |
-| `voice_action/semantic_index.py` | 선택 기능: 임베딩 색인(SQLite)·유사도 검색. 꺼져 있으면 import만 됨 | torch는 `semantic` extra |
+| `voice_action/file_search.py` | `local__find_files`: 이름→폴더→내용 단계 검색 | |
 | `voice_action/file_operations.py` | `local__move_file` `local__copy_file` `local__create_directory` | |
 | `voice_action/deletion.py` | `local__delete_files`(백업 후 삭제) | |
 | `voice_action/conversion.py` | `local__convert_file`(승인 쓰기), `local__read_document`(pdf·docx 읽기) | |
@@ -52,7 +51,7 @@
 
 ## 앱이 쓰는 상태 (모두 git 제외, `.voice-action/` 아래)
 
-`undo.sqlite3`(Undo journal·백업) · `feedback.sqlite3`(평가·사건·lesson) · `semantic.sqlite3`(의미 색인) · `config.env`(API 키).
+`undo.sqlite3`(Undo journal·백업) · `feedback.sqlite3`(평가·사건·lesson) · `config.env`(API 키).
 테스트는 이 파일들을 임시 폴더로 바꿔 쓴다(`tests/conftest.py`). 운영 DB는 수정하지 않는다.
 
 ## 무엇을 고치려면
@@ -61,7 +60,7 @@
 |---|---|
 | 새 로컬 도구 추가 | 도구 모듈(`file_operations.py` 참고) → `risk_guard.py` 분류·승인 → `planner.py` 노출 조건 → 테스트·eval 과제 |
 | 모델이 도구를 못 고르거나 잘못 고른다 | `planner.py` 시스템 프롬프트·노출 조건, `docs/self-improvement-guide.md`, `evals/tasks/` |
-| 검색이 못 찾는다 | `file_search.py`(단계), 안 되면 `semantic_index.py` |
+| 검색이 못 찾는다 | `file_search.py`(단계) |
 | 승인 화면을 바꾼다 | SwiftUI `native-preview/…/App.swift`, 필요하면 `native_bridge.py`와 프로토콜 문서 |
 | 설정 항목 추가 | `config.py` → README 설정 표 → `tests/test_config.py` |
 | 안전 경계(허용 폴더·symlink) | `risk_guard.py`, 각 도구 모듈의 `_open_below` 계열. 약화하지 않는다 |

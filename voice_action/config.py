@@ -48,7 +48,6 @@ class Config:
     feedback_autonomy: bool = True
     finder_reveal: bool = True
     finder_dock: bool = True  # put the revealed Finder window beside the app window
-    semantic_search: bool = False  # meaning-based file search; needs the `semantic` extra
 
 
 def load_config(
@@ -164,9 +163,6 @@ def load_config(
     dock = str(env.get("VOICE_ACTION_FINDER_DOCK") or "on").strip().casefold()
     if dock not in ("on", "off"):
         raise ConfigError("VOICE_ACTION_FINDER_DOCK는 on 또는 off여야 합니다.")
-    semantic = str(env.get("VOICE_ACTION_SEMANTIC_SEARCH") or "off").strip().casefold()
-    if semantic not in ("on", "off"):
-        raise ConfigError("VOICE_ACTION_SEMANTIC_SEARCH는 on 또는 off여야 합니다.")
     feedback_model = (
         env.get("VOICE_ACTION_FEEDBACK_MODEL") or ""
     ).strip() or "anthropic/claude-sonnet-5.5"
@@ -195,5 +191,4 @@ def load_config(
         feedback_autonomy=autonomy == "on",
         finder_reveal=finder == "on",
         finder_dock=dock == "on",
-        semantic_search=semantic == "on",
     )
