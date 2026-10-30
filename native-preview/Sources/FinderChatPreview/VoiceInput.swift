@@ -50,17 +50,31 @@ final class VoiceInput: ObservableObject {
             typed(event)
             return event
         }) { monitors.append(local) }
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: typed) {
-            monitors.append(global)
+        // A worktree build listens only while frontmost; main's app hears the key everywhere
+        // except when another Symbio window is in front, so one press never starts two recordings.
+        let global = worktreeLabel == nil
+        let otherSymbioFront = {
+            guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+            return front != NSRunningApplication.current
+                && (front.bundleIdentifier ?? "").hasPrefix("local.voiceaction.finder-chat-preview")
+        }
+        if global, let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { event in
+            if !otherSymbioFront() { typed(event) }
+        }) {
+            monitors.append(monitor)
         }
         // Without Input Monitoring the key-up is lost once another app is frontmost.
         let resign = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in if !CGPreflightListenEventAccess() { VoiceInput.shared.finish() } }
+            // A worktree build never hears the key-up once it is in the background.
+            Task { @MainActor in if !global || !CGPreflightListenEventAccess() { VoiceInput.shared.finish() } }
         }
         monitors.append(resign)
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) {
-            monitors.append(global)
+        if global, let monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { event in
+            // Still let a key-up end a recording that began before another Symbio came forward.
+            if otherSymbioFront() { Task { @MainActor in VoiceInput.shared.finish() } } else { handler(event) }
+        }) {
+            monitors.append(monitor)
         }
     }
 
