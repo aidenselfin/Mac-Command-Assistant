@@ -7,7 +7,7 @@
 |---|---|---|---|---|---|---|---|
 | 목록·읽기·요약 | ✅ | `폴더 파일 목록 보여줘` `test1.md 요약해줘` | `planner.py` + filesystem MCP | 읽기(자동) | `test_planner.py` `test_integration_filesystem.py` | `read_summary` `preserve_unrelated` | |
 | 파일 찾기 | ✅ | `회의록 요약해줘` | `file_search.py` | 읽기 | `test_file_search.py` `test_find_files_flow.py` | `find_*` `meeting_*` `clarify_cancel` `missing_file` | 2026-10-07 파일 검색 |
-| **의미 검색** | 🟡 `VOICE_ACTION_SEMANTIC_SEARCH=on` | `내 폴더에서 철골 구조물이 나오는 사진 찾아줘` | `semantic_index.py` `file_search.py` | 읽기(항상 후보 확인) | `test_semantic_index.py` `test_integration_features.py` | (없음, 수동 사례는 README) | 2026-10-14 의미 검색 |
+| 크기·날짜 목록 | ✅ | `가장 용량이 큰 파일이 뭐야?` | `file_search.py`(`list_files`) | 읽기 | `test_list_files.py` `test_find_files_flow.py` | `target_see_*` `target_finder_sort_*` `target_finder_disk_usage` `target_read_latest_version` | 2026-10-28 크기·날짜 목록 |
 | 쓰기·덮어쓰기 | ✅ | `result.txt에 저장해줘` | `planner.py` `risk_guard.py` | 쓰기(승인) | `test_risk_guard.py` `test_integration_undo.py` | `write_*` `overwrite_*` `outside_root_write` | |
 | 삭제(단일·패턴) | ✅ | `*.txt 모두 삭제해줘` | `deletion.py` | 쓰기(승인·백업) | `test_deletion.py` | `delete_*` `attach_delete` `neg_delete_too_much` | |
 | **이동·복사·폴더 생성** | ✅ | `보고서를 보관 폴더로 옮겨줘` | `file_operations.py` | 쓰기(승인·Undo) | `test_file_operations.py` | `move_*` `create_directory_undo` | 2026-10-14 파일 정리 도구 |
@@ -17,16 +17,19 @@
 | Undo | ✅ | `undo` `되돌리기` | `undo.py` | | `test_undo.py` `test_integration_undo.py` | `overwrite_undo` `create_directory_undo` | |
 | 직전 대화 기억·후속 질문 | ✅ | `그 요약을 파일로 저장해줘` | `planner.py`(Exchange) | | `test_followup.py` `test_free_text.py` | `follow_up_*` | |
 | 자가 피드백(평가·lesson) | ✅ 피드백 on | 1~5 평가 | `feedback.py` | | `test_feedback*.py` `test_lesson_candidates.py` | `evals/run_eval.py --lesson` | 2026-10-04 lesson |
+| **자율 개선(lesson 자동 채택·코드 자동 수정)** | ✅ `VOICE_ACTION_FEEDBACK_AUTONOMY=on` | (실패 반복 시 자동) | `autonomy.py` `feedback.py` | 보호 파일 목록 | `test_autonomy.py` | `evals/run_eval.py` | 2026-10-27 피드백 자율 개선 |
+| **점수 연동 개선(벤치마크 미달 과제 접수·중도 취소 감지)** | ✅ `autonomy.py bench` (수동) | (벤치 라운드) | `autonomy.py` `feedback.py` | R10 취소 2회 | `test_autonomy.py` | `evals/benchmark.py` | 2026-10-28 점수 연동 |
 | Finder 연동(결과 표시·파일 첨부) | ✅ 네이티브 앱 | | `ui.py` `finder.py` `attachment.py` | | `test_ui.py` `test_finder.py` | | 2026-10-14 Finder 패널 |
+| 찾은 파일 드래그 칩(끌어서 다른 앱에 놓기, "파일 줘"면 전체 화면 위 떠 있는 상자) | ✅ 네이티브 앱 | | `planner.py` `native_bridge.py` `App.swift` `FileBox.swift` | | `test_native_bridge.py` | | 2026-10-28 클릭 드롭 |
 | **네이티브 SwiftUI 앱** | ✅ `native-preview/run.sh` | | `native_bridge.py` `native-preview/` | 승인은 Python이 보유 | `test_native_bridge.py` `test_native_preview.py` `test_native_protocol.py` | | 2026-10-14 네이티브 백엔드 |
 | **오른쪽 옵션 키 음성 명령** | ✅ 네이티브 앱 | 꾹 누르는 동안 녹음 → Groq Whisper → 일반 `submit` | `VoiceInput.swift` `transcribe.py` `native_bridge.py` | 마이크 권한 필요, 앱 밖 감지는 입력 모니터링 권한 | `test_voice_input.py` `test_native_protocol.py` | 실제 마이크·Groq 호출은 사람 확인 전 | 2026-10-28 |
+| 능력 점수 벤치마크 | ✅ live 결과로만 | `python evals/benchmark.py` | `evals/benchmark.py` `evals/benchmark.json` | | `test_benchmark.py` `test_eval_runner.py` | 모든 과제의 `axis`·`level`·`status` | 2026-10-28 능력 점수 |
 | 수정 세션·worktree 도구 | ✅ | | `scripts/vibe.py` | | `test_vibe.py` | | 2026-10-14 병렬 수정 세션 |
 
-과제 이름은 `evals/tasks/*.json` 파일명이다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.
+과제 이름은 `evals/tasks/*.json` 파일명이다. `status: "target"` 과제(`target_*`)는 아직 없는 능력의 목표이며 `--include-targets` 없이는 실행하지 않는다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.
 
 ## 기능 사이의 약속 (깨면 안 되는 것)
 
 - 새 쓰기 도구는 `risk_guard.classify_tool`과 `WRITE_TOOLS`에 넣고, 승인 화면을 SwiftUI에 표시하게 한다.
-- 선택 기능은 꺼져 있을 때 도구 정의·동작이 이전과 같아야 한다(`test_integration_features.py`가 의미 검색을 확인).
 - 파일 내용·벡터는 채팅 모델에 주지 않는다. 검색 결과는 후보로만 내고 확정은 사용자(또는 정확히 1개인 이름 일치)가 한다.
 - 승인된 작업이 없으면 "이동/삭제했다"고 답하지 않는다(`file_operations`의 회귀 테스트 참고).

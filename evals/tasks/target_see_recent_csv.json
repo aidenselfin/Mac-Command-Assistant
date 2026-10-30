@@ -1,0 +1,46 @@
+{
+  "id": "target_see_recent_csv",
+  "family": "file.info",
+  "axis": "see",
+  "level": 100,
+  "status": "active",
+  "files": {
+    "new.csv": "1",
+    "old.csv": "2",
+    "new.txt": "3"
+  },
+  "request": "최근 3일 안에 바뀐 csv 파일만 알려줘",
+  "ages": {
+    "new.csv": 1,
+    "old.csv": 30,
+    "new.txt": 1
+  },
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "new.csv"
+    ],
+    "reply_excludes": [
+      "old.csv",
+      "new.txt"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "extensions": [
+              "csv"
+            ],
+            "modified_within_days": 3
+          }
+        }
+      ]
+    },
+    {
+      "text": "최근 3일 안에 바뀐 csv: new.csv"
+    }
+  ]
+}

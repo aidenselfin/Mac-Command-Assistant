@@ -1,0 +1,26 @@
+{
+  "id": "target_finder_compress_selected",
+  "family": "finder.archive",
+  "axis": "finder",
+  "level": 82,
+  "status": "target",
+  "files": {
+    "a.txt": "A",
+    "b.txt": "B",
+    "c.txt": "C"
+  },
+  "request": "a.txt와 b.txt만 묶음.zip으로 압축해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "묶음.zip": "*"
+    },
+    "must_run": [
+      "local__compress_files"
+    ]
+  }
+}

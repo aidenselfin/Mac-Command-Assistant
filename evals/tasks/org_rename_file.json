@@ -1,0 +1,44 @@
+{
+  "id": "org_rename_file",
+  "family": "file.move",
+  "axis": "organize",
+  "level": 66,
+  "status": "active",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "a.txt 이름을 b.txt로 바꿔줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/a.txt",
+            "destination": "{root}/b.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "이름을 바꿨습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "a.txt": null,
+      "b.txt": "x"
+    },
+    "must_run": [
+      "local__move_file"
+    ],
+    "changed_paths": [
+      "b.txt"
+    ]
+  }
+}

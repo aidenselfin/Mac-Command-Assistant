@@ -1,0 +1,76 @@
+{
+  "id": "target_finder_full_cleanup",
+  "family": "finder.compose",
+  "axis": "finder",
+  "level": 100,
+  "status": "target",
+  "files": {
+    "a.txt": "same",
+    "h.txt": "same",
+    "c.txt": "C",
+    "e.txt": "E",
+    "b.png": "B",
+    "d.png": "D",
+    "f.png": "F",
+    "g.pdf": "G"
+  },
+  "request": "확장자별 폴더(txt, png, pdf)로 나누고, 90일 넘은 파일은 보관 폴더로 옮기고, 내용이 같은 중복은 오래된 것만 남기고 지워줘",
+  "ages": {
+    "a.txt": 2,
+    "h.txt": 50,
+    "c.txt": 200,
+    "e.txt": 5,
+    "b.png": 3,
+    "d.png": 5,
+    "f.png": 300,
+    "g.pdf": 4
+  },
+  "user": {
+    "approve": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "a.txt": null,
+      "h.txt": null,
+      "c.txt": null,
+      "e.txt": null,
+      "b.png": null,
+      "d.png": null,
+      "f.png": null,
+      "g.pdf": null,
+      "txt/h.txt": "same",
+      "txt/e.txt": "E",
+      "png/b.png": "B",
+      "png/d.png": "D",
+      "pdf/g.pdf": "G",
+      "보관/c.txt": "C",
+      "보관/f.png": "F"
+    }
+  }
+}

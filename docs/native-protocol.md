@@ -13,8 +13,8 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 | `state` | `state` | 런타임 상태 이름(IDLE, PLANNING, WAITING_APPROVAL …) |
 | `tool` | `name` | 지금 실행 중인 도구 |
 | `approval` | `approval_id` `operation` `target` `targets` `preview` `truncated` `characters` | 승인 요청. `operation`: `create` `overwrite` `delete` `move` `copy` `mkdir` `convert` … <br>이동·복사는 `targets[0]`=원본, `target`=목적지. 폴더 생성은 `target`만 |
-| `clarification` | `text` `kind` `choices` | 질문 또는 후보 선택(의미 검색 후보 포함) |
-| `completed` | `text` `changed_paths` `ratable` | 완료 |
+| `clarification` | `text` `kind` `choices` | 질문 또는 후보 선택 |
+| `completed` | `text` `changed_paths` `found_paths` `offer_file` `ratable` | 완료. `found_paths`는 검색이 한 파일로 정한 경로(드래그 칩용), `offer_file`은 "파일 줘"처럼 파일 자체를 달라는 명령이라 떠 있는 상자도 띄울지 |
 | `error` | `text` | 오류·바쁨 |
 | `attachment` | `path` `text` | 첨부 결과(`path`가 null이면 해제) |
 | `rating_saved` | `score` `tags` | 평가 저장됨 |

@@ -1,0 +1,83 @@
+{
+  "id": "finder_group_into_folder",
+  "family": "finder.group",
+  "axis": "finder",
+  "level": 44,
+  "status": "active",
+  "files": {
+    "a.txt": "A",
+    "b.txt": "B",
+    "c.txt": "C"
+  },
+  "request": "a.txt, b.txt, c.txt를 묶음 폴더를 만들어서 이동해줘",
+  "user": {
+    "approve": [
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__create_directory",
+          "args": {
+            "path": "{root}/묶음"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/a.txt",
+            "destination": "{root}/묶음"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/b.txt",
+            "destination": "{root}/묶음"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/c.txt",
+            "destination": "{root}/묶음"
+          }
+        }
+      ]
+    },
+    {
+      "text": "묶음 폴더에 모았습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "a.txt": null,
+      "b.txt": null,
+      "c.txt": null,
+      "묶음/a.txt": "A",
+      "묶음/b.txt": "B",
+      "묶음/c.txt": "C"
+    },
+    "must_run": [
+      "local__create_directory",
+      "local__move_file"
+    ]
+  }
+}

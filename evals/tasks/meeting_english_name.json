@@ -1,6 +1,9 @@
 {
   "id": "meeting_english_name",
   "family": "file.find",
+  "axis": "summarize",
+  "level": 46,
+  "status": "active",
   "files": {
     "meeting-minutes.txt": "Decision: ship on Friday",
     "메모.txt": "점심"

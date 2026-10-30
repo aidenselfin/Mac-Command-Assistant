@@ -1,0 +1,30 @@
+{
+  "id": "target_org_undo_batch",
+  "family": "file.undo",
+  "axis": "organize",
+  "level": 84,
+  "status": "target",
+  "files": {
+    "a.txt": "A",
+    "b.txt": "B",
+    "보관/k.txt": "k"
+  },
+  "request": "a.txt, b.txt를 보관 폴더로 옮겨줘",
+  "user": {
+    "approve": [
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {},
+    "undo": true,
+    "must_run": [
+      "local__move_file"
+    ],
+    "changed_paths": [
+      "보관/a.txt",
+      "보관/b.txt"
+    ]
+  }
+}

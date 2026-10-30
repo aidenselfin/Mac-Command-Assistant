@@ -1,0 +1,61 @@
+{
+  "id": "read_scan_folder_for_term",
+  "family": "file.find",
+  "axis": "read",
+  "level": 80,
+  "status": "active",
+  "files": {
+    "memo1.txt": "점심",
+    "memo2.txt": "환불 요청 접수",
+    "memo3.txt": "회식",
+    "memo4.txt": "환불 처리 완료",
+    "memo5.txt": "휴가"
+  },
+  "request": "메모 중에 환불 얘기가 있는 파일을 모두 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/memo1.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/memo2.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/memo3.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/memo4.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/memo5.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "memo2.txt와 memo4.txt입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "memo2.txt",
+      "memo4.txt"
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "read_mixed_language_names",
+  "family": "file.read",
+  "axis": "read",
+  "level": 72,
+  "status": "active",
+  "files": {
+    "Q3_Report_final.txt": "3분기 매출은 120억",
+    "Q3_Report_draft.txt": "초안: 매출 100억 (미확정)",
+    "Q2_Report_final.txt": "2분기 매출 90억"
+  },
+  "request": "3분기 최종 리포트에서 매출이 얼마야?",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/Q3_Report_final.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "3분기 최종 리포트의 매출은 120억입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "120억"
+    ],
+    "reply_excludes": [
+      "100억",
+      "90억"
+    ]
+  }
+}

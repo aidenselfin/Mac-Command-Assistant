@@ -1,0 +1,29 @@
+{
+  "id": "target_org_delete_with_exception",
+  "family": "file.delete.batch",
+  "axis": "organize",
+  "level": 72,
+  "status": "target",
+  "files": {
+    "log/a.tmp": "1",
+    "log/b.tmp": "2",
+    "log/keep.tmp": "3",
+    "log/c.txt": "4"
+  },
+  "request": "log 폴더의 .tmp 파일을 삭제하되 keep.tmp는 남겨줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "note": "앱이 '제외 조건'이 있는 삭제를 거절한다(planner._delete_scope_error)",
+  "expect": {
+    "files": {
+      "log/a.tmp": null,
+      "log/b.tmp": null
+    },
+    "must_run": [
+      "local__delete_files"
+    ]
+  }
+}

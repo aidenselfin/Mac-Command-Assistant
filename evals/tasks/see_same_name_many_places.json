@@ -1,0 +1,80 @@
+{
+  "id": "see_same_name_many_places",
+  "family": "file.find",
+  "axis": "see",
+  "level": 78,
+  "status": "active",
+  "files": {
+    "a/보고서.txt": "1",
+    "b/보고서.txt": "2",
+    "c/보고서.txt": "3",
+    "d/메모.txt": "4"
+  },
+  "request": "보고서.txt가 어느 폴더들에 있는지 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}/a"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}/b"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}/c"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}/d"
+          }
+        }
+      ]
+    },
+    {
+      "text": "a/보고서.txt, b/보고서.txt, c/보고서.txt 세 곳에 있습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "a/보고서.txt",
+      "b/보고서.txt",
+      "c/보고서.txt"
+    ],
+    "reply_excludes": [
+      "메모.txt"
+    ]
+  }
+}

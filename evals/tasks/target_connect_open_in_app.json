@@ -1,0 +1,17 @@
+{
+  "id": "target_connect_open_in_app",
+  "family": "app.open",
+  "axis": "connect",
+  "level": 82,
+  "status": "target",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "a.txt를 기본 앱으로 열어줘",
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__open_file"
+    ]
+  }
+}

@@ -71,27 +71,6 @@ FIND_FILES_DEFINITION = ToolDefinition(
     },
 )
 
-# Offered to the model only when the meaning search is on; validation always accepts `query`.
-FIND_FILES_SEMANTIC_DEFINITION = ToolDefinition(
-    FIND_FILES_TOOL,
-    FIND_FILES_DEFINITION.description
-    + " query에는 찾는 파일이 어떤 것인지 설명하는 구절만 적는다(예: 고양이 사진, 가계부 지출, "
-    "이탈리아 음식 사진). 이동·삭제·요약 같은 동작이나 목적지 폴더는 넣지 않는다. "
-    "이름·폴더·내용으로 하나도 못 찾을 때만 앱이 의미가 비슷한 파일을 찾으며, 그 결과는 "
-    "항상 사용자에게 확인한다. 파일명을 정확히 말했으면 생략한다.",
-    {
-        **FIND_FILES_DEFINITION.schema,
-        "properties": {
-            **FIND_FILES_DEFINITION.schema["properties"],
-            "query": {
-                "type": ["string", "null"],
-                "description": "찾는 파일을 설명하는 구절만. 동작·목적지는 넣지 않는다.",
-            },
-        },
-    },
-)
-
-
 @dataclass(frozen=True)
 class Entry:
     path: Path
@@ -124,7 +103,7 @@ def _keyword_pattern(keyword: str) -> re.Pattern:
 
 def _validate(arguments: dict) -> None:
     try:
-        Draft202012Validator(FIND_FILES_SEMANTIC_DEFINITION.schema).validate(arguments)
+        Draft202012Validator(FIND_FILES_DEFINITION.schema).validate(arguments)
     except ValidationError as exc:
         raise ToolRejectedError(f"잘못된 {FIND_FILES_TOOL} 인자입니다.") from exc
 
@@ -431,21 +410,7 @@ def _narrow_by_content(
     return [entry for entry, _ in kept], coverage
 
 
-def _by_meaning(semantic, query: str, scope: list[Entry]) -> tuple[str, list[Entry], list[str]]:
-    """(stage, ranked, limits): files whose meaning is close to the request, best first."""
-    result = semantic.search(query, scope, MAX_SHOW)
-    if result.state == "loading":
-        return "none", [], ["의미 검색 모델을 불러오는 중이라 사용하지 못했습니다"]
-    if result.state == "error":
-        return "none", [], ["의미 검색을 사용할 수 없습니다"]
-    reasons = []
-    if result.state == "partial":
-        reasons.append(f"의미 검색 색인이 {result.done}/{result.total}개만 준비되었습니다")
-    hits = [entry for entry, _ in result.hits]
-    return ("meaning" if hits else "none"), hits, reasons
-
-
-def find_files(arguments: dict, roots: tuple[Path, ...], semantic=None) -> ToolResult:
+def find_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     _validate(arguments)
     keywords = list(
         dict.fromkeys(_fold(item[:100]) for item in arguments["keywords"] if _fold(item[:100]))
@@ -470,19 +435,14 @@ def find_files(arguments: dict, roots: tuple[Path, ...], semantic=None) -> ToolR
     if content_words and ranked:
         ranked, coverage = _narrow_by_content(ranked, content_words, coverage)
         stage = f"{stage}+content"
-    meaning_reasons: list[str] = []
-    query = (arguments.get("query") or "").strip()[:200]
-    if not ranked and semantic is not None and query:  # also when the content step emptied it
-        stage, ranked, meaning_reasons = _by_meaning(semantic, query, scope)
     count = len(ranked)
-    reasons = _limits(walk_cut, coverage) + meaning_reasons
+    reasons = _limits(walk_cut, coverage)
     decision = (
         "none" if count == 0 else "single" if count == 1
         else "choose" if count <= MAX_SHOW else "narrow"
     )
-    if decision == "single" and (reasons or stage == "meaning"):
-        # One hit among files that were not fully looked at, or a guess by similarity, is not
-        # "the only one": confirm it.
+    if decision == "single" and reasons:
+        # One hit among files that were not fully looked at is not "the only one": confirm it.
         decision = "choose"
     response: dict = {
         "stage": stage, "decision": decision, "total": count,
@@ -495,8 +455,6 @@ def find_files(arguments: dict, roots: tuple[Path, ...], semantic=None) -> ToolR
         notes.append("검사 범위의 한계: " + "; ".join(reasons) + ".")
         if decision == "none":
             notes.append("없다고 단정하지 말고, 파일명·폴더 같은 단서를 사용자에게 물으세요.")
-    if stage == "meaning":
-        notes.append("의미가 비슷한 순서의 추정이라 틀릴 수 있습니다. 앱이 사용자에게 확인합니다.")
     if filtered and decision == "none":
         # Never widen on our own: a condition the user named must not be dropped silently.
         notes.append(
@@ -519,6 +477,105 @@ def find_files(arguments: dict, roots: tuple[Path, ...], semantic=None) -> ToolR
     return ToolResult(
         True, json.dumps(response, ensure_ascii=False), structured=response,
         truncated=response["truncated"],
+    )
+
+
+LIST_FILES_TOOL = "local__list_files"
+LIST_MAX = 50
+LIST_DEFINITION = ToolDefinition(
+    LIST_FILES_TOOL,
+    "허용된 폴더 안 파일을 크기·수정일과 함께 목록으로 본다(하위 폴더 포함). 가장 큰 파일, "
+    "최근에 바뀐 파일, 며칠 안/며칠 넘은 파일, 형식별 목록, 폴더별 용량처럼 크기·날짜로 "
+    "고르거나 정렬하는 요청에 쓴다. sort_by는 size·modified·name(기본 modified, 큰 것·최근 "
+    "것 먼저, ascending이 true면 반대). name_contains는 파일 이름에 들어갈 말(하나만 맞아도 "
+    "됨)이다. paths는 이미 찾은 후보 경로만 볼 때 쓴다. "
+    "modified_within_days=N은 최근 N일 안에 바뀐 파일, "
+    "not_modified_for_days=N은 N일 넘게 안 바뀐 파일이다. group_by가 folder면 최상위 "
+    "폴더별 합계 용량을 큰 순서로 준다. 결과는 사용자에게 보이지 않으므로 답에 이름을 "
+    "결과 순서대로 직접 적고, 바이트 크기는 size_bytes를 쓴다. 안 쓰는 인자는 생략한다.",
+    {
+        "type": "object",
+        "properties": {
+            "sort_by": {"type": ["string", "null"], "enum": ["size", "modified", "name", None]},
+            "ascending": {"type": ["boolean", "null"]},
+            "extensions": {"type": ["array", "null"], "items": {"type": "string"}},
+            "folder_hint": {"type": ["string", "null"]},
+            "name_contains": {"type": ["array", "null"], "items": {"type": "string"}},
+            "paths": {"type": ["array", "null"], "items": {"type": "string"}},
+            "modified_within_days": {"type": ["number", "null"]},
+            "not_modified_for_days": {"type": ["number", "null"]},
+            "group_by": {"type": ["string", "null"], "enum": ["folder", None]},
+            "limit": {"type": ["integer", "null"]},
+        },
+    },
+)
+
+
+def list_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
+    try:
+        Draft202012Validator(LIST_DEFINITION.schema).validate(arguments)
+    except ValidationError as exc:
+        raise ToolRejectedError(f"잘못된 {LIST_FILES_TOOL} 인자입니다.") from exc
+    within = arguments.get("modified_within_days")
+    idle = arguments.get("not_modified_for_days")
+    if any(days is not None and days < 0 for days in (within, idle)):
+        raise ToolRejectedError("일 수는 0 이상이어야 합니다.")
+    entries, truncated = _walk(roots)
+    entries = _filter(entries, arguments, roots)
+    words = [_fold(word[:100]) for word in (arguments.get("name_contains") or [])[:MAX_KEYWORDS]]
+    words = [word for word in words if word]
+    if len(arguments.get("paths") or []) > LIST_MAX:
+        raise ToolRejectedError(f"paths는 {LIST_MAX}개까지입니다.")
+    paths = {str(Path(path)) for path in arguments.get("paths") or []}
+    now = time.time()
+    entries = [
+        entry for entry in entries
+        if (not paths or str(entry.path) in paths)
+        and (not words or any(word in _fold(entry.name) for word in words))
+        and (within is None or entry.mtime >= now - within * 86400)
+        and (idle is None or entry.mtime < now - idle * 86400)
+    ]
+    limit = max(1, min(arguments.get("limit") or 20, LIST_MAX))
+    descending = not arguments.get("ascending")
+    response: dict = {"total": len(entries), "truncated": truncated}
+    if arguments.get("group_by") == "folder":
+        totals: dict[str, list[int]] = {}
+        for entry in entries:
+            if entry.folder:
+                # Two allowed roots may each hold a folder of the same name.
+                label = entry.folder[0]
+                if len(roots) > 1:  # roots may share a name too, so the full path
+                    label = str(entry.root / label)
+                total = totals.setdefault(label, [0, 0])
+                total[0] += entry.size
+                total[1] += 1
+        folders = sorted(totals.items(), key=lambda item: (-item[1][0], item[0]))
+        if not descending:
+            folders.reverse()
+        response["folders"] = [
+            {"folder": name, "size_bytes": size, "size": _size(size), "files": count}
+            for name, (size, count) in folders[:limit]
+        ]
+    else:
+        key = arguments.get("sort_by") or "modified"
+        ordered = sorted(
+            entries,
+            key=lambda entry: entry.name if key == "name" else getattr(
+                entry, "size" if key == "size" else "mtime"
+            ),
+            reverse=descending if key != "name" else not descending,
+        )
+        response["files"] = [
+            {
+                "name": entry.name, "path": str(entry.path), "size_bytes": entry.size,
+                "size": _size(entry.size),
+                "modified": datetime.fromtimestamp(entry.mtime).strftime("%Y-%m-%d %H:%M"),
+            }
+            for entry in ordered[:limit]
+        ]
+        response["shown"] = len(response["files"])
+    return ToolResult(
+        True, json.dumps(response, ensure_ascii=False), structured=response, truncated=truncated
     )
 
 

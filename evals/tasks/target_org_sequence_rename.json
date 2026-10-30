@@ -1,0 +1,35 @@
+{
+  "id": "target_org_sequence_rename",
+  "family": "file.organize",
+  "axis": "organize",
+  "level": 92,
+  "status": "target",
+  "files": {
+    "c.jpg": "C",
+    "a.jpg": "A",
+    "b.jpg": "B"
+  },
+  "request": "사진을 찍은(수정한) 순서대로 vacation_01.jpg, vacation_02.jpg 순으로 이름을 바꿔줘",
+  "ages": {
+    "c.jpg": 9,
+    "a.jpg": 5,
+    "b.jpg": 1
+  },
+  "user": {
+    "approve": [
+      true,
+      true,
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "c.jpg": null,
+      "a.jpg": null,
+      "b.jpg": null,
+      "vacation_01.jpg": "C",
+      "vacation_02.jpg": "A",
+      "vacation_03.jpg": "B"
+    }
+  }
+}

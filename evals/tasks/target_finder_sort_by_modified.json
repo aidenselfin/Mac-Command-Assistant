@@ -1,0 +1,46 @@
+{
+  "id": "target_finder_sort_by_modified",
+  "family": "finder.sort",
+  "axis": "finder",
+  "level": 40,
+  "status": "active",
+  "files": {
+    "a.txt": "1",
+    "b.txt": "2",
+    "c.txt": "3"
+  },
+  "request": "최근에 수정한 순서대로 파일 목록을 보여줘",
+  "ages": {
+    "a.txt": 9,
+    "b.txt": 1,
+    "c.txt": 5
+  },
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "b.txt",
+      "c.txt",
+      "a.txt"
+    ],
+    "reply_order": [
+      "b.txt",
+      "c.txt",
+      "a.txt"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "sort_by": "modified"
+          }
+        }
+      ]
+    },
+    {
+      "text": "최근 수정 순: b.txt, c.txt, a.txt"
+    }
+  ]
+}

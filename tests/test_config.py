@@ -131,3 +131,13 @@ def test_finder_switches_default_on_and_accept_off(tmp_path):
         load_config(
             cwd=tmp_path, home=tmp_path, environ={**base, "VOICE_ACTION_FINDER_DOCK": "maybe"}
         )
+
+
+def test_fallback_only_with_other_provider(tmp_path):
+    (tmp_path / "voice-action-test").mkdir()
+    kw = {"cwd": tmp_path, "home": tmp_path / "home"}
+    both = {"GROQ_API_KEY": "g", "OPENAI_API_KEY": "o", "VOICE_ACTION_FALLBACK_MODEL": "m"}
+    config = load_config(environ=both, **kw)
+    assert (config.fallback_api_key, config.fallback_model) == ("o", "m")
+    assert load_config(environ={"GROQ_API_KEY": "g"}, **kw).fallback_api_key is None
+    assert load_config(environ={"OPENAI_API_KEY": "o"}, **kw).fallback_api_key is None

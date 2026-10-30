@@ -27,12 +27,18 @@ Python은 이 폴더의 `.venv`를 먼저 쓰고, 없으면 같은 저장소 원
 Finder 옆 자동 배치는 아직 네이티브 화면에 옮기지 않았다. 창을 직접 옆에 놓아 시험한다.
 기존 `main.py --interactive`·Tk `--ui`는 그대로 사용할 수 있다.
 
-## 의미 검색 (선택)
-이름·내용으로 못 찾을 때 뜻이 비슷한 파일을 후보로 보여 준다. `uv sync --locked --extra semantic`로 설치하고
-`.voice-action/config.env`에 `VOICE_ACTION_SEMANTIC_SEARCH=on`을 적는다(앱 재시작 필요). 첫 실행에는 모델 로딩과
-색인에 시간이 걸린다. 자세한 내용은 저장소 README의 "의미 검색".
-
 ## 실행 오류 복구
 앱 패키지 전체를 로컬 ad-hoc 서명하고 strict 검사를 통과한 뒤 연다.
 빌드 hash가 같으면 실행 중인 앱을 덮어쓰거나 새 인스턴스를 만들지 않는다.
 코드가 바뀌면 이 worktree의 앱만 종료하고 갱신한다. 자동 소유권 스냅샷은 실행 검증과 별개다.
+
+## 메뉴 막대·로그인 자동 시작
+앱은 메뉴 막대 아이콘(마이크)으로 떠 있다. 오른쪽 옵션 키 감지는 메뉴에서 켜고 끈다(설정은 기억된다).
+클릭하면 켜기·끄기, 창 열기, 종료 메뉴가 나온다(우클릭은 동작 없음). 창을 닫아도 앱은 계속 실행된다.
+
+```sh
+./native-preview/login-agent.sh install    # 로그인 때 main 폴더 코드를 빌드해 실행
+./native-preview/login-agent.sh uninstall
+```
+
+main이 업데이트되면 다음 로그인(또는 `install` 다시 실행) 때 최신 코드로 다시 빌드된다. 로그는 `/tmp/com.aidenselfin.voice-action-ai.menubar.log`.

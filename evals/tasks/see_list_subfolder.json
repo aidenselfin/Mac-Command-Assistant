@@ -1,0 +1,35 @@
+{
+  "id": "see_list_subfolder",
+  "family": "file.list",
+  "axis": "see",
+  "level": 12,
+  "status": "active",
+  "files": {
+    "보고서/q1.txt": "1",
+    "보고서/q2.txt": "2",
+    "other.txt": "3"
+  },
+  "request": "보고서 폴더 안에 뭐가 있어?",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}/보고서"
+          }
+        }
+      ]
+    },
+    {
+      "text": "q1.txt와 q2.txt가 있습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "q1.txt",
+      "q2.txt"
+    ]
+  }
+}

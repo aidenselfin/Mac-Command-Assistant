@@ -16,6 +16,49 @@ from voice_action.runtime import Busy, RuntimeState
 from voice_action.transcribe import clip_path, is_hallucination, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
+GIVE_ENDINGS = ("줘요", "줘", "주세요", "줄래요", "줄래")
+GIVE_VERBS = ("가져와", "가져다", "꺼내")
+PARTICLES = ("만", "도", "을", "를", "은", "는")
+FILE_FACTS = (
+    "경로", "위치", "이름", "목록", "내용", "요약", "크기", "개수", "정보", "날짜", "수정일",
+    "생성일", "용량",
+)
+
+
+def _bare(word):
+    """'찾아만' is still 찾아, '경로를' still 경로."""
+    while word[-1:] in PARTICLES:
+        word = word[:-1]
+    return word
+
+
+def _verb_form(word):
+    """'해'·'찾아'·'알려'처럼 받침 없는 아/어 꼴이면 그 뒤 '줘'는 동작을 해 달라는 말이다."""
+    code = ord(word[-1]) - 0xAC00
+    return 0 <= code < 11172 and code % 28 == 0 and code // 28 % 21 in {0, 1, 4, 6, 9, 10, 14, 15}
+
+
+def asks_for_file(text):
+    """'보고서 파일 줘'처럼 파일 자체를 달라는 말인지. '요약해줘'·'찾아 줘'는 아니다."""
+    # ponytail: 말끝 규칙만 본다. "데이터 줘", 이름에 "요약"이 든 파일은 놓친다
+    words = [word.strip(".,!?~") for word in text.split()]
+    plain = [word for word in words if "." not in word and "_" not in word]  # not file names
+    if not words or any(fact in word for word in plain for fact in FILE_FACTS):
+        return False  # "경로 좀 가져와": facts about the file, not the file
+    last = words[-1]  # what the command finally asks: "가져와서 요약해줘" is a summary
+    give = next((ending for ending in GIVE_ENDINGS if last.endswith(ending)), "")
+    if not give:
+        return last.endswith(GIVE_VERBS)
+    before = [*words[:-1], last[: -len(give)]]
+    before = [word for word in before if word and word != "좀"]  # "찾아 좀 줘" is still 찾아 줘
+    stem = before[-1] if before else ""
+    if stem.endswith(GIVE_VERBS):  # "꺼내줘", "가져와 줘"
+        return True
+    stem = _bare(stem)
+    if stem.endswith(("거", "것", "서", "나", "개", "명")):  # 보고서·하나·두 개: nouns
+        return True
+    return not stem or not _verb_form(stem)
+
 
 class NativeBridge:
     def __init__(self, worker, emit, voice_key=None):
@@ -27,6 +70,7 @@ class NativeBridge:
         self.state = None
         self.in_flight = False
         self.approval_id = None
+        self.request = ""  # the command a clarification answer belongs to
 
     def message(self, message):
         kind, value = message.type, message.value
@@ -51,6 +95,8 @@ class NativeBridge:
             elif isinstance(value, Completed):
                 self.emit({"type": "completed", "text": value.text,
                            "changed_paths": list(value.changed_paths),
+                           "found_paths": list(value.found_paths),
+                           "offer_file": asks_for_file(self.request),
                            "ratable": self.worker.can_rate()})
             elif isinstance(value, (Error, Busy)):
                 self.emit({"type": "error", "text": value.message})
@@ -124,6 +170,8 @@ class NativeBridge:
                     or not isinstance(text, str) or not text.strip()):
                 return self.refuse()
             if self.worker.submit(text):
+                if self.state is not RuntimeState.WAITING_USER_INPUT:
+                    self.request = text
                 self.in_flight = True
                 return True
             return self.refuse()

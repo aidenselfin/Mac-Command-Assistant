@@ -1,6 +1,9 @@
 {
   "id": "find_by_content",
   "family": "file.find",
+  "axis": "read",
+  "level": 46,
+  "status": "active",
   "files": {
     "memo1.txt": "분기 예산은 3천만원으로 확정",
     "memo2.txt": "점심 메뉴는 김밥",

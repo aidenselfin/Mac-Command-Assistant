@@ -1,0 +1,22 @@
+{
+  "id": "target_find_duplicates",
+  "family": "target",
+  "axis": "organize",
+  "level": 90,
+  "status": "target",
+  "files": {
+    "a.txt": "same",
+    "b.txt": "same",
+    "c.txt": "other"
+  },
+  "request": "내용이 같은 중복 파일을 찾아줘",
+  "user": {
+    "approve": []
+  },
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__find_duplicates"
+    ]
+  }
+}

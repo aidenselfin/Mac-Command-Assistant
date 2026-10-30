@@ -187,3 +187,54 @@ def test_json_stream_rejects_malformed_input_and_closes_worker_on_shutdown(
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [event["type"] for event in events] == ["config", "rejected"]
     assert config.api_key not in json.dumps(events)
+
+
+def test_completed_event_carries_found_paths_for_drag_chip():
+    from voice_action.planner import Completed
+
+    events = []
+    worker = Mock()
+    worker.can_rate.return_value = False
+    NativeBridge(worker, events.append).message(
+        UIMessage(UIMessageType.OUTCOME, Completed("찾았어요", found_paths=("/a/b.txt",)))
+    )
+    assert events[-1]["found_paths"] == ["/a/b.txt"]
+
+
+def test_floating_file_box_only_when_the_file_itself_is_asked_for():
+    from voice_action.native_bridge import asks_for_file
+
+    for text in ("보고서 파일 줘", "회의록 줘", "계약서파일줘", "그거 좀 줘", "사진 꺼내줘",
+                 "견적서 가져와", "발표 자료 주세요", "회의록만 줘",
+                 "보고서 줘", "견적서 주세요", "문서 줘",
+                 "회의록_요약본.pdf 파일 줘", "위치도.png 파일 줘", "견적서 가져다줘",
+                 "보고서 파일 가져와 줘", "견적서 꺼내 주세요", "회의록을 줘",
+                 "가장 최근 파일 하나 줘", "최근 파일 두 개만 줘", "문서 한 개 주세요"):
+        assert asks_for_file(text), text
+    for text in ("회의록 요약해줘", "보고서 찾아 줘", "파일 위치 알려줘", "사진 지워줘",
+                 "pdf로 바꿔줘", "회의록 읽어줘", "보고서 파일 열어 줘",
+                 "보고서 가져와서 요약해줘", "회의록 찾아만 줘",
+                 "보고서 찾아 좀 줘", "보고서 파일 경로 줘",
+                 "보고서 가져와서요약해줘", "보고서 꺼내서읽어줘", "보고서 파일 경로만 줘",
+                 "보고서 파일 위치도 줘",
+                 "보고서 파일 경로를 줘", "보고서 파일 위치를 주세요", "보고서 파일 용량 줘",
+                 "보고서 파일 경로 가져와 줘", "파일 목록 가져와",
+                 "보고서 파일 경로 좀 가져와", "보고서 파일 경로가져와줘"):
+        assert not asks_for_file(text), text
+
+
+def test_offer_file_follows_the_original_request_through_a_clarification():
+    from voice_action.planner import Completed
+
+    events = []
+    worker = Mock()
+    worker.can_rate.return_value = False
+    worker.submit.return_value = True
+    bridge = NativeBridge(worker, events.append)
+    bridge.state = RuntimeState.IDLE
+    bridge.command({"action": "submit", "text": "보고서 파일 줘"})
+    bridge.state = RuntimeState.WAITING_USER_INPUT
+    bridge.command({"action": "submit", "text": "2번"})
+    found = Completed("찾았어요", found_paths=("/a/b.txt",))
+    bridge.message(UIMessage(UIMessageType.OUTCOME, found))
+    assert events[-1]["offer_file"] is True
