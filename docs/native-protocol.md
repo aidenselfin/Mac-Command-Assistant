@@ -13,7 +13,7 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 | `state` | `state` | 런타임 상태 이름(IDLE, PLANNING, WAITING_APPROVAL …) |
 | `tool` | `name` | 지금 실행 중인 도구 |
 | `approval` | `approval_id` `operation` `target` `targets` `preview` `truncated` `characters` | 승인 요청. `operation`: `create` `overwrite` `delete` `move` `copy` `mkdir` `convert` … <br>이동·복사는 `targets[0]`=원본, `target`=목적지. 폴더 생성은 `target`만 |
-| `clarification` | `text` `kind` `choices` | 질문 또는 후보 선택(의미 검색 후보 포함) |
+| `clarification` | `text` `kind` `choices` | 질문 또는 후보 선택 |
 | `completed` | `text` `changed_paths` `ratable` | 완료 |
 | `error` | `text` | 오류·바쁨 |
 | `attachment` | `path` `text` | 첨부 결과(`path`가 null이면 해제) |
