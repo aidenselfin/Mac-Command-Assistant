@@ -13,7 +13,7 @@ from voice_action.config import load_config
 from voice_action.feedback import RATING_TAGS
 from voice_action.planner import ApprovalRequired, Clarification, Completed, Error
 from voice_action.runtime import Busy, RuntimeState
-from voice_action.transcribe import clip_path, purge_stale, transcribe
+from voice_action.transcribe import clip_path, is_hallucination, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
 
@@ -157,8 +157,8 @@ class NativeBridge:
                 problem = "음성 명령에는 Groq API 키(GROQ_API_KEY)가 필요합니다."
             else:
                 text = transcribe(clip, self.voice_key)
-                if not text:
-                    problem = "음성을 알아듣지 못했어요. 다시 말해 주세요."
+                if is_hallucination(text):
+                    text = ""  # silence heard as a stock phrase: show nothing
         except Exception as exc:
             problem = f"음성을 글로 바꾸지 못했습니다 ({type(exc).__name__})."
         finally:
