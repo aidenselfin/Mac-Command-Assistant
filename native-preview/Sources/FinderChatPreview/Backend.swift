@@ -264,6 +264,9 @@ final class Backend: ObservableObject {
     }
 }
 
+/// Worktree builds carry their folder name (set by run.sh); nil for main's app.
+let worktreeLabel = Bundle.main.object(forInfoDictionaryKey: "SymbioLabel") as? String
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
@@ -275,7 +278,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
         Backend.shared.start()
         VoiceInput.shared.install()
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(
+            withLength: worktreeLabel == nil ? NSStatusItem.squareLength : NSStatusItem.variableLength)
         item.button?.target = self
         item.button?.action = #selector(statusClicked)
         item.button?.sendAction(on: [.leftMouseUp])  // right-click does nothing
@@ -285,6 +289,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--background") {
             DispatchQueue.main.async { NSApp.windows.forEach { $0.orderOut(nil) } }
         }
+        if let label = worktreeLabel {
+            DispatchQueue.main.async { NSApp.windows.first { $0.title == "Symbio" }?.subtitle = label }
+        }
     }
 
     private func refreshIcon() {
@@ -293,6 +300,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         image?.isTemplate = true
         statusItem?.button?.image = image
         statusItem?.button?.toolTip = on ? "음성 키 감지 켜짐" : "음성 키 감지 꺼짐"
+        if let label = worktreeLabel {
+            statusItem?.button?.title = label
+            statusItem?.button?.imagePosition = .imageLeft
+        }
     }
 
     /// Left click opens the menu (toggle, open window, quit); right click is ignored.
