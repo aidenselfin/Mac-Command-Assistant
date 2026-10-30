@@ -1,0 +1,43 @@
+{
+  "id": "finder_duplicate_file",
+  "family": "finder.duplicate",
+  "axis": "finder",
+  "level": 24,
+  "status": "active",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "a.txt를 'a 복사본.txt'로 복사해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__copy_file",
+          "args": {
+            "source": "{root}/a.txt",
+            "destination": "{root}/a 복사본.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "복제했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "a 복사본.txt": "x"
+    },
+    "must_run": [
+      "local__copy_file"
+    ],
+    "changed_paths": [
+      "a 복사본.txt"
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "id": "target_see_pdf_in_date_range",
+  "family": "file.info",
+  "axis": "see",
+  "level": 95,
+  "status": "active",
+  "files": {
+    "x.pdf": "1",
+    "y.pdf": "2",
+    "z.txt": "3",
+    "w.pdf": "4"
+  },
+  "request": "30일 전부터 60일 전 사이에 수정한 pdf 파일만 알려줘",
+  "ages": {
+    "x.pdf": 40,
+    "y.pdf": 5,
+    "z.txt": 40,
+    "w.pdf": 90
+  },
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "x.pdf"
+    ],
+    "reply_excludes": [
+      "y.pdf",
+      "z.txt",
+      "w.pdf"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "extensions": [
+              "pdf"
+            ],
+            "modified_within_days": 60,
+            "not_modified_for_days": 30
+          }
+        }
+      ]
+    },
+    {
+      "text": "해당 기간 pdf: x.pdf"
+    }
+  ]
+}

@@ -11,8 +11,10 @@ scripted turns and are left out of --live runs.
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import heavy_lock  # noqa: E402
 
 from main import error_message  # noqa: E402
 from voice_action.config import Config, load_config  # noqa: E402
@@ -72,11 +77,22 @@ class Scripted:
 
 class Counting:
     def __init__(self, inner):
-        self.inner, self.calls = inner, 0
+        self.inner, self.calls, self.trace = inner, 0, []
 
     async def generate(self, *args, **kwargs):
         self.calls += 1
-        return await self.inner.generate(*args, **kwargs)
+        messages = args[0] if args else kwargs.get("messages") or []
+        turn = await self.inner.generate(*args, **kwargs)
+        if len(self.trace) < 12:  # why a trial failed: what the app told the model, what it said
+            last = messages[-1] if messages and isinstance(messages[-1], dict) else {}
+            heard = last.get("content")
+            self.trace.append({
+                "heard": str(heard or "")[:160],
+                "said": (turn.text or "")[:160],
+                "calls": [c.name for c in turn.tool_calls],
+                "asked": turn.clarification.question[:120] if turn.clarification else None,
+            })
+        return turn
 
 
 def auto_answer(clarification, task: dict, root: Path) -> str | None:
@@ -132,7 +148,13 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         root = Path(temporary).resolve()  # noqa: ASYNC240 - trials run one at a time
         for path, content in task["files"].items():
             (root / path).parent.mkdir(parents=True, exist_ok=True)
-            (root / path).write_text(content, encoding="utf-8")
+            if isinstance(content, dict):  # {"b64": ...}: a real binary file (image, docx, zip)
+                (root / path).write_bytes(base64.b64decode(content["b64"]))
+            else:
+                (root / path).write_text(content, encoding="utf-8")
+        for path, days in task.get("ages", {}).items():  # modification time, for date-based tasks
+            aged = time.time() - days * 86400
+            os.utime(root / path, (aged, aged))
         initial = manifest(root)
         client = None
         if config is None:
@@ -256,6 +278,26 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         problems = diff(expected_manifest(initial, files), manifest(root))
         problems += [f"{name}: not run" for name in expect.get("must_run", [])
                      if name not in tools_run]
+        problems += [f"reply: missing {word!r}" for word in expect.get("reply_contains", [])
+                     if word not in (text or "")]
+        problems += [f"reply: should not mention {word!r}"
+                     for word in expect.get("reply_excludes", []) if word in (text or "")]
+        position = 0  # the words must appear in this order (later mentions may repeat earlier ones)
+        for word in expect.get("reply_order", []):
+            found = (text or "").find(word, position)
+            if found < 0:
+                problems.append(f"reply: expected order {expect['reply_order']}")
+                break
+            position = found + len(word)
+        if not expect.get("undo"):  # what a produced file must say, beyond that it exists
+            for path, words in expect.get("files_contain", {}).items():
+                target = root / path
+                body = ""
+                if target.is_file():
+                    body = target.read_text(encoding="utf-8", errors="ignore")
+                problems += [f"{path}: missing {word!r}" for word in words if word not in body]
+        problems += [f"{name}: directory should not exist" for name in expect.get("absent_dirs", [])
+                     if (root / name).is_dir()]
         want = sorted(expect.get("changed_paths", []))
         if "changed_paths" in expect and sorted(changed) != want:
             problems.append(f"changed_paths: {sorted(changed)} != {want}")
@@ -271,6 +313,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         return {
             "task": task["id"],
             "family": task.get("family"),
+            "axis": task.get("axis"),
+            "level": task.get("level"),
             "status": status,
             "passed": passed,
             "valid": valid,
@@ -281,6 +325,7 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
             "graded": "state_and_side_effects",
             "seconds": round(time.monotonic() - started, 2),
             "reply": text[:200],
+            **({"trace": model.trace} if isinstance(model, Counting) else {}),
         }
 
 
@@ -330,10 +375,18 @@ async def main(argv=None) -> int:
     parser.add_argument("--live", action="store_true", help="use the configured LLM")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--lesson", action="append", default=[])
+    parser.add_argument("--axis", action="append",
+                        help="only this capability axis (cheaper partial run; repeatable)")
+    parser.add_argument("--include-targets", action="store_true",
+                        help="also run status=target tasks (abilities the app does not have yet)")
     parser.add_argument("--dir", type=Path, default=TASKS, help="task folder")
     args = parser.parse_args(argv)
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(args.dir.glob("*.json"))]
     tasks = [t for t in tasks if not args.task or t["id"] in args.task]
+    if args.axis:
+        tasks = [t for t in tasks if t.get("axis") in args.axis]
+    if not args.include_targets:
+        tasks = [t for t in tasks if t.get("status") != "target"]
     if not args.live:
         tasks = [t for t in tasks if "script" in t]
     else:  # controls pass only when a run goes wrong; they would invert a live score
@@ -341,13 +394,26 @@ async def main(argv=None) -> int:
         # another), so only controls and scripted replays use it.
         tasks = [t for t in tasks if not t.get("negative") and t.get("live", True)]
     config = load_config() if args.live else None
-    trials = [await run_trial(t, config, args.lesson) for _ in range(args.repeat) for t in tasks]
-    for r in trials:
-        mark = "PASS" if r["passed"] else ("FAIL" if r["valid"] else "INVALID")
-        print(
-            f"{mark:7} {r['task']:28} {r['status']:17} calls={r['model_calls']} "
-            f"{'; '.join(r['problems'] + r['violations'])}"
-        )
+    if args.live:  # live runs make many model calls; one at a time across sessions
+        heavy_lock.acquire()
+    trials, outage = [], 0
+    for _ in range(args.repeat):
+        for t in tasks:
+            r = await run_trial(t, config, args.lesson)
+            trials.append(r)
+            mark = "PASS" if r["passed"] else ("FAIL" if r["valid"] else "INVALID")
+            why = "; ".join(r["problems"] + r["violations"])
+            if not why and not r["valid"]:
+                why = r["reply"][:100]
+            print(f"{mark:7} {r['task']:28} {r['status']:17} calls={r['model_calls']} {why}",
+                  flush=True)
+            outage = outage + 1 if r["status"] in {"provider_failure", "timeout"} else 0
+            if outage >= 3:  # same outage again and again: stop paying for it
+                print("\n제공자 오류 3연속이라 중단합니다. 키·네트워크·속도 제한을 확인하세요.")
+                break
+        else:
+            continue
+        break
     valid = [r for r in trials if r["valid"]]
     print(
         f"\npassed {sum(r['passed'] for r in trials)}/{len(trials)} "

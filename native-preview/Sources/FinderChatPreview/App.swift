@@ -5,7 +5,7 @@ import SwiftUI
 struct FinderChatPreviewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
-        Window("파일 도우미", id: "assistant") {
+        Window("Symbio", id: "assistant") {
             ChatPanel().frame(minWidth: 360, minHeight: 480)
         }
         .defaultSize(width: 360, height: 560)
@@ -52,6 +52,7 @@ private struct ChatPanel: View {
                             }
                             .buttonStyle(.plain).disabled(!backend.canSubmit)
                         }
+                        if let file = backend.dragFile { dragChip(file) }
                         if let approval = backend.approval { approvalView(approval) }
                         if backend.ratable { rating }
                         Color.clear.frame(height: 1).id("bottom")
@@ -179,6 +180,19 @@ private struct ChatPanel: View {
             }.disabled(backend.pending)
         }
         .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// A chip the user drags into any app (Cursor, Slack, Finder …) to drop the found file there.
+    private func dragChip(_ file: URL) -> some View {
+        HStack(spacing: 8) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: file.path)).resizable().frame(width: 20, height: 20)
+            Text(file.lastPathComponent).font(.callout).lineLimit(1)
+            Spacer(minLength: 0)
+            Image(systemName: "arrow.up.forward.app").foregroundStyle(.secondary)
+        }
+        .padding(10).background(Color.purple.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+        .onDrag { NSItemProvider(contentsOf: file) ?? NSItemProvider() }
+        .help("끌어서 원하는 곳에 놓으세요")
     }
 
     private var rating: some View {

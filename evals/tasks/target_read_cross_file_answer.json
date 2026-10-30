@@ -1,0 +1,25 @@
+{
+  "id": "target_read_cross_file_answer",
+  "family": "file.read",
+  "axis": "read",
+  "level": 100,
+  "status": "target",
+  "files": {
+    "인사/영업.txt": "영업팀: 김하늘 팀장, 박민수 사원",
+    "인사/개발.txt": "개발팀: 김하늘 인턴, 최유진 팀장",
+    "예산/2026.txt": "영업팀 3천만원, 개발팀 8천만원",
+    "예산/2025.txt": "영업팀 2천만원, 개발팀 7천만원",
+    "규정.txt": "예산 질문은 항상 올해(2026) 기준으로 답한다."
+  },
+  "request": "팀장인 김하늘 씨의 팀은 올해 예산이 얼마야?",
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "3천만원"
+    ],
+    "reply_excludes": [
+      "8천만원",
+      "2천만원"
+    ]
+  }
+}

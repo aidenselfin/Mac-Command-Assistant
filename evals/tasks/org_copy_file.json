@@ -1,0 +1,44 @@
+{
+  "id": "org_copy_file",
+  "family": "file.copy",
+  "axis": "organize",
+  "level": 62,
+  "status": "active",
+  "files": {
+    "report.txt": "r",
+    "백업/keep.txt": "k"
+  },
+  "request": "report.txt를 백업 폴더에 복사해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__copy_file",
+          "args": {
+            "source": "{root}/report.txt",
+            "destination": "{root}/백업"
+          }
+        }
+      ]
+    },
+    {
+      "text": "복사했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "백업/report.txt": "r"
+    },
+    "must_run": [
+      "local__copy_file"
+    ],
+    "changed_paths": [
+      "백업/report.txt"
+    ]
+  }
+}

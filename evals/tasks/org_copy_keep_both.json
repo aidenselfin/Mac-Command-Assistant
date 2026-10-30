@@ -1,0 +1,44 @@
+{
+  "id": "org_copy_keep_both",
+  "family": "file.copy",
+  "axis": "organize",
+  "level": 76,
+  "status": "active",
+  "files": {
+    "보고서.txt": "새",
+    "백업/보고서.txt": "옛"
+  },
+  "request": "보고서.txt를 백업 폴더에 복사해줘. 같은 이름이 있으면 '보고서 (2).txt'로 저장해",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__copy_file",
+          "args": {
+            "source": "{root}/보고서.txt",
+            "destination": "{root}/백업/보고서 (2).txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "보고서 (2).txt로 복사했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "백업/보고서 (2).txt": "새"
+    },
+    "must_run": [
+      "local__copy_file"
+    ],
+    "changed_paths": [
+      "백업/보고서 (2).txt"
+    ]
+  }
+}

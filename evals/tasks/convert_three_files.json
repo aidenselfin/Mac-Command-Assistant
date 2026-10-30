@@ -1,6 +1,9 @@
 {
   "id": "convert_three_files",
   "family": "file.convert.many",
+  "axis": "connect",
+  "level": 34,
+  "status": "active",
   "files": {
     "a.csv": "x,y\n1,2\n",
     "b.csv": "x,y\n3,4\n",

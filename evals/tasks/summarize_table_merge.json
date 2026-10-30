@@ -1,0 +1,79 @@
+{
+  "id": "summarize_table_merge",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 88,
+  "status": "active",
+  "files": {
+    "매출/1분기.csv": "분기,매출\n1분기,100\n",
+    "매출/2분기.csv": "분기,매출\n2분기,120\n",
+    "매출/3분기.csv": "분기,매출\n3분기,90\n",
+    "매출/4분기.csv": "분기,매출\n4분기,150\n"
+  },
+  "request": "매출 폴더 csv 4개를 합쳐서 분기별 매출 표와 합계를 합계.md에 저장해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/매출/1분기.csv"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/매출/2분기.csv"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/매출/3분기.csv"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/매출/4분기.csv"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/합계.md",
+            "content": "| 분기 | 매출 |\n|---|---|\n| 1분기 | 100 |\n| 2분기 | 120 |\n| 3분기 | 90 |\n| 4분기 | 150 |\n| 합계 | 460 |"
+          }
+        }
+      ]
+    },
+    {
+      "text": "합계.md에 저장했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "합계.md": "*"
+    },
+    "files_contain": {
+      "합계.md": [
+        "1분기",
+        "4분기",
+        "100",
+        "120",
+        "90",
+        "150",
+        "460"
+      ]
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "target_see_largest_file",
+  "family": "file.info",
+  "axis": "see",
+  "level": 75,
+  "status": "active",
+  "files": {
+    "small.txt": "a",
+    "big.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "mid.txt": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+  },
+  "request": "가장 용량이 큰 파일이 뭐야?",
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "big.txt"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "sort_by": "size",
+            "limit": 1
+          }
+        }
+      ]
+    },
+    {
+      "text": "가장 큰 파일은 big.txt입니다."
+    }
+  ]
+}

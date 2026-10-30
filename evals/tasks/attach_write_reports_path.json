@@ -1,6 +1,9 @@
 {
   "id": "attach_write_reports_path",
   "family": "file.attach",
+  "axis": "summarize",
+  "level": 60,
+  "status": "active",
   "attach": "메모 원본.txt",
   "files": {
     "메모 원본.txt": "초안: 배포는 금요일"

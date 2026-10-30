@@ -1,0 +1,22 @@
+{
+  "id": "target_connect_attach_to_mail",
+  "family": "app.mail",
+  "axis": "connect",
+  "level": 90,
+  "status": "target",
+  "files": {
+    "report.txt": "x"
+  },
+  "request": "report.txt를 메일 첨부 초안으로 만들어줘 (보내지는 말고)",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__compose_mail_draft"
+    ]
+  }
+}

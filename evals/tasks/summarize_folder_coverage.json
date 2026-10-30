@@ -1,0 +1,108 @@
+{
+  "id": "summarize_folder_coverage",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 82,
+  "status": "active",
+  "files": {
+    "보고/r1.txt": "A팀 매출 12% 증가",
+    "보고/r2.txt": "B팀 비용 8% 절감",
+    "보고/r3.txt": "C팀 신규 고객 300명",
+    "보고/r4.txt": "D팀 출시 3월 연기",
+    "보고/r5.txt": "E팀 채용 5명 완료",
+    "보고/r6.txt": "F팀 장애 2건 해결",
+    "보고/r7.txt": "G팀 특허 1건 출원",
+    "보고/r8.txt": "H팀 교육 40시간 달성"
+  },
+  "request": "보고 폴더 전체를 읽고 핵심 항목을 빠짐없이 요약.md에 정리해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r1.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r2.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r3.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r4.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r5.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r6.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r7.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/r8.txt"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/요약.md",
+            "content": "- A팀 매출 12% 증가\n- B팀 비용 8% 절감\n- C팀 신규 고객 300명\n- D팀 출시 3월 연기\n- E팀 채용 5명 완료\n- F팀 장애 2건 해결\n- G팀 특허 1건 출원\n- H팀 교육 40시간 달성"
+          }
+        }
+      ]
+    },
+    {
+      "text": "요약.md에 정리했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "요약.md": "*"
+    },
+    "files_contain": {
+      "요약.md": [
+        "12%",
+        "8%",
+        "300명",
+        "3월",
+        "5명",
+        "2건",
+        "1건",
+        "40시간"
+      ]
+    }
+  }
+}

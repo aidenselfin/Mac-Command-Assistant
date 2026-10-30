@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import heavy_lock
+
 ROOT = Path(__file__).resolve().parents[1]
 RUN = ["uv", "run", "--locked", "python"]
 
@@ -27,6 +29,7 @@ def steps(fast: bool):
 
 
 def main() -> int:
+    heavy_lock.acquire()
     failed = []
     for name, command in steps("--fast" in sys.argv):
         done = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)

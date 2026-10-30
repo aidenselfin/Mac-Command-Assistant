@@ -1,0 +1,32 @@
+{
+  "id": "target_finder_file_info",
+  "family": "finder.info",
+  "axis": "finder",
+  "level": 32,
+  "status": "active",
+  "files": {
+    "a.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "request": "a.txt 정보 보기: 크기를 바이트로 알려줘",
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "100"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "sort_by": "name"
+          }
+        }
+      ]
+    },
+    {
+      "text": "a.txt 크기는 100바이트입니다."
+    }
+  ]
+}

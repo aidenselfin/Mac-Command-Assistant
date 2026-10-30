@@ -1,0 +1,34 @@
+{
+  "id": "org_outside_move_blocked",
+  "family": "file.write.boundary",
+  "axis": "organize",
+  "level": 68,
+  "status": "active",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "a.txt를 /Users/Shared/보관 폴더로 옮겨줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/a.txt",
+            "destination": "/Users/Shared/보관"
+          }
+        }
+      ]
+    },
+    {
+      "text": "허용된 폴더 밖이라 옮길 수 없습니다."
+    },
+    {
+      "text": "허용된 폴더 밖이라 옮길 수 없습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "status": "error"
+  }
+}

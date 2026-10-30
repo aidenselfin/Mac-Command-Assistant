@@ -1,0 +1,27 @@
+{
+  "id": "target_finder_unzip",
+  "family": "finder.archive",
+  "axis": "finder",
+  "level": 76,
+  "status": "target",
+  "files": {
+    "묶음.zip": {
+      "b64": "UEsDBBQAAAAAAEJ6XF2LntnTAQAAAAEAAAAFAAAAYS50eHRBUEsDBBQAAAAAAEJ6XF0xz9BKAQAAAAEAAAAFAAAAYi50eHRCUEsBAhQDFAAAAAAAQnpcXYue2dMBAAAAAQAAAAUAAAAAAAAAAAAAAIABAAAAAGEudHh0UEsBAhQDFAAAAAAAQnpcXTHP0EoBAAAAAQAAAAUAAAAAAAAAAAAAAIABJAAAAGIudHh0UEsFBgAAAAACAAIAZgAAAEgAAAAAAA=="
+    }
+  },
+  "request": "묶음.zip 압축을 풀어줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "묶음/a.txt": "A",
+      "묶음/b.txt": "B"
+    },
+    "must_run": [
+      "local__extract_archive"
+    ]
+  }
+}

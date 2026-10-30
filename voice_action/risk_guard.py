@@ -18,7 +18,7 @@ from voice_action import conversion, file_search
 from voice_action.conversion import CONVERT_TOOL, READ_DOCUMENT_TOOL
 from voice_action.deletion import DELETE_TOOL
 from voice_action.file_operations import OPERATIONS
-from voice_action.file_search import FIND_FILES_TOOL
+from voice_action.file_search import FIND_FILES_TOOL, LIST_FILES_TOOL
 from voice_action.mcp_client import TRUNCATION_MARKER, ToolRejectedError, ToolResult
 from voice_action.undo import (
     UndoJournal,
@@ -38,6 +38,7 @@ READ_ONLY_TOOLS = frozenset(
         "macos__get_active_app",
         READ_DOCUMENT_TOOL,
         FIND_FILES_TOOL,
+        LIST_FILES_TOOL,
     }
 )
 WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL, CONVERT_TOOL, *OPERATIONS})
@@ -155,6 +156,8 @@ class RiskGuard:
             return await asyncio.to_thread(
                 conversion.read_document, arguments, self._roots, self._read_limit
             )
+        if name == LIST_FILES_TOOL:
+            return await asyncio.to_thread(file_search.list_files, arguments, self._roots)
         if name == FIND_FILES_TOOL:
             return await asyncio.to_thread(
                 file_search.find_files, arguments, self._roots

@@ -27,8 +27,10 @@ final class Backend: ObservableObject {
     @Published var choices: [String] = []
     @Published var approval: Approval?
     @Published var attachment: String?
+    // The one found file, offered as a chip the user drags out; "파일 줘" also floats it over other apps.
+    @Published var dragFile: URL? { didSet { if dragFile == nil { FileBox.shared.show(nil) } } }
     @Published var online = false
-    @Published var pending = false
+    @Published var pending = false { didSet { if !pending { Toast.shared.thinking(nil) } } }
     @Published var transcribing = false
     @Published var ratable = false
     @Published var lowScore: Int?
@@ -72,6 +74,9 @@ final class Backend: ObservableObject {
             child.currentDirectoryURL = URL(fileURLWithPath: runtime.project)
             var environment = ProcessInfo.processInfo.environment
             environment["PYTHONPATH"] = runtime.project
+            // 앱 아이콘으로 켜면 PATH가 최소라 filesystem MCP가 쓰는 node를 못 찾는다.
+            let extra = "/opt/homebrew/bin:/usr/local/bin"
+            environment["PATH"] = extra + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
             child.environment = environment
             child.standardInput = stdin
             child.standardOutput = stdout
@@ -137,6 +142,17 @@ final class Backend: ObservableObject {
                 append(type == "error" ? "error" : "assistant", text)
                 ratable = value["ratable"] as? Bool ?? false
                 lowScore = nil
+                if type == "completed", let found = (value["found_paths"] as? [String])?.first {
+                    let url = URL(fileURLWithPath: found).standardizedFileURL
+                    if url == url.resolvingSymlinksInPath(),
+                       folders.contains(where: { url.path.hasPrefix($0 + "/") }),
+                       (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular {
+                        if value["offer_file"] as? Bool == true {  // "회의록 줘": only then offer a drag
+                            dragFile = url
+                            if !NSApp.isActive { FileBox.shared.show(url) }  // spoken from another app
+                        }
+                    }
+                }
                 if type == "completed", reveal,
                    let paths = value["changed_paths"] as? [String], !paths.isEmpty {
                     let checked = paths.compactMap { path -> URL? in
@@ -179,7 +195,9 @@ final class Backend: ObservableObject {
     }
 
     func append(_ role: String, _ text: String) {
-        if !text.isEmpty { messages.append(ChatMessage(role: role, text: text)) }
+        guard !text.isEmpty else { return }
+        messages.append(ChatMessage(role: role, text: text))
+        Toast.shared.show(role, text)
     }
 
     @discardableResult
@@ -207,7 +225,9 @@ final class Backend: ObservableObject {
             ratable = false
             choices = []
             attachment = nil
+            dragFile = nil
             append("user", text)
+            Toast.shared.thinking("생각하는 중…")
         }
     }
 
@@ -221,12 +241,14 @@ final class Backend: ObservableObject {
         voiceCancelled = false
         pending = true
         transcribing = true
+        Toast.shared.thinking("음성을 글로 바꾸는 중…", fresh: true)
     }
 
     func decide(_ approve: Bool) {
         guard !pending, let approval else { return }
         if send(approve ? "approve" : "reject", fields: ["approval_id": approval.approval_id]) {
             pending = true
+            Toast.shared.thinking("처리하는 중…")
             self.approval = nil
         }
     }
@@ -244,7 +266,61 @@ final class Backend: ObservableObject {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    private var statusItem: NSStatusItem?
+
+    // The menu bar icon keeps the app alive after the window is closed.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
+        Backend.shared.start()
+        VoiceInput.shared.install()
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.target = self
+        item.button?.action = #selector(statusClicked)
+        item.button?.sendAction(on: [.leftMouseUp])  // right-click does nothing
+        statusItem = item
+        refreshIcon()
+        // Login launch (--background) starts hidden; the window opens from the menu.
+        if CommandLine.arguments.contains("--background") {
+            DispatchQueue.main.async { NSApp.windows.forEach { $0.orderOut(nil) } }
+        }
+    }
+
+    private func refreshIcon() {
+        let on = VoiceInput.shared.enabled
+        let image = NSImage(systemSymbolName: on ? "mic.fill" : "mic.slash", accessibilityDescription: "음성 키")
+        image?.isTemplate = true
+        statusItem?.button?.image = image
+        statusItem?.button?.toolTip = on ? "음성 키 감지 켜짐" : "음성 키 감지 꺼짐"
+    }
+
+    /// Left click opens the menu (toggle, open window, quit); right click is ignored.
+    @objc private func statusClicked() {
+        let menu = NSMenu()
+        let toggle = menu.addItem(withTitle: VoiceInput.shared.enabled ? "음성 키 끄기" : "음성 키 켜기",
+                                  action: #selector(toggleVoice), keyEquivalent: "")
+        toggle.target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "창 열기", action: #selector(openWindow), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "종료", action: #selector(quit), keyEquivalent: "").target = self
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    @objc private func toggleVoice() {
+        VoiceInput.shared.enabled.toggle()
+        refreshIcon()
+    }
+
+    @objc private func openWindow() {
+        NSApp.activate()
+        // The app also owns small helper windows (status item, 64pt stub): pick the chat window by title.
+        NSApp.windows.first { $0.title == "Symbio" }?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func quit() { NSApp.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         VoiceInput.shared.discard()  // a clip still being recorded must not stay in the temp folder

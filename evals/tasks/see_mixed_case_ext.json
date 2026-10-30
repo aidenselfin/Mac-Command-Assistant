@@ -1,0 +1,58 @@
+{
+  "id": "see_mixed_case_ext",
+  "family": "file.find",
+  "axis": "see",
+  "level": 84,
+  "status": "active",
+  "files": {
+    "PHOTO1.JPG": {
+      "b64": "/9j/4EpGSUYx"
+    },
+    "trip.jpeg": {
+      "b64": "/9j/4EpGSUYy"
+    },
+    "logo.png": {
+      "b64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggjM="
+    },
+    "SCAN.PNG": {
+      "b64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggjQ="
+    },
+    "pic.HEIC": {
+      "b64": "/9j/4EpGSUY1"
+    },
+    "clip.mov": "mov",
+    "note.txt": "n",
+    "doc.pdf": "pdf"
+  },
+  "request": "사진 파일(jpg, jpeg, png, heic)만 이름을 알려줘. 대소문자는 구분하지 마",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}"
+          }
+        }
+      ]
+    },
+    {
+      "text": "PHOTO1.JPG, trip.jpeg, logo.png, SCAN.PNG, pic.HEIC입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "PHOTO1.JPG",
+      "trip.jpeg",
+      "logo.png",
+      "SCAN.PNG",
+      "pic.HEIC"
+    ],
+    "reply_excludes": [
+      "clip.mov",
+      "note.txt",
+      "doc.pdf"
+    ]
+  }
+}

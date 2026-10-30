@@ -1,0 +1,17 @@
+{
+  "id": "target_finder_reveal",
+  "family": "finder.reveal",
+  "axis": "finder",
+  "level": 16,
+  "status": "target",
+  "files": {
+    "보관/a.txt": "x"
+  },
+  "request": "a.txt가 있는 위치를 Finder에서 보여줘",
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__reveal_in_finder"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "read_contract_question",
+  "family": "file.read",
+  "axis": "read",
+  "level": 60,
+  "status": "active",
+  "files": {
+    "계약서.txt": "계약 기간은 2026년 1월부터 2027년 6월까지이며, 갱신은 자동입니다."
+  },
+  "request": "계약서.txt에서 계약이 언제 끝나?",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/계약서.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "2027년 6월에 끝납니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "2027"
+    ]
+  }
+}

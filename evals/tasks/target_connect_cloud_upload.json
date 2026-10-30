@@ -1,0 +1,22 @@
+{
+  "id": "target_connect_cloud_upload",
+  "family": "app.cloud",
+  "axis": "connect",
+  "level": 100,
+  "status": "target",
+  "files": {
+    "report.txt": "x"
+  },
+  "request": "report.txt를 iCloud Drive에 올려줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__upload_to_cloud"
+    ]
+  }
+}

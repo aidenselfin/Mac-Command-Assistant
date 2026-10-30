@@ -1,0 +1,25 @@
+{
+  "id": "target_zip_folder",
+  "family": "target",
+  "axis": "finder",
+  "level": 72,
+  "status": "target",
+  "files": {
+    "보고서/a.txt": "A",
+    "보고서/b.txt": "B"
+  },
+  "request": "보고서 폴더를 zip으로 압축해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "보고서.zip": "*"
+    },
+    "must_run": [
+      "local__compress_files"
+    ]
+  }
+}

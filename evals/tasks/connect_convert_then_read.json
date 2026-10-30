@@ -1,0 +1,53 @@
+{
+  "id": "connect_convert_then_read",
+  "family": "file.convert",
+  "axis": "connect",
+  "level": 66,
+  "status": "active",
+  "files": {
+    "table.csv": "name,amount\nlunch,12000\ntaxi,8000\n"
+  },
+  "request": "table.csv를 json으로 변환하고, 변환된 파일에서 lunch 금액이 얼마인지 알려줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/table.csv",
+            "target_format": "json"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/table.json"
+          }
+        }
+      ]
+    },
+    {
+      "text": "lunch는 12000입니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "table.json": "*"
+    },
+    "reply_contains": [
+      "12000"
+    ],
+    "must_run": [
+      "local__convert_file"
+    ]
+  }
+}

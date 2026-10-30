@@ -1,0 +1,40 @@
+{
+  "id": "summarize_compare_versions",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 84,
+  "status": "active",
+  "files": {
+    "v1.txt": "가격 1만원. 배송 3일.",
+    "v2.txt": "가격 1.2만원. 배송 3일. 무료 반품 추가."
+  },
+  "request": "v1.txt와 v2.txt의 차이를 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/v1.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/v2.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "가격이 1.2만원으로 올랐고 무료 반품이 추가되었습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "1.2만원",
+      "반품"
+    ]
+  }
+}
