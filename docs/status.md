@@ -26,12 +26,10 @@
   지운 것: `--interactive`·`--ui`·`--text`, Tk 뷰(`ui.py` 1,082줄), Finder 패널 함수, `tkinterdnd2`, Tk·대화형 테스트(15+12개).
   `test_planner_tools_review`의 후보 선택 통합 테스트는 대화형 대신 Planner를 직접 두 번 불러 다시 짰다.
   평가 재생 **42/42**. 네이티브 앱 실행·live 평가는 하지 않았다. 아래 기록의 `--ui`·`--interactive`·Tk는 제거 전 기준이다.
-- 2026-10-21 의미 검색 체험 자료: `voice-action-test/embedding-demo/`에 공개 사진 3장과 가상 txt 3개 추가.
   PNG 디코딩·해상도·12 MiB 제한·UTF-8·2000자 제한 확인, 대표 검색어 6묶음의 일반 검색 0건 확인.
   기존 `.venv`에서 검색·의미 색인 회귀 52 passed, ruff 전체·diff check 통과.
   uv 실행은 캐시 접근 제한으로 실패하여 설치된 `.venv`를 직접 사용했다.
   선택 의존성 설치·실제 임베딩 순위·유료 LLM·운영 색인은 확인/변경하지 않았다.
-  활성화·예시 명령·기대 후보·출처는 [체험 안내](semantic-demo.md). 기존 사용자 자료는 보존했다.
 - 2026-10-14 **통합**(파일 정리 + 의미 검색 + 네이티브 SwiftUI, 브랜치 `work/integration`): 전체 pytest **722 passed**
   (실제 MCP·Tk UI 포함), ruff·diff check·Swift 빌드 통과, 평가 재생 **42/42**. 병합은 `main` → 의미 검색(병렬 세션 도구 포함) → 네이티브 순이며
   충돌은 문서 3개뿐이었다. 상세·비교는 [통합 보고서](reviews/2026-10-14-integration.md).
@@ -79,10 +77,9 @@
     - 실행 오류 162는 앱 전체 ad-hoc 서명으로 수정했다. strict 검사·반복 실행 통과.
 # 다음 작업
 0. 능력 점수 첫 측정: `uv run python evals/run_eval.py --live --repeat 3` 다음 `uv run python evals/benchmark.py`(유료, 확인 후).
-1. 사람이 확인: 네이티브 앱(`./native-preview/run.sh`)의 이동·복사·폴더 생성 승인 화면, 의미 검색 후보 선택,    의미 검색을 켠 상태의 사용(`.voice-action/config.env`에 `VOICE_ACTION_SEMANTIC_SEARCH=on`, `uv sync --locked --extra semantic`).
+1. 사람이 확인: 네이티브 앱(`./native-preview/run.sh`)의 이동·복사·폴더 생성 승인 화면.
 2. 이동 과제의 live 성공률 개선: "…를 보관 폴더로 옮겨줘"에서 모델이 폴더의 절대 경로를 되묻는다(`move_*`·`create_directory_undo`가 INVALID).
    프롬프트가 허용 폴더 기준 상대 이름을 해석하도록 보강하고 같은 live 평가로 비교한다. 변동 폭이 크므로 같은 코드로 2회 이상 잰다.
-3. 의미 검색 임계값(글 0.69·사진 0.62)은 파일 20개 시험값이다. 실제 폴더에서 엉뚱한 후보가 나오면 `semantic_index.py`를 조정한다.
 4. `planner.py`(2,200줄+)·`ui.py`(1,700줄) 분할은 동작 고정 테스트를 늘린 뒤 별도 작업으로.
 5. 보류: [Claude Code 조사·개선 설계](reviews/2026-10-07-claude-code-research.md) 구현, 한/영 대체어·pdf/docx 본문 검색, HTML 반복 읽기,
    변환 쓰기의 fd 기준 경합 방어, 네이티브 앱의 Finder 자동 배치·독립 배포.
@@ -91,7 +88,6 @@
 - 먼저 [AGENTS.md](../AGENTS.md) → [ARCHITECTURE.md](ARCHITECTURE.md) → [features.md](features.md). 기능을 바꾸면 features.md도 갱신한다.
 - 모델이 질문을 남발하면 평가가 INVALID가 된다. free_text는 확인 질문·검색 전 질문을 앱이 돌려보내는 규칙(`_free_text_refusal`)이 있어야 한다.
 - 공급자가 도구 호출을 스키마로 먼저 검사해 HTTP 400을 내므로 도구 스키마에는 상한·`oneOf`를 넣지 않고 코드에서 적용한다(메시지에 `tool_use_failed — <도구>: <위반>`).
-- 의미 검색은 꺼짐이 기본이고, 꺼져 있으면 도구 정의가 이전과 같다. 켜면 모델이 `query`에 찾는 파일의 설명만 적도록 안내한다.
 - 네이티브 앱은 승인 context를 Python에만 두고 Swift에는 1회용 승인 ID만 준다. 메시지를 바꾸면 [native-protocol.md](native-protocol.md)·Swift·`native_bridge.py`를 함께 고친다.
 - 피드백 DB의 lesson 후보 #2~#4는 미채택이다. 운영 `.voice-action/` DB와 사용자 시험 자료(`voice-action-test/`)는 커밋하거나 지우지 않는다.
 - 알려진 불안정: `tests/test_ui.py`의 붙여넣기 테스트는 테스트 중 사람이 키보드를 치면 가끔 실패한다.

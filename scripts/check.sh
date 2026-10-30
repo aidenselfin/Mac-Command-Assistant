@@ -9,7 +9,7 @@ case "${1:-quick}" in
     # 바뀐 파일(커밋 안 된 것 + 마지막 커밋 이후)에 맞는 영역만. 모르겠으면 full을 쓴다.
     changed=$(git status --porcelain | awk '{print $2}')
     tests=""
-    case "$changed" in *file_search*|*semantic_index*) tests="$tests tests/test_file_search.py tests/test_find_files_flow.py tests/test_semantic_index.py";; esac
+    case "$changed" in *file_search*) tests="$tests tests/test_file_search.py tests/test_find_files_flow.py";; esac
     case "$changed" in *file_operations*|*undo.py*) tests="$tests tests/test_file_operations.py tests/test_undo.py";; esac
     case "$changed" in *deletion*) tests="$tests tests/test_deletion.py";; esac
     case "$changed" in *conversion*) tests="$tests tests/test_conversion.py";; esac
@@ -20,7 +20,6 @@ case "${1:-quick}" in
     if [ -z "$tests" ]; then echo "영역을 알 수 없어 전체를 실행합니다."; exec "$0" full; fi
     $RUN pytest -q $tests tests/test_integration_features.py && $RUN ruff check . ;;
   search|파일찾기) $RUN pytest -q tests/test_file_search.py tests/test_find_files_flow.py ;;
-  semantic|의미검색) $RUN pytest -q tests/test_semantic_index.py tests/test_integration_features.py ;;
   fileops|파일정리) $RUN pytest -q tests/test_file_operations.py tests/test_undo.py ;;
   delete|삭제) $RUN pytest -q tests/test_deletion.py ;;
   convert|변환) $RUN pytest -q tests/test_conversion.py tests/test_conversion_review.py ;;
@@ -30,5 +29,5 @@ case "${1:-quick}" in
   feedback|피드백) $RUN pytest -q tests/test_feedback.py tests/test_feedback_review.py tests/test_lesson_candidates.py ;;
   eval|평가) $RUN python evals/run_eval.py ;;
   bench|점수) $RUN python evals/benchmark.py --no-save ;;
-  *) echo "사용법: $0 quick|full|search|semantic|fileops|delete|convert|write|ui|native|feedback|eval|bench"; exit 2 ;;
+  *) echo "사용법: $0 quick|full|search|fileops|delete|convert|write|ui|native|feedback|eval|bench"; exit 2 ;;
 esac
