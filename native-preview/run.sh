@@ -5,13 +5,13 @@ swift build --package-path "$PROJECT_DIR"
 BIN_DIR=$(swift build --package-path "$PROJECT_DIR" --show-bin-path)
 REPO_DIR="${PROJECT_DIR:h}"
 PYTHON_BIN="${VOICE_ACTION_PYTHON:-$REPO_DIR/.venv/bin/python}"
-COMMON_GIT_DIR=$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-common-dir)
+COMMON_GIT_DIR=$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
 if [[ ! -x "$PYTHON_BIN" ]]; then
     PYTHON_BIN="${COMMON_GIT_DIR:h}/.venv/bin/python"
 fi
 # A worktree build gets its own bundle id and name, so it runs next to main's app.
 LABEL=""
-if [[ "$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-dir)" != "$COMMON_GIT_DIR" ]]; then
+if [[ -n "$COMMON_GIT_DIR" && "$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-dir)" != "$COMMON_GIT_DIR" ]]; then
     LABEL="${REPO_DIR:t}"
 fi
 if [[ ! -x "$PYTHON_BIN" ]]; then
@@ -56,7 +56,7 @@ if [[ "$BUILD_HASH" != "$(cat "$HASH_FILE" 2>/dev/null || true)" ]] || \
     cp "$PROJECT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
     if [[ -n "$LABEL" ]]; then
         /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleIdentifier local.voiceaction.finder-chat-preview.${LABEL//[^A-Za-z0-9-]/-}" \
+            -c "Set :CFBundleIdentifier local.voiceaction.finder-chat-preview.${LABEL//[^A-Za-z0-9-]/-}-${$(print -rn -- "$REPO_DIR" | shasum):0:6}" \
             -c "Set :CFBundleName Symbio · $LABEL" -c "Add :SymbioLabel string $LABEL" \
             "$APP_DIR/Contents/Info.plist"
     fi

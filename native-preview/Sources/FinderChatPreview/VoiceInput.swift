@@ -66,11 +66,13 @@ final class VoiceInput: ObservableObject {
         // Without Input Monitoring the key-up is lost once another app is frontmost.
         let resign = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in if !CGPreflightListenEventAccess() { VoiceInput.shared.finish() } }
+            // A worktree build never hears the key-up once it is in the background.
+            Task { @MainActor in if !global || !CGPreflightListenEventAccess() { VoiceInput.shared.finish() } }
         }
         monitors.append(resign)
         if global, let monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { event in
-            if !otherSymbioFront() { handler(event) }
+            // Still let a key-up end a recording that began before another Symbio came forward.
+            if otherSymbioFront() { Task { @MainActor in VoiceInput.shared.finish() } } else { handler(event) }
         }) {
             monitors.append(monitor)
         }
