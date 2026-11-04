@@ -238,3 +238,27 @@ def test_offer_file_follows_the_original_request_through_a_clarification():
     found = Completed("찾았어요", found_paths=("/a/b.txt",))
     bridge.message(UIMessage(UIMessageType.OUTCOME, found))
     assert events[-1]["offer_file"] is True
+
+
+def test_completed_event_offers_made_files_as_chips_up_to_five(tmp_path):
+    from voice_action.planner import Completed
+
+    files = [str(tmp_path / f"{n}.md") for n in range(6)]
+    for path in files:
+        open(path, "w").close()
+    folder = str(tmp_path)  # a made folder is never a chip
+
+    def offered(completed, request=""):
+        events = []
+        worker = Mock()
+        worker.can_rate.return_value = False
+        bridge = NativeBridge(worker, events.append)
+        bridge.request = request
+        bridge.message(UIMessage(UIMessageType.OUTCOME, completed))
+        return events[-1]["offer_paths"]
+
+    assert offered(Completed("요약을 저장했어요", (files[0],))) == [files[0]]
+    assert offered(Completed("저장했어요", (*files[:5], folder))) == files[:5]
+    assert offered(Completed("저장했어요", tuple(files))) == []
+    assert offered(Completed("찾았어요", found_paths=(files[0],)), "회의록 요약해줘") == []
+    assert offered(Completed("찾았어요", found_paths=(files[0],)), "회의록 줘") == [files[0]]
