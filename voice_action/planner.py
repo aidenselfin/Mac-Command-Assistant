@@ -726,8 +726,14 @@ def _delete_scope_error(
     if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
         return "삭제 파일 목록을 지정해야 합니다."
     for raw in paths:
-        if raw not in seen and not _write_target_is_explicit(raw, text, ()):
+        if raw in seen:
+            continue
+        if not _write_target_is_explicit(raw, text, ()):
             return "삭제 대상은 사용자가 말한 파일이거나 local__find_files 결과여야 합니다."
+        # 파일 경로를 명시했다면 같은 이름의 다른 폴더 파일을 선택하지 않는다.
+        qualified = re.findall(rf"(?:/|[\w.-]+/)[^\s\"'<>]*{re.escape(Path(raw).name)}", text)
+        if qualified and not any(raw == item or raw.endswith("/" + item) for item in qualified):
+            return "삭제 파일 경로가 사용자 명령의 경로와 일치하지 않습니다."
     return None
 
 

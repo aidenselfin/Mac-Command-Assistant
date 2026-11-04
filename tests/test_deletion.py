@@ -260,6 +260,12 @@ def test_delete_scope_allows_named_or_searched_files_only(tmp_path):
     assert _delete_scope_error({"paths": [b]}, "a.txt 삭제해줘", (root,))
     assert _delete_scope_error({"paths": [b]}, "피그마 파일 지워줘", (root,), seen=(b,)) is None
     assert _delete_scope_error({"paths": [b]}, "a.txt 삭제해줘", (root,), seen=(b,)) is None
+    assert _delete_scope_error(
+        {"paths": [str(root / "B" / "a.txt")]}, f"{root}/A/a.txt 삭제해줘", (root,)
+    )
+    assert _delete_scope_error(
+        {"paths": [str(root / "B" / "a.txt")]}, f"{root}/A/a.txt 삭제해줘", (root,)
+    )
     assert _delete_scope_error({"paths": []}, "파일을 삭제해줘", (root,))
 
 
