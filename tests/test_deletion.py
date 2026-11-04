@@ -249,21 +249,21 @@ def test_non_delete_intent_does_not_enable_deletion(text):
     assert not _destructive_request(text)
 
 
-def test_delete_scope_requires_user_intent_folder_and_pattern(tmp_path):
+def test_delete_scope_allows_named_or_searched_files_only(tmp_path):
     root = tmp_path / "allowed"
     args = {"directory": str(root), "pattern": "*.txt"}
     assert _delete_scope_error(args, "allowed 폴더의 *.txt 파일을 삭제해줘", (root,)) is None
     assert _delete_scope_error(args, "다른 폴더의 *.txt 파일을 삭제해줘", (root,))
-    assert _delete_scope_error(args, "allowed 폴더의 *.bin 파일을 삭제해줘", (root,))
     assert _delete_scope_error(args, "allowed 폴더의 *.txt 파일을 읽어줘", (root,))
-    assert _delete_scope_error(
-        {"directory": str(root), "pattern": "*"}, "allowed 폴더 파일을 삭제해줘", (root,)
-    )
-    assert _delete_scope_error({"paths": [str(root / "b.txt")]}, "a.txt 삭제해줘", (root,))
     assert _delete_scope_error(args, "allowed 폴더의 *.txt 중 a.txt 제외하고 삭제해줘", (root,))
+    b = str(root / "b.txt")
+    assert _delete_scope_error({"paths": [b]}, "a.txt 삭제해줘", (root,))
+    assert _delete_scope_error({"paths": [b]}, "피그마 파일 지워줘", (root,), seen=(b,)) is None
+    assert _delete_scope_error({"paths": [b]}, "a.txt 삭제해줘", (root,), seen=(b,)) is None
     assert _delete_scope_error(
-        {"paths": [str(root / "a.txt")]}, '"a.txt 삭제해줘"라는 문장 말고 b.txt 삭제해줘', (root,)
+        {"paths": [str(root / "B" / "a.txt")]}, f"{root}/A/a.txt 삭제해줘", (root,)
     )
+    assert _delete_scope_error({"paths": []}, "파일을 삭제해줘", (root,))
 
 
 async def test_backup_failure_never_deletes_files(tmp_path, monkeypatch):
@@ -403,25 +403,21 @@ async def test_described_delete_searches_then_selects_and_asks_approval(
     if retry:
         turns.insert(0, ModelTurn(None, [], ClarificationRequest("어떤 작업인가요?", (),
                                                                "free_text", "q")))
-    model.generate.side_effect = turns
     journal = UndoJournal(tmp_path / "delete.sqlite3", (root,))
     runtime = RuntimeController(Planner(config, gateway, model, undo_journal=journal))
     request = "10월 3일 회의록 삭제해줘."
-    choices = await runtime.submit("다시" if retry else request)
-    if retry:
-        assert isinstance(choices, Clarification)
-        choices = await runtime.submit(request)
-    assert isinstance(choices, Clarification) and choices.context.kind == "file_candidate"
-    assert target.exists()
-    wrong = root / "한글 메모.txt"
     model.generate.side_effect = [
-        ModelTurn(None, [ToolCall("wrong", DELETE_TOOL, json.dumps({"paths": [str(wrong)]}))]),
+        *turns,
         ModelTurn(None, [ToolCall("d", DELETE_TOOL, json.dumps({"paths": [str(target)]}))]),
     ]
-    pending = await runtime.submit(f"{choices.options.index(str(target)) + 1}번")
+    pending = await runtime.submit("다시" if retry else request)
+    if retry:
+        assert isinstance(pending, Clarification)
+        pending = await runtime.submit(request)
     assert isinstance(pending, ApprovalRequired) and pending.targets == (str(target),)
-    assert runtime.state is RuntimeState.WAITING_APPROVAL and target.exists() and wrong.exists()
-    messages, tools = model.generate.await_args_list[-2].args
+    assert runtime.state is RuntimeState.WAITING_APPROVAL and target.exists()
+    wrong = root / "한글 메모.txt"
+    messages, tools = model.generate.await_args_list[-1].args
     assert request in messages[1]["content"]
     assert DELETE_TOOL in [tool.name for tool in tools]
     assert isinstance(await (runtime.approve_pending() if approve else runtime.reject_pending()),
@@ -433,23 +429,25 @@ async def test_described_delete_searches_then_selects_and_asks_approval(
     assert target.read_text() == "지울 회의록"
 
 
-async def test_described_delete_cannot_skip_search_or_candidate_selection(config, tmp_path):
+async def test_described_delete_cannot_skip_the_search(config, tmp_path):
     root = config.allowed_directories[0]
     target = root / "회의록-2026-10-03.md"
     target.write_text("보존")
     gateway, model = AsyncMock(), AsyncMock()
     gateway.list_tools.return_value = []
+    gateway.validate_result_path.side_effect = Path
     guessed = ModelTurn(None, [ToolCall("d", DELETE_TOOL,
                                        json.dumps({"paths": [str(target)]}))])
     find = ModelTurn(None, [ToolCall("f", "local__find_files",
                                     json.dumps({"keywords": ["회의록"]}))])
-    model.generate.side_effect = [guessed, find]
+    model.generate.side_effect = [guessed, find, ModelTurn(None, [ToolCall(
+        "d2", DELETE_TOOL, json.dumps({"paths": [str(target)]}))])]
     planner = Planner(config, gateway, model,
                       undo_journal=UndoJournal(tmp_path / "undo.sqlite3", (root,)))
-    choices = await planner.run("10월 3일 회의록 삭제해줘")
-    assert isinstance(choices, Clarification) and choices.options == (str(target),)
+    pending = await planner.run("10월 3일 회의록 삭제해줘")
     assert target.read_text() == "보존"
-    assert "사용자 명령에 명시되지" in model.generate.await_args_list[1].args[0][-1]["content"]
+    assert "먼저 local__find_files" in model.generate.await_args_list[1].args[0][-1]["content"]
+    assert isinstance(pending, ApprovalRequired) and pending.targets == (str(target),)
 
 
 async def test_clarification_answer_cannot_turn_a_read_request_into_deletion(config, tmp_path):

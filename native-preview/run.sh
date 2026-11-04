@@ -1,6 +1,12 @@
 #!/bin/zsh
 set -eu
 PROJECT_DIR="${0:A:h}"
+# Only main's app runs; extra worktree apps made the machine run hot.
+if [[ "$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-dir)" != \
+      "$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir)" ]]; then
+    print -u2 "worktree에서는 앱을 실행하지 않습니다. main에 병합한 뒤 메인 폴더에서 실행하세요."
+    exit 1
+fi
 swift build --package-path "$PROJECT_DIR"
 BIN_DIR=$(swift build --package-path "$PROJECT_DIR" --show-bin-path)
 REPO_DIR="${PROJECT_DIR:h}"
@@ -8,11 +14,6 @@ PYTHON_BIN="${VOICE_ACTION_PYTHON:-$REPO_DIR/.venv/bin/python}"
 COMMON_GIT_DIR=$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
 if [[ ! -x "$PYTHON_BIN" ]]; then
     PYTHON_BIN="${COMMON_GIT_DIR:h}/.venv/bin/python"
-fi
-# A worktree build gets its own bundle id and name, so it runs next to main's app.
-LABEL=""
-if [[ -n "$COMMON_GIT_DIR" && "$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-dir)" != "$COMMON_GIT_DIR" ]]; then
-    LABEL="${REPO_DIR:t}"
 fi
 if [[ ! -x "$PYTHON_BIN" ]]; then
     print -u2 "Python 환경이 없습니다. 프로젝트에서 uv sync --locked를 실행하세요."
@@ -32,7 +33,7 @@ BUILD_HASH=$(shasum -a 256 "$BIN_DIR/FinderChatPreview" "$PROJECT_DIR/Info.plist
 HASH_FILE="$PROJECT_DIR/.build/preview-source.sha256"
 if [[ "$BUILD_HASH" != "$(cat "$HASH_FILE" 2>/dev/null || true)" ]] || \
    ! codesign --verify --deep --strict "$APP_DIR" >/dev/null 2>&1; then
-    # Stop only this worktree's preview before replacing its signed app bundle.
+    # Stop the running preview before replacing its signed app bundle.
     while read -r process_pid process_command; do
         if [[ "$process_command" == "$EXECUTABLE" ]]; then
             child_pids=("${(@f)$(pgrep -P "$process_pid" || true)}")
@@ -54,12 +55,6 @@ if [[ "$BUILD_HASH" != "$(cat "$HASH_FILE" 2>/dev/null || true)" ]] || \
     cp "$BIN_DIR/FinderChatPreview" "$EXECUTABLE.new"
     mv -f "$EXECUTABLE.new" "$EXECUTABLE"
     cp "$PROJECT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
-    if [[ -n "$LABEL" ]]; then
-        /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleIdentifier local.voiceaction.finder-chat-preview.${LABEL//[^A-Za-z0-9-]/-}-${$(print -rn -- "$REPO_DIR" | shasum):0:6}" \
-            -c "Set :CFBundleName Symbio · $LABEL" -c "Add :SymbioLabel string $LABEL" \
-            "$APP_DIR/Contents/Info.plist"
-    fi
     cp "$RUNTIME_FILE" "$APP_DIR/Contents/Resources/runtime.json"
     codesign --force --sign - "$APP_DIR"
     printf '%s\n' "$BUILD_HASH" > "$HASH_FILE"

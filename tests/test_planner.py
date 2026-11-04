@@ -1851,15 +1851,14 @@ async def test_cancelling_clarification_does_not_write(config):
     model.generate.assert_not_awaited()
 
 
-async def test_unspecified_delete_is_rejected_without_model_or_mcp(config):
+async def test_unspecified_delete_is_left_to_the_model_to_scope(config):
     mcp, model = fake_mcp(), AsyncMock()
+    model.generate.side_effect = [ModelTurn("지울 파일을 찾지 못했습니다.", [])]
 
     outcome = await Planner(config, mcp, model).run("필요 없는 파일 전부 지워줘")
 
-    assert isinstance(outcome, Error)
-    assert "지정해 주세요" in outcome.message
-    assert "파일 목록" in outcome.message
-    model.generate.assert_not_awaited()
+    assert not isinstance(outcome, ApprovalRequired)
+    model.generate.assert_awaited()
     mcp.call_tool.assert_not_awaited()
 
 

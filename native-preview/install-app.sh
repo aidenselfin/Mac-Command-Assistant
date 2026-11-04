@@ -10,7 +10,7 @@ DEST="$HOME/Applications/Symbio.app"
 if [[ ! -d "$SRC" ]]; then
     VOICE_ACTION_BACKGROUND=1 "$MAIN_DIR/native-preview/run.sh"  # 처음이면 빌드한다
 fi
-pkill -f "$SRC/Contents/MacOS/FinderChatPreview" 2>/dev/null || true  # worktree 앱은 그대로 둔다
+pkill -f "$SRC/Contents/MacOS/FinderChatPreview" 2>/dev/null || true
 pkill -f "$DEST/Contents/MacOS/FinderChatPreview" 2>/dev/null || true
 sleep 1
 mkdir -p "$HOME/Applications"

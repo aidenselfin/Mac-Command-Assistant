@@ -18,7 +18,7 @@ Stop 훅(`check-reply-style.py`)이 어기면 다시 쓰게 한다.
 - **프로그램 개선**(오류 해결·기능 추가)과 **환경 개선**(지침·개발 도구 등 AI를 돕는 작업) 두 가지다.
 - 순서: 세션 만들기 → "프로젝트 이해해"(구조 그림) → 작업 명령 → worktree 만들고 작업 기록 추가 → 작업 → 피드백·수정 반복 → **"메인에 병합해"** → `merge-worktrees` 스킬.
 - **프로그램 개선과 도구 만들기(검토 도구·스크립트·훅 코드)는 worktree에서** 한다. 한 기능 = 한 worktree·한 브랜치, 여러 worktree를 동시에 진행한다.
-- 앱 동작이 바뀌는 작업을 마치면 피드백 전에 그 worktree의 `native-preview/run.sh`로 Symbio를 띄워 둔다. worktree 앱은 메뉴 막대에 폴더 이름이 붙어 메인 앱과 따로 돌고, 음성 키는 앞에 있는 Symbio만 받는다.
+- worktree에서는 앱을 띄우지 않는다(`run.sh`가 막는다, 여러 앱이 동시에 돌면 기기가 뜨거워진다). 앱 동작은 `scripts/check.py`와 평가로 확인하고, 화면 확인은 "메인에 병합해" 뒤 메인 앱에서 한다.
 - **지침만 고치는 환경 개선은 메인에서 직접** 고칠 수 있다(대상: `AGENTS.md`·`native-preview/AGENTS.md`·`CLAUDE.md`·`docs/내 작업 방식.md`·`.claude/skills/*/SKILL.md`, 훅 `block-main-edit.py`가 허용). 세션이 worktree로 열렸으면 그 브랜치에서 고치고 "메인에 병합해"로 합친다. 메인에서 고치면 그 파일만 `git add -- 파일`로 커밋한다.
 - git 밖 파일(전역 지침·`~/.claude/voice-action/` 기록·훅)은 어느 세션에서든 바로 고친다.
 - 브랜치 이름은 하는 일을 나타낸다(예: `claude/voice-hotkey`). 자동 이름이면 첫 수정 전에 `git branch -m`으로 바꾸고 작업 기록 키도 맞춘다.
