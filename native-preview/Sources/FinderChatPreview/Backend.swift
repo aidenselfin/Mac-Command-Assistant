@@ -171,6 +171,7 @@ final class Backend: ObservableObject {
             case "state":
                 state = value["state"] as? String ?? "STARTING"
                 online = true
+                if state == "IDLE", resetWhenIdle { pending = false; newConversation() }
             case "tool": tool = value["name"] as? String ?? ""
             case "approval":
                 pending = false
@@ -276,6 +277,30 @@ final class Backend: ObservableObject {
             append("user", text)
             Toast.shared.thinking("생각하는 중…")
         }
+    }
+
+    private var resetWhenIdle = false
+
+    /// ⌘⇧O: drop the shown chat and the backend's follow-up memory. Busy or waiting work is cancelled first.
+    func newConversation() {
+        guard online else { return }
+        if state != "IDLE" || pending {
+            resetWhenIdle = true
+            _ = send("cancel")
+            return
+        }
+        resetWhenIdle = false
+        guard send("reset") else { return }
+        messages = []
+        choices = []
+        approval = nil
+        attachment = nil
+        dragFile = nil
+        tool = ""
+        ratable = false
+        lowScore = nil
+        Toast.shared.dismiss()
+        ChoiceChips.shared.hide()
     }
 
     /// Hand a finished recording to the backend; it comes back as a `transcript` event.

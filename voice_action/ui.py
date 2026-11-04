@@ -501,6 +501,10 @@ class AsyncRuntimeWorker:
         if self._controller is not None:
             self._controller.detach()
 
+    def reset_conversation(self) -> bool:
+        controller = self._controller
+        return controller is not None and controller.reset_conversation()
+
     async def _attach(self, controller, path: str) -> None:
         try:
             stored = controller.attach(path)

@@ -10,6 +10,12 @@ struct FinderChatPreviewApp: App {
         }
         .defaultSize(width: 360, height: 560)
         .windowToolbarStyle(.unifiedCompact)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("새 대화") { Backend.shared.newConversation() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+        }
     }
 }
 
