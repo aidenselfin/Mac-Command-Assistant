@@ -150,7 +150,10 @@ final class Backend: ObservableObject {
                         if value["offer_file"] as? Bool == true {  // "회의록 줘": only then offer a drag
                             dragFile = url
                             // spoken from another app, or from the type box with the chat window closed
-                            let chatShown = NSApp.windows.contains { $0.isVisible && !($0 is NSPanel) }
+                            // canBecomeMain: the menu-bar item's own window is visible but is not the chat
+                            let chatShown = NSApp.windows.contains {
+                                $0.isVisible && $0.canBecomeMain && !($0 is NSPanel)
+                            }
                             if !NSApp.isActive || !chatShown { FileBox.shared.show(url) }
                         }
                     }
