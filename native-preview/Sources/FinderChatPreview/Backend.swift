@@ -149,7 +149,9 @@ final class Backend: ObservableObject {
                        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular {
                         if value["offer_file"] as? Bool == true {  // "회의록 줘": only then offer a drag
                             dragFile = url
-                            if !NSApp.isActive { FileBox.shared.show(url) }  // spoken from another app
+                            // spoken from another app, or from the type box with the chat window closed
+                            let chatShown = NSApp.windows.contains { $0.isVisible && !($0 is NSPanel) }
+                            if !NSApp.isActive || !chatShown { FileBox.shared.show(url) }
                         }
                     }
                 }
