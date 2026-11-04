@@ -11,9 +11,8 @@ import threading
 import uuid
 
 from voice_action.config import load_config
-from voice_action.feedback import RATING_TAGS
 from voice_action.planner import ApprovalRequired, Clarification, Completed, Error
-from voice_action.runtime import Busy, RuntimeState
+from voice_action.runtime import FEEDBACK_COMMAND, Busy, RuntimeState
 from voice_action.transcribe import clip_path, is_hallucination, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
@@ -121,8 +120,7 @@ class NativeBridge:
                            "found_paths": list(value.found_paths),
                            "offer_file": asks_for_file(self.request),
                            "offer_paths": offer_paths(value.changed_paths, value.found_paths,
-                                                      asks_for_file(self.request)),
-                           "ratable": self.worker.can_rate()})
+                                                      asks_for_file(self.request))})
             elif isinstance(value, (Error, Busy)):
                 self.emit({"type": "error", "text": value.message})
         elif kind is UIMessageType.PLANNER_EVENT:
@@ -130,9 +128,6 @@ class NativeBridge:
         elif kind is UIMessageType.ATTACHMENT:
             path, refusal = value
             self.emit({"type": "attachment", "path": path, "text": refusal})
-        elif kind is UIMessageType.RATING_SAVED:
-            score, tags = value
-            self.emit({"type": "rating_saved", "score": score, "tags": list(tags)})
         elif kind is UIMessageType.FAILURE:
             self.in_flight = False
             self.approval_id = None
@@ -194,6 +189,8 @@ class NativeBridge:
             if (self.state not in {RuntimeState.IDLE, RuntimeState.WAITING_USER_INPUT}
                     or not isinstance(text, str) or not text.strip()):
                 return self.refuse()
+            if self.state is RuntimeState.WAITING_USER_INPUT and FEEDBACK_COMMAND.match(text):
+                return self.refuse("질문에 먼저 답한 뒤 /feedback을 보내 주세요.")
             if self.worker.submit(text):
                 if self.state is not RuntimeState.WAITING_USER_INPUT:
                     self.request = text
@@ -216,12 +213,6 @@ class NativeBridge:
             return True
         elif action == "reset":
             if self.worker.reset_conversation():
-                return True
-        elif action == "rate":
-            score, tags = request.get("score"), request.get("tags", [])
-            if (type(score) is int and 1 <= score <= 5 and isinstance(tags, list)
-                    and all(isinstance(tag, str) and tag in RATING_TAGS for tag in tags)
-                    and self.worker.rate(score, tuple(tags))):
                 return True
         return self.refuse()
 
@@ -248,8 +239,8 @@ class NativeBridge:
             self.emit({"type": "transcript", "text": text, "error": problem})
             self.transcribing = False
 
-    def refuse(self):
-        self.emit({"type": "rejected", "text": "현재 상태에서 처리할 수 없는 요청입니다."})
+    def refuse(self, text="현재 상태에서 처리할 수 없는 요청입니다."):
+        self.emit({"type": "rejected", "text": text})
         return True
 
 

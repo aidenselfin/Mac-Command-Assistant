@@ -80,13 +80,20 @@ def test_clarification_and_cancel_use_original_runtime_contract():
 
 
 @pytest.mark.parametrize("payload", [None, [], {"action": "submit", "text": []},
-                                    {"action": "rate", "score": True},
-                                    {"action": "rate", "score": 1, "tags": ["bad"]}])
+                                    {"action": "rate", "score": 1}])
 def test_malformed_commands_do_not_reach_worker(payload):
     transport, worker, events = bridge()
     transport.command(payload)
     assert events[-1]["type"] == "rejected"
     assert not worker.mock_calls
+
+
+def test_feedback_command_waits_until_the_question_is_answered():
+    transport, worker, events = bridge()
+    transport.message(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_USER_INPUT))
+    transport.command({"action": "submit", "text": "/feedback 너무 느려"})
+    assert events[-1]["type"] == "rejected" and "/feedback" in events[-1]["text"]
+    worker.submit.assert_not_called()
 
 
 @pytest.mark.integration
@@ -195,7 +202,6 @@ def test_completed_event_carries_found_paths_for_drag_chip():
 
     events = []
     worker = Mock()
-    worker.can_rate.return_value = False
     NativeBridge(worker, events.append).message(
         UIMessage(UIMessageType.OUTCOME, Completed("찾았어요", found_paths=("/a/b.txt",)))
     )
@@ -229,7 +235,6 @@ def test_offer_file_follows_the_original_request_through_a_clarification():
 
     events = []
     worker = Mock()
-    worker.can_rate.return_value = False
     worker.submit.return_value = True
     bridge = NativeBridge(worker, events.append)
     bridge.state = RuntimeState.IDLE
@@ -252,7 +257,6 @@ def test_completed_event_offers_made_files_as_chips_up_to_five(tmp_path):
     def offered(completed, request=""):
         events = []
         worker = Mock()
-        worker.can_rate.return_value = False
         bridge = NativeBridge(worker, events.append)
         bridge.request = request
         bridge.message(UIMessage(UIMessageType.OUTCOME, completed))

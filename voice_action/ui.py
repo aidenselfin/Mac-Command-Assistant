@@ -12,7 +12,7 @@ from typing import Protocol
 from openai import AsyncOpenAI
 
 from voice_action.attachment import AttachmentError
-from voice_action.feedback import LOW_RATING, build_feedback
+from voice_action.feedback import build_feedback
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient
 from voice_action.mcp_manager import MCPManager
 from voice_action.planner import (
@@ -51,7 +51,6 @@ class UIMessageType(Enum):
     FAILURE = auto()
     NOTICE = auto()
     ATTACHMENT = auto()  # value: (path or None, refusal text or None)
-    RATING_SAVED = auto()  # value: (score, tags)
     STOPPED = auto()
 
 
@@ -89,10 +88,6 @@ class UIView(Protocol):
 
     def set_attachment(self, path: str | None) -> None: ...
 
-    def set_rating(
-        self, visible: bool, score: int | None = None, tags: tuple[str, ...] = ()
-    ) -> None: ...
-
     def close(self) -> None: ...
 
 
@@ -104,10 +99,6 @@ class UIAdapter(Protocol):
     def reject_pending(self) -> bool: ...
 
     def undo_last_write(self) -> bool: ...
-
-    def rate(self, score: int, tags: tuple[str, ...]) -> bool: ...
-
-    def can_rate(self) -> bool: ...
 
     def attach(self, path: str) -> bool: ...
 
@@ -172,9 +163,6 @@ class UIPresenter:
         self.state: RuntimeState | None = None
         self._dispatch_pending = False
         self._choices: tuple[str, ...] = ()  # button labels while a question is open
-        self._rating_open = False  # the last answer can still be rated
-        self._score: int | None = None
-        self._tags: tuple[str, ...] = ()
         self._attached: str | None = None  # a dropped file waiting for the next command
         self.view.set_status("STARTING")
         self.view.set_tool("없음")
@@ -208,8 +196,6 @@ class UIPresenter:
                     self._choices = (
                         outcome.shown_options if isinstance(outcome, Clarification) else ()
                     )
-                    self._rating_open = isinstance(outcome, Completed) and self.adapter.can_rate()
-                    self._score, self._tags = None, ()
                 self.view.show_outcome(outcome)
                 self._refresh_controls()
             return
@@ -226,16 +212,6 @@ class UIPresenter:
             return
         if message.type is UIMessageType.NOTICE:
             self.view.show_output(str(message.value))
-            return
-        if message.type is UIMessageType.RATING_SAVED:
-            score, tags = message.value
-            if (
-                self._can_rate()
-                and (score, tags) == (self._score, self._tags)
-                and (score > LOW_RATING or tags)
-            ):
-                self._rating_open = False
-                self._refresh_controls()
             return
         if message.type is UIMessageType.ATTACHMENT:
             path, refusal = message.value
@@ -264,9 +240,8 @@ class UIPresenter:
             undo_enabled=False,
         )
         if self.adapter.submit(normalized):
-            self._choices, self._rating_open = (), False
+            self._choices = ()
             self.view.set_choices(())
-            self.view.set_rating(False)
             if self.state is RuntimeState.IDLE and self._attached is not None:
                 self._attached = None  # it went with this command
                 self.view.set_attachment(None)
@@ -298,33 +273,6 @@ class UIPresenter:
         if not asking or not 1 <= number <= len(self._choices):
             return False
         return self.execute(f"{number}번", shown=f"{number}. {self._choices[number - 1]}")
-
-    def rate(self, score: int) -> bool:
-        if not self._can_rate() or score not in range(1, 6):
-            return False
-        # Low scores keep the chosen causes; a better score drops them.
-        tags = self._tags if score <= LOW_RATING else ()
-        if not self.adapter.rate(score, tags):
-            return False
-        self._score, self._tags = score, tags
-        self._refresh_controls()
-        return True
-
-    def toggle_tag(self, tag: str) -> bool:
-        """Pick or drop a cause for a low rating; the rating is sent again with it."""
-        if not self._can_rate() or self._score is None or self._score > LOW_RATING:
-            return False
-        tags = tuple(t for t in self._tags if t != tag)
-        if len(tags) == len(self._tags):
-            tags = (*self._tags, tag)
-        if not self.adapter.rate(self._score, tags):
-            return False
-        self._tags = tags
-        self._refresh_controls()
-        return True
-
-    def _can_rate(self) -> bool:
-        return self._rating_open and self.state is RuntimeState.IDLE and not self._dispatch_pending
 
     def approve(self) -> bool:
         if self.state is not RuntimeState.WAITING_APPROVAL or self._dispatch_pending:
@@ -406,7 +354,6 @@ class UIPresenter:
         self.view.set_approval_enabled(approval_visible and not self._dispatch_pending)
         asking = self.state is RuntimeState.WAITING_USER_INPUT and not self._dispatch_pending
         self.view.set_choices(self._choices if asking else ())
-        self.view.set_rating(self._can_rate(), self._score, self._tags)
 
 
 def _manager_factory(config) -> MCPManager:
@@ -489,10 +436,6 @@ class AsyncRuntimeWorker:
         controller = self._controller
         return controller is not None and self._schedule(self._dispatch(controller.undo_last_write))
 
-    def can_rate(self) -> bool:
-        controller = self._controller
-        return controller is not None and controller.ratable
-
     def attach(self, path: str) -> bool:
         controller = self._controller
         return controller is not None and self._schedule(self._attach(controller, path))
@@ -512,19 +455,6 @@ class AsyncRuntimeWorker:
             self.messages.put(UIMessage(UIMessageType.ATTACHMENT, (None, str(exc))))
         else:
             self.messages.put(UIMessage(UIMessageType.ATTACHMENT, (stored, None)))
-
-    def rate(self, score: int, tags: tuple[str, ...]) -> bool:
-        controller = self._controller
-        return controller is not None and self._schedule(self._rate(controller, score, tags))
-
-    async def _rate(self, controller, score: int, tags: tuple[str, ...]) -> None:
-        # Scheduling worked; whether the rating was stored is only known here.
-        if not await controller.rate(score, tags):
-            self.messages.put(
-                UIMessage(UIMessageType.NOTICE, "평가를 저장하지 못했어요. 다시 눌러 보세요.")
-            )
-        else:
-            self.messages.put(UIMessage(UIMessageType.RATING_SAVED, (score, tags)))
 
     def cancel_active(self) -> bool:
         if self._active_task is None:

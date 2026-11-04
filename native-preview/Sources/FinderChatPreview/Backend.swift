@@ -33,8 +33,6 @@ final class Backend: ObservableObject {
     @Published var online = false
     @Published var pending = false { didSet { if !pending { Toast.shared.thinking(nil) } } }
     @Published var transcribing = false
-    @Published var ratable = false
-    @Published var lowScore: Int?
     private var process: Process?
     private var input: FileHandle?
     private var buffer = Data()
@@ -113,8 +111,6 @@ final class Backend: ObservableObject {
             state = "STARTING"
             online = false
             pending = false
-            ratable = false
-            lowScore = nil
             approval = nil
             choices = []
             child.executableURL = URL(fileURLWithPath: runtime.python)
@@ -190,8 +186,6 @@ final class Backend: ObservableObject {
                 choices = []
                 tool = ""
                 append(type == "error" ? "error" : "assistant", text)
-                ratable = value["ratable"] as? Bool ?? false
-                lowScore = nil
                 if type == "completed" {
                     dragFiles = (value["offer_paths"] as? [String] ?? []).compactMap(offerable)
                     // canBecomeMain: the menu-bar item's own window is visible but is not the chat
@@ -206,11 +200,6 @@ final class Backend: ObservableObject {
                 if let path = value["path"] as? String { attachment = path }
                 else if text.isEmpty { attachment = nil }
                 if !text.isEmpty { append("error", text) }
-            case "rating_saved":
-                let score = value["score"] as? Int ?? 0
-                let tags = value["tags"] as? [String] ?? []
-                if score > 3 || !tags.isEmpty { ratable = false; lowScore = nil }
-                else { lowScore = score }
             case "rejected":
                 pending = false
                 transcribing = false
@@ -270,9 +259,9 @@ final class Backend: ObservableObject {
         guard canSubmit, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if send("submit", fields: ["text": text]) {
             pending = true
-            ratable = false
             choices = []
-            attachment = nil
+            // `/feedback 내용` is a note about the last answer: the attachment waits for a real command.
+            if !text.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("/feedback") { attachment = nil }
             dragFiles = []
             append("user", text)
             Toast.shared.thinking("생각하는 중…")
@@ -297,8 +286,6 @@ final class Backend: ObservableObject {
         attachment = nil
         dragFiles = []
         tool = ""
-        ratable = false
-        lowScore = nil
         Toast.shared.dismiss()
         ChoiceChips.shared.hide()
     }
