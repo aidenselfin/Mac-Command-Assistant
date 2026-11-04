@@ -97,9 +97,11 @@ final class Backend: ObservableObject {
                 DispatchQueue.main.async { Task { @MainActor in Backend.shared.syncChips() } }
             }
         }
-        struct Runtime: Decodable { let project: String; let python: String }
+        // app_tree: the native-preview code this app was built from, so the backend can warn when stale.
+        // args: only a UI test replaces the real backend with a scripted one.
+        struct Runtime: Decodable { let project: String; let python: String; let app_tree: String?; let args: [String]? }
         do {
-            guard let url = Bundle.main.url(forResource: "runtime", withExtension: "json") else {
+            guard let url = UITest.runtime ?? Bundle.main.url(forResource: "runtime", withExtension: "json") else {
                 throw CocoaError(.fileNoSuchFile)
             }
             let runtime = try JSONDecoder().decode(Runtime.self, from: Data(contentsOf: url))
@@ -116,10 +118,11 @@ final class Backend: ObservableObject {
             approval = nil
             choices = []
             child.executableURL = URL(fileURLWithPath: runtime.python)
-            child.arguments = ["-u", "-m", "voice_action.native_bridge"]
+            child.arguments = runtime.args ?? ["-u", "-m", "voice_action.native_bridge"]
             child.currentDirectoryURL = URL(fileURLWithPath: runtime.project)
             var environment = ProcessInfo.processInfo.environment
             environment["PYTHONPATH"] = runtime.project
+            environment["SYMBIO_APP_TREE"] = runtime.app_tree
             // 앱 아이콘으로 켜면 PATH가 최소라 filesystem MCP가 쓰는 node를 못 찾는다.
             let extra = "/opt/homebrew/bin:/usr/local/bin"
             environment["PATH"] = extra + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
@@ -222,6 +225,7 @@ final class Backend: ObservableObject {
                 if let problem = value["error"] as? String { append("error", problem) }
                 else { submit(text) }
             case "notice": append("notice", text)
+            case "_test" where UITest.active: UITest.handle(value)
             case "stopped": online = false; pending = false; approval = nil; choices = []
             default: break
             }
@@ -342,6 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
         Backend.shared.start()
+        guard !UITest.active else { return }  // a test run must not catch the user's keys or add a menu icon
         VoiceInput.shared.install()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.target = self

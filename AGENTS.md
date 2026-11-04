@@ -17,6 +17,7 @@ Symbio: 자연어 명령(글·음성)을 LLM(OpenRouter/Groq/OpenAI)이 고정�
 - 의존성 설치: `uv sync --locked && npm ci && npm run playwright:install`
 - 실행: 네이티브 앱 `./native-preview/run.sh` 또는 `Voice Action AI.command`(더블클릭). lesson 관리: `uv run python main.py --lessons`
 - 점검: `uv run python scripts/check.py`(린트·테스트·평가 재생·어려운 케이스, 화면 없이), `scripts/check.sh quick`(변경 영역 테스트+ruff), `scripts/check.sh full`, `scripts/check.sh <기능>`(features.md의 기능 이름)
+- 화면 반영: `python3 scripts/ui_check.py status`(설치된 앱이 최신 빌드인지), `python3 scripts/ui_check.py run`(창·칩 시나리오 재생)
 - 테스트: `uv run --locked pytest -q` (통합만: `-m integration`, 실제 LLM 키 불필요)
 - 빠른 테스트(샌드박스·네트워크 제한 환경): `uv run --locked pytest -q -m "not integration"`
 - 린트: `uv run --locked ruff check .`

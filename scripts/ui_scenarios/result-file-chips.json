@@ -1,0 +1,10 @@
+{
+ "about": "만든·고친 파일이 창을 닫았을 때 떠 있는 파일 칩으로 나온다",
+ "steps": [
+  {"do": "close_chat", "expect": {"chat_visible": false}},
+  {"touch": ["a.txt", "b.txt"],
+   "emit": {"type": "completed", "text": "두 파일을 만들었어요.", "offer_paths": ["{dir}/a.txt", "{dir}/b.txt"],
+            "changed_paths": ["{dir}/a.txt", "{dir}/b.txt"], "found_paths": []},
+   "expect": {"drag_files": ["a.txt", "b.txt"], "file_box": ["a.txt", "b.txt"]}}
+ ]
+}
