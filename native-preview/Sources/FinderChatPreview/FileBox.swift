@@ -9,7 +9,7 @@ final class FileBox {
     private let chip = FileChip()
     private let name = NSTextField(labelWithString: "")
     private let icon = NSImageView()
-    private static let size = NSSize(width: 260, height: 48)
+    private static let size = NSSize(width: ChipStyle.width, height: ChipStyle.height)
 
     /// nil hides the box; the caller has already checked the file is inside an allowed folder.
     func show(_ file: URL?) {
@@ -19,7 +19,7 @@ final class FileBox {
         name.stringValue = file.lastPathComponent
         icon.image = NSWorkspace.shared.icon(forFile: file.path)
         if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
-            panel.setFrameOrigin(NSPoint(x: area.maxX - Self.size.width - 16, y: area.minY + 16))
+            panel.setFrameOrigin(NSPoint(x: area.maxX - Self.size.width - ChipStyle.margin, y: area.minY + ChipStyle.margin))
         }
         panel.orderFrontRegardless()
     }
@@ -38,19 +38,19 @@ final class FileBox {
         box.material = .hudWindow
         box.state = .active
         box.wantsLayer = true
-        box.layer?.cornerRadius = 10
+        box.layer?.cornerRadius = ChipStyle.radius
         box.layer?.masksToBounds = true
         chip.frame = box.bounds
         chip.toolTip = "끌어서 원하는 곳에 놓으세요"
         chip.onDropped = { [weak panel] in panel?.orderOut(nil) }
-        icon.frame = NSRect(x: 12, y: 12, width: 24, height: 24)
+        icon.frame = NSRect(x: 12, y: 10, width: 24, height: 24)
         name.font = .systemFont(ofSize: 13, weight: .medium)
         name.lineBreakMode = .byTruncatingMiddle
-        name.frame = NSRect(x: 44, y: 14, width: Self.size.width - 84, height: 20)
+        name.frame = NSRect(x: 44, y: 12, width: Self.size.width - 84, height: 20)
         let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "닫기")!,
                              target: panel, action: #selector(NSWindow.orderOut(_:)))
         close.isBordered = false
-        close.frame = NSRect(x: Self.size.width - 32, y: 14, width: 20, height: 20)
+        close.frame = NSRect(x: Self.size.width - 32, y: 12, width: 20, height: 20)
         for view in [icon, name] as [NSView] { chip.addSubview(view) }
         box.addSubview(chip)
         box.addSubview(close)
