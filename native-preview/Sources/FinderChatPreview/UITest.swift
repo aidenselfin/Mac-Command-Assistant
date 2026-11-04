@@ -28,7 +28,10 @@ enum UITest {
         case "key": ok = press(value["key"] as? String ?? "")
         case "open_chat": AppDelegate.showChat()
         case "close_chat": chat?.performClose(nil)
-        case "quit": NSApp.terminate(nil)
+        // Stops the scripted backend like a quit does, then ends; the menu's quit path is not under test.
+        case "quit":
+            Backend.shared.shutdown { exit(0) }
+            return
         default: ok = false
         }
         Backend.shared.send("_done", fields: ["do": name, "ok": ok])

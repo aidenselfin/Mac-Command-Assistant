@@ -48,6 +48,7 @@ def status():
         runtime = app / "Contents/Resources/runtime.json"
         if not runtime.exists():
             print(f"없음   {app}")
+            stale |= app == APPS[0]  # the installed app is the one the user opens
             continue
         built = json.loads(runtime.read_text()).get("app_tree")
         ok = built == latest
@@ -157,14 +158,13 @@ def run(names):
                 stderr=subprocess.DEVNULL,
             )
             try:
-                app.wait(timeout=60)
+                code = app.wait(timeout=60)
             except subprocess.TimeoutExpired:
                 app.kill()
-            problems = (
-                json.loads(result.read_text())["failures"]
-                if result.exists()
-                else ["앱이 끝까지 돌지 못함(멈춤·충돌)"]
-            )
+                code = "시간 초과"
+            problems = json.loads(result.read_text())["failures"] if result.exists() else []
+            if code != 0:
+                problems.append(f"앱이 정상 종료하지 못함({code})")
             failed += bool(problems)
             print(("FAIL " if problems else "PASS ") + path.stem)
             for problem in problems:
