@@ -25,7 +25,7 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 
 ## Swift → Python 명령 (`action`)
 
-`submit`(`text`) · `approve`/`reject`(`approval_id`) · `cancel` · `undo` · `attach`(`path`) · `detach` ·
+`submit`(`text`) · `approve`/`reject`(`approval_id`) · `cancel` · `undo` · `reset`(후속 질문 기억 삭제, IDLE에서만) · `attach`(`path`) · `detach` ·
 `rate`(`score`, 선택 `tags`) · `voice`(`path`: 임시 폴더의 `voice-action-voice-*.m4a`, 변환 뒤 지운다) · `shutdown`. 상태와 맞지 않거나 `approval_id`가 다르면 `rejected`.
 
 ## 새 승인 종류를 추가할 때

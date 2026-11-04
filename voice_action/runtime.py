@@ -168,6 +168,13 @@ class RuntimeController:
     def detach(self) -> None:
         self._attachment = None
 
+    def reset_conversation(self) -> bool:
+        """Forget the follow-up context so the next command starts a new conversation."""
+        if self._in_flight or self.state is not RuntimeState.IDLE:
+            return False
+        self._previous = self._answered_run = self._attachment = None
+        return True
+
     @property
     def ratable(self) -> bool:
         """True while the last answer is still the current run, i.e. before the next command."""
