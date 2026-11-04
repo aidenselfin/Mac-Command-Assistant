@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 from voice_action.mcp_client import ToolDefinition, ToolResult
 from voice_action.planner import (
+    ApprovalRequired,
     Clarification,
     ClarificationContext,
     Completed,
@@ -80,12 +81,12 @@ async def test_the_reply_and_request_in_memory_are_cut_short(config):
     assert "- 다룬 파일: 없음" in system
 
 
-async def test_memory_does_not_authorize_a_delete_that_names_no_file(config):
-    planner, model = make(config, [])
+async def test_a_delete_that_names_no_file_is_not_refused_up_front(config):
+    planner, model = make(config, [ModelTurn("대상을 찾지 못했습니다.", [])])
     previous = Exchange("a.txt 읽어줘", "내용입니다", ("/x/a.txt",))
     outcome = await planner.run("그 파일 삭제해줘", previous=previous)
-    assert isinstance(outcome, Error) and "지정해 주세요" in outcome.message
-    model.generate.assert_not_awaited()
+    assert not isinstance(outcome, ApprovalRequired)  # no delete without a search
+    model.generate.assert_awaited()
 
 
 async def test_a_completed_answer_reports_the_files_it_read_and_changed(config):

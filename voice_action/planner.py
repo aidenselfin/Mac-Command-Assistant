@@ -686,15 +686,6 @@ def _destructive_request(text: str) -> bool:
     return DELETE_ACTION_PATTERN.search(lowered) is not None
 
 
-def _delete_request_has_target(text: str, roots: tuple[Path, ...]) -> bool:
-    # shortcut: 제목 단서는 날짜·문서 종류만 지원, 다른 설명 요청이 쌓이면 확장.
-    return bool(
-        OUTPUT_FILENAME_PATTERN.search(text)
-        or any(root.name in text or str(root) in text for root in roots)
-        or re.search(r"\d|회의록|보고서|메모|예산안", text)
-    )
-
-
 def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) -> bool:
     names = {str(directory)}
     for root in roots:
@@ -712,36 +703,21 @@ def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) ->
 def _delete_scope_error(
     arguments: dict, text: str, roots: tuple[Path, ...], web: bool = True
 ) -> str | None:
+    """Deletion scope is the model's call (found by search); the approval screen confirms it."""
     if not _destructive_request(text) or (web and USER_URL_PATTERN.search(text)):
         return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹 명령과 삭제를 분리하세요."
-    text = _without_quoted_text(text, action_pattern=DELETE_ACTION_PATTERN)
-    if re.search(r"제외|빼고|남기|\b(?:except|excluding|keep)\b", text, re.IGNORECASE):
-        return "제외 조건은 지원하지 않습니다. 삭제할 파일 목록이나 glob 패턴을 지정하세요."
     if "directory" in arguments:
-        directory, pattern = arguments.get("directory"), arguments.get("pattern")
-        if not isinstance(directory, str) or not isinstance(pattern, str):
+        text = _without_quoted_text(text, action_pattern=DELETE_ACTION_PATTERN)
+        if re.search(r"제외|빼고|남기|\b(?:except|excluding|keep)\b", text, re.IGNORECASE):
+            return "directory·pattern은 제외 조건을 못 씁니다. paths로 파일을 지정하세요."
+        if not isinstance(arguments.get("directory"), str) or not isinstance(
+            arguments.get("pattern"), str
+        ):
             return "삭제 폴더와 패턴을 지정해야 합니다."
-        if not _mentioned_directory(Path(directory), text, roots):
-            return "일괄 삭제 폴더가 사용자 명령에 명시되지 않았습니다."
-        if pattern == "*":
-            if not re.search(r"모두|전부|전체|모든|\ball\b|\*", text, re.IGNORECASE):
-                return "모든 파일 삭제가 사용자 명령에 명시되지 않았습니다."
-        elif pattern not in text:
-            return "삭제 패턴이 사용자 명령에 명시되지 않았습니다."
         return None
     paths = arguments.get("paths")
-    if not isinstance(paths, list) or not paths:
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
         return "삭제 파일 목록을 지정해야 합니다."
-    for raw in paths:
-        if not isinstance(raw, str) or not _write_target_is_explicit(raw, text, ()):
-            return "삭제할 파일명이 사용자 명령에 명시되지 않았습니다."
-        path = Path(raw)
-        # 파일 경로를 명시했다면 같은 이름의 다른 폴더 파일을 선택하지 않는다.
-        qualified = re.findall(rf"(?:/|[\w.-]+/)[^\s\"'<>]*{re.escape(path.name)}", text)
-        if qualified and not any(
-            str(path) == item or str(path).endswith("/" + item) for item in qualified
-        ):
-            return "삭제 파일 경로가 사용자 명령의 경로와 일치하지 않습니다."
     return None
 
 
@@ -1179,13 +1155,6 @@ class Planner:
                 "URL 경계가 모호합니다. 주소를 <https://example.com/경로>처럼 "
                 "꺾쇠로 감싸거나 URL 뒤에 공백을 넣어 다시 요청해 주세요."
             )
-        if _destructive_request(user_text) and attachment is None and not (
-            _delete_request_has_target(user_text, self.config.allowed_directories)
-        ):
-            return Error(
-                "삭제할 파일 경로 또는 제목·날짜, 일괄 삭제할 폴더와 패턴을 지정해 주세요. "
-                "먼저 파일 목록 조회로 대상을 확인할 수 있습니다."
-            )
         if _ambiguous_mutation(user_text):
             return _edit_clarification(user_text, attachment=attachment or "")
         if attachment is not None:
@@ -1241,13 +1210,6 @@ class Planner:
             except (MCPError, OSError):
                 return Error("선택한 파일이 허용 경로 안의 읽을 수 있는 파일이 아닙니다.")
         attachment = context.attachment or None
-        if _destructive_request(request) and attachment is None and not (
-            _delete_request_has_target(request, self.config.allowed_directories)
-        ):
-            return Error(
-                "삭제할 파일 경로 또는 제목·날짜, 일괄 삭제할 폴더와 패턴을 지정해 주세요. "
-                "먼저 파일 목록 조회로 대상을 확인할 수 있습니다."
-            )
         if attachment is not None and not is_file:
             resolution += f" 사용자가 첨부한 파일: {attachment}. 이 파일이 요청의 대상입니다."
         return await self._run_loop(
@@ -1327,7 +1289,10 @@ class Planner:
                     "다음 web__browser_snapshot으로 수행하세요. URL 문자열 자체의 "
                     "번역·설명 요청은 페이지 방문이 필요하지 않습니다. "
                     "이동이나 우회는 금지됩니다. "
-                    "삭제는 사용자 원문에 지정된 파일만 local__delete_files로 처리하세요. "
+                    "삭제 대상은 사용자 표현(예: '피그마 파일')에 맞게 local__find_files로 "
+                    "직접 찾아 정하고 local__delete_files로 처리하세요. 대상을 되묻지 마세요. "
+                    "사용자 확인은 "
+                    "앱의 삭제 승인 화면이 마지막에 한 번 받습니다. "
                     "일괄 삭제는 directory와 pattern으로 선택하고, 폴더 바로 아래 파일만 "
                     "대상입니다. 재귀 삭제는 금지되며 요청에 하위 폴더/재귀가 포함되면 "
                     "지원하지 않는다고 답하세요. 승인 전에는 삭제 완료를 말하지 마세요. "
@@ -1959,6 +1924,8 @@ class Planner:
                 ):
                     return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹과 분리하세요."
                 return None
+            if state.search_required and not state.search_completed:
+                return "삭제 대상을 추측하지 말고 먼저 local__find_files로 찾으세요."
             return _delete_scope_error(
                 arguments, state.user_text, self.config.allowed_directories, self._web_active
             )
@@ -2195,6 +2162,23 @@ class Planner:
             )
             return None
         if (
+            _destructive_request(state.user_text)
+            and response.get("decision") == "choose"
+            and response.get("complete") is not False
+        ):
+            # 어떤 파일을 지울지는 봇이 정하고, 사용자는 삭제 승인 화면에서 한 번만 확인한다.
+            state.find_override = json.dumps(
+                {
+                    "decision": "delete_scope",
+                    "note": "삭제 대상은 묻지 말고 요청에 맞는 후보를 직접 골라 "
+                    "local__delete_files(paths)를 호출하세요. 요청과 무관한 파일은 넣지 마세요. "
+                    "사용자 확인은 앱의 삭제 승인 화면이 받습니다.",
+                    "candidates": response.get("candidates", []),
+                },
+                ensure_ascii=False,
+            )
+            return None
+        if (
             RANKED_PICK_PATTERN.search(state.user_text)
             and response.get("decision") == "choose"
             and response.get("stage") != "meaning"  # a guess by similarity is always confirmed
@@ -2217,12 +2201,6 @@ class Planner:
                 ensure_ascii=False,
             )
             return None
-        if response.get("decision") == "single" and _destructive_request(state.user_text):
-            found = response["candidates"][0]["path"]
-            if _delete_scope_error({"paths": [found]}, state.user_text,
-                                   self.config.allowed_directories, self._web_active):
-                # A descriptive delete still needs the user to name the exact candidate.
-                response = {**response, "decision": "choose"}
         spec = clarification_spec(response)
         if spec is not None:
             count = state.prior_clarifications + 1

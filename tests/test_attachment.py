@@ -186,11 +186,11 @@ async def test_deleting_the_attachment_needs_no_filename_in_the_text_but_still_a
     assert "첨부한 파일 하나만" in model.generate.await_args_list[1].args[0][-1]["content"]
 
 
-async def test_a_delete_without_an_attachment_still_needs_a_named_file(config):
-    planner, _, model = make(config, [])
+async def test_a_delete_without_an_attachment_goes_to_the_model_to_find_the_file(config):
+    planner, _, model = make(config, [ModelTurn("대상을 찾지 못했습니다.", [])])
     outcome = await planner.run("이 파일 삭제해줘")
-    assert isinstance(outcome, Error) and "지정해 주세요" in outcome.message
-    model.generate.assert_not_awaited()
+    assert not isinstance(outcome, ApprovalRequired)
+    model.generate.assert_awaited()
 
 
 async def test_converting_is_limited_to_the_attached_file(config):
