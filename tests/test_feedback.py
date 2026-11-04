@@ -432,3 +432,18 @@ async def test_requests_starting_like_thanks_still_count_and_exceptions_are_fail
     loop.clock.now += 20
     loop.user_input("예산 파일 찾아줘.", new_run=True)
     assert "R3" in [r for r, _ in loop.run_finished()]
+
+
+def test_failed_list_request_becomes_a_live_eval_task_with_the_exact_words(tmp_path):
+    loop, _ = make_loop(tmp_path)
+    loop.user_input("폴더에 뭐있어?", new_run=True)
+    loop.record("llm_response", tool_calls=[{"name": "filesystem__list_directory"}])
+    run = loop.run_id
+    loop.user_input("회의록 줘", new_run=True)  # not a listing: no grader can know the answer
+    loop.record("llm_response", tool_calls=[{"name": "local__find_files"}])
+    loop._failure_tasks((run, loop.run_id))
+    loop._failure_tasks((run,))  # same words twice keep one task
+    (path,) = (tmp_path / "failure-tasks").glob("*.json")
+    task = json.loads(path.read_text(encoding="utf-8"))
+    assert task["request"] == "폴더에 뭐있어?" and task["id"] == path.stem
+    assert set(task["expect"]["reply_contains"]) == set(task["files"])

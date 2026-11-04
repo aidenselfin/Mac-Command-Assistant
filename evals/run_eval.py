@@ -49,6 +49,7 @@ from voice_action.undo import UndoJournal  # noqa: E402
 
 TASKS = Path(__file__).with_name("tasks")
 RESULTS = Path(__file__).with_name("results")
+FAILURES = ROOT / ".voice-action" / "failure-tasks"
 SKIP = {".eval"}  # harness-owned files inside the trial root
 
 
@@ -382,6 +383,9 @@ async def main(argv=None) -> int:
     parser.add_argument("--dir", type=Path, default=TASKS, help="task folder")
     args = parser.parse_args(argv)
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(args.dir.glob("*.json"))]
+    if args.live and args.dir == TASKS:  # real failures the feedback loop kept, verbatim
+        tasks += [json.loads(p.read_text(encoding="utf-8"))
+                  for p in sorted(FAILURES.glob("*.json"))]
     tasks = [t for t in tasks if not args.task or t["id"] in args.task]
     if args.axis:
         tasks = [t for t in tasks if t.get("axis") in args.axis]

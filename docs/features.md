@@ -19,6 +19,7 @@
 | 자가 피드백(평가·lesson) | ✅ 피드백 on | 1~5 평가 | `feedback.py` | | `test_feedback*.py` `test_lesson_candidates.py` | `evals/run_eval.py --lesson` | 2026-10-04 lesson |
 | **자율 개선(lesson 자동 채택·코드 자동 수정)** | ✅ `VOICE_ACTION_FEEDBACK_AUTONOMY=on` | (실패 반복 시 자동) | `autonomy.py` `feedback.py` | 보호 파일 목록 | `test_autonomy.py` | `evals/run_eval.py` | 2026-10-27 피드백 자율 개선 |
 | **점수 연동 개선(벤치마크 미달 과제 접수·중도 취소 감지)** | ✅ `autonomy.py bench` (수동) | (벤치 라운드) | `autonomy.py` `feedback.py` | R10 취소 2회 | `test_autonomy.py` | `evals/benchmark.py` | 2026-10-28 점수 연동 |
+| **실패한 말 → 시험 문제(목록 요청)** | ✅ 자동 | (문제 감지 시) | `feedback.py` `run_eval.py` | 목록 요청만 | `test_feedback.py` | `evals/run_eval.py --live` | 2026-11-04 실패 문제화 |
 | Finder 연동(결과 표시·파일 첨부) | ✅ 네이티브 앱 | | `ui.py` `finder.py` `attachment.py` | | `test_ui.py` `test_finder.py` | | 2026-10-14 Finder 패널 |
 | 찾은 파일 드래그 칩(끌어서 다른 앱에 놓기, "파일 줘"면 전체 화면 위 떠 있는 상자) | ✅ 네이티브 앱 | | `planner.py` `native_bridge.py` `App.swift` `FileBox.swift` | | `test_native_bridge.py` | | 2026-10-28 클릭 드롭 |
 | **네이티브 SwiftUI 앱** | ✅ `native-preview/run.sh` | | `native_bridge.py` `native-preview/` | 승인은 Python이 보유 | `test_native_bridge.py` `test_native_preview.py` `test_native_protocol.py` | | 2026-10-14 네이티브 백엔드 |
