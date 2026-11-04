@@ -27,8 +27,9 @@ final class Backend: ObservableObject {
     @Published var choices: [String] = [] { didSet { syncChips() } }
     @Published var approval: Approval? { didSet { syncChips() } }
     @Published var attachment: String?
-    // The one found file, offered as a chip the user drags out; "파일 줘" also floats it over other apps.
-    @Published var dragFile: URL? { didSet { if dragFile == nil { FileBox.shared.show(nil) } } }
+    // Files the command made, edited or was asked for (at most 5), each a chip the user drags out;
+    // with the chat window closed they also float over other apps.
+    @Published var dragFiles: [URL] = [] { didSet { if dragFiles.isEmpty { FileBox.shared.show([]) } } }
     @Published var online = false
     @Published var pending = false { didSet { if !pending { Toast.shared.thinking(nil) } } }
     @Published var transcribing = false
@@ -188,29 +189,14 @@ final class Backend: ObservableObject {
                 append(type == "error" ? "error" : "assistant", text)
                 ratable = value["ratable"] as? Bool ?? false
                 lowScore = nil
-                if type == "completed", let found = (value["found_paths"] as? [String])?.first {
-                    let url = URL(fileURLWithPath: found).standardizedFileURL
-                    if url == url.resolvingSymlinksInPath(),
-                       folders.contains(where: { url.path.hasPrefix($0 + "/") }),
-                       (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular {
-                        if value["offer_file"] as? Bool == true {  // "회의록 줘": only then offer a drag
-                            dragFile = url
-                            // spoken from another app, or from the type box with the chat window closed
-                            // canBecomeMain: the menu-bar item's own window is visible but is not the chat
-                            if !chatShown { FileBox.shared.show(url) }
-                        }
-                    }
+                if type == "completed" {
+                    dragFiles = (value["offer_paths"] as? [String] ?? []).compactMap(offerable)
+                    // canBecomeMain: the menu-bar item's own window is visible but is not the chat
+                    if !dragFiles.isEmpty, !chatShown { FileBox.shared.show(dragFiles) }
                 }
                 if type == "completed", reveal,
                    let paths = value["changed_paths"] as? [String], !paths.isEmpty {
-                    let checked = paths.compactMap { path -> URL? in
-                        let url = URL(fileURLWithPath: path).standardizedFileURL
-                        guard url == url.resolvingSymlinksInPath(),
-                              folders.contains(where: { url.path.hasPrefix($0 + "/") }),
-                              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-                              attributes[.type] as? FileAttributeType == .typeRegular else { return nil }
-                        return url
-                    }
+                    let checked = paths.compactMap(offerable)
                     if !checked.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(checked) }
                 }
             case "attachment":
@@ -240,6 +226,16 @@ final class Backend: ObservableObject {
             default: break
             }
         }
+    }
+
+    /// A regular file inside an allowed folder, not reached through a symlink; anything else is never offered.
+    private func offerable(_ path: String) -> URL? {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard url == url.resolvingSymlinksInPath(),
+              folders.contains(where: { url.path.hasPrefix($0 + "/") }),
+              (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular
+        else { return nil }
+        return url
     }
 
     func append(_ role: String, _ text: String) {
@@ -273,7 +269,7 @@ final class Backend: ObservableObject {
             ratable = false
             choices = []
             attachment = nil
-            dragFile = nil
+            dragFiles = []
             append("user", text)
             Toast.shared.thinking("생각하는 중…")
         }
@@ -295,7 +291,7 @@ final class Backend: ObservableObject {
         choices = []
         approval = nil
         attachment = nil
-        dragFile = nil
+        dragFiles = []
         tool = ""
         ratable = false
         lowScore = nil

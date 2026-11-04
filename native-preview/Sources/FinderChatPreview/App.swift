@@ -58,7 +58,7 @@ private struct ChatPanel: View {
                             }
                             .buttonStyle(.plain).disabled(!backend.canSubmit)
                         }
-                        if let file = backend.dragFile { dragChip(file) }
+                        ForEach(backend.dragFiles, id: \.self) { dragChip($0) }
                         if let approval = backend.approval { approvalView(approval) }
                         if backend.ratable { rating }
                         Color.clear.frame(height: 1).id("bottom")

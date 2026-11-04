@@ -60,6 +60,15 @@ def asks_for_file(text):
     return not stem or not _verb_form(stem)
 
 
+OFFER_LIMIT = 5
+
+
+def offer_paths(changed, found, wants_file):
+    """Drag-chip files: what the command made or edited, else the found file if it was asked for."""
+    paths = [path for path in (changed or (found if wants_file else ())) if os.path.isfile(path)]
+    return paths if len(paths) <= OFFER_LIMIT else []
+
+
 class NativeBridge:
     def __init__(self, worker, emit, voice_key=None):
         self.worker, self.emit, self.voice_key = worker, emit, voice_key
@@ -97,6 +106,8 @@ class NativeBridge:
                            "changed_paths": list(value.changed_paths),
                            "found_paths": list(value.found_paths),
                            "offer_file": asks_for_file(self.request),
+                           "offer_paths": offer_paths(value.changed_paths, value.found_paths,
+                                                      asks_for_file(self.request)),
                            "ratable": self.worker.can_rate()})
             elif isinstance(value, (Error, Busy)):
                 self.emit({"type": "error", "text": value.message})
