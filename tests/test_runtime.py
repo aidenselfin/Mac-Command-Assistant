@@ -556,3 +556,15 @@ async def test_attaching_is_refused_while_a_command_is_running_or_waiting(config
     await controller.submit("요약해줘")  # now waiting for an answer
     with pytest.raises(AttachmentError):
         controller.attach(str(root / "a.md"))
+
+
+async def test_reset_conversation_forgets_follow_up_context_only_when_idle():
+    controller = RuntimeController(ScriptedPlanner([Completed("완료")]))
+    await controller.submit("파일 목록")
+    assert controller._previous is not None
+
+    assert controller.reset_conversation() is True
+    assert controller._previous is None and controller._answered_run is None
+
+    controller.state = RuntimeState.PLANNING
+    assert controller.reset_conversation() is False

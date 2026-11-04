@@ -189,6 +189,9 @@ class NativeBridge:
             self.worker.detach()
             self.emit({"type": "attachment", "path": None, "text": None})
             return True
+        elif action == "reset":
+            if self.worker.reset_conversation():
+                return True
         elif action == "rate":
             score, tags = request.get("score"), request.get("tags", [])
             if (type(score) is int and 1 <= score <= 5 and isinstance(tags, list)
