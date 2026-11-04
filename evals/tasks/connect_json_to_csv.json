@@ -1,0 +1,40 @@
+{
+  "id": "connect_json_to_csv",
+  "family": "file.convert",
+  "axis": "connect",
+  "level": 28,
+  "status": "active",
+  "files": {
+    "data.json": "[{\"name\": \"lunch\", \"amount\": \"12000\"}]"
+  },
+  "request": "data.json을 csv로 변환해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/data.json",
+            "target_format": "csv"
+          }
+        }
+      ]
+    },
+    {
+      "text": "data.csv를 만들었습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "data.csv": "*"
+    },
+    "must_run": [
+      "local__convert_file"
+    ]
+  }
+}

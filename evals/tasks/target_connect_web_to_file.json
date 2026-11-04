@@ -1,0 +1,25 @@
+{
+  "id": "target_connect_web_to_file",
+  "family": "web.read",
+  "axis": "connect",
+  "level": 72,
+  "status": "target",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "http://localhost:8000/ 페이지를 읽고 내용을 page.md로 저장해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "page.md": "*"
+    },
+    "must_run": [
+      "web__browser_navigate"
+    ]
+  },
+  "note": "평가 하네스에 web·macos MCP 연결이 있어야 풀 수 있다(지금은 filesystem만)"
+}

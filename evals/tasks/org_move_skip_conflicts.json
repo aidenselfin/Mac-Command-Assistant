@@ -1,0 +1,58 @@
+{
+  "id": "org_move_skip_conflicts",
+  "family": "file.move",
+  "axis": "organize",
+  "level": 78,
+  "status": "active",
+  "files": {
+    "a.txt": "A",
+    "b.txt": "B",
+    "c.txt": "C",
+    "보관/b.txt": "OLD"
+  },
+  "request": "a.txt, b.txt, c.txt를 보관 폴더로 이동해줘. 보관에 이미 같은 이름이 있는 파일은 건드리지 마",
+  "user": {
+    "approve": [
+      true,
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/a.txt",
+            "destination": "{root}/보관"
+          }
+        },
+        {
+          "name": "local__move_file",
+          "args": {
+            "source": "{root}/c.txt",
+            "destination": "{root}/보관"
+          }
+        }
+      ]
+    },
+    {
+      "text": "a.txt와 c.txt만 옮겼습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "a.txt": null,
+      "c.txt": null,
+      "보관/a.txt": "A",
+      "보관/c.txt": "C"
+    },
+    "must_run": [
+      "local__move_file"
+    ],
+    "changed_paths": [
+      "보관/a.txt",
+      "보관/c.txt"
+    ]
+  }
+}

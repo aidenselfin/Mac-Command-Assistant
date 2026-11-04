@@ -1,0 +1,22 @@
+{
+  "id": "target_summarize_conflicting_sources",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 94,
+  "status": "target",
+  "files": {
+    "기획서.txt": "마감일은 11월 3일이다.",
+    "회의록.txt": "회의 결과 마감일을 11월 10일로 변경했다."
+  },
+  "request": "최신 내용 기준으로 마감일이 언제인지 알려줘",
+  "ages": {
+    "기획서.txt": 30,
+    "회의록.txt": 2
+  },
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "11월 10일"
+    ]
+  }
+}

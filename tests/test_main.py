@@ -169,6 +169,7 @@ async def test_run_text_uses_manager_and_combined_tools(config, monkeypatch):
         "web__browser_snapshot",
         "local__read_document",  # offered for every non-web request
         "local__find_files",
+        "local__list_files",
     }
 
 

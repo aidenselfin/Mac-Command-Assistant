@@ -348,3 +348,10 @@ async def test_read_optional_nulls_are_omitted_without_relaxing_validation(confi
         with pytest.raises(ToolRejectedError):
             await mcp.normalize_tool_arguments("read_text_file", {"path": str(path), **invalid})
     mcp._session.call_tool.assert_not_awaited()
+
+
+def test_find_node_works_with_minimal_path(monkeypatch):
+    from voice_action.mcp_client import find_node
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert find_node().endswith("node")

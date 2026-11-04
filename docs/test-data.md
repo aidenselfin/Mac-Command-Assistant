@@ -46,8 +46,3 @@ Undo는 작업 완료 후 `undo` 또는 `되돌리기`를 입력한다. 종료�
 모델 응답은 비결정적이다. 정확한 답변 문구보다 도구 순서·승인·파일 부작용을 확인한다.
 이 안내는 수동 연습용이다. 자동 검증이나 실제 API smoke는 기존 파일과 journal을 재사용하지
 않고 임시 cwd·allowed root·journal·feedback DB로 격리한다.
-
-## 의미 검색 체험 자료
-
-`voice-action-test/embedding-demo/`에 중립적인 파일명의 사진 3장·가상 문서 3개를 추가했다.
-활성화 방법, 예시 명령, 기대 후보와 사진 출처·라이선스는 [semantic-demo.md](semantic-demo.md)를 참고한다.

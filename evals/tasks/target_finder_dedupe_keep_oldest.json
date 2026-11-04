@@ -1,0 +1,31 @@
+{
+  "id": "target_finder_dedupe_keep_oldest",
+  "family": "finder.duplicates",
+  "axis": "finder",
+  "level": 68,
+  "status": "target",
+  "files": {
+    "a.txt": "same",
+    "a_copy.txt": "same",
+    "b.txt": "other"
+  },
+  "request": "내용이 같은 중복 파일은 가장 오래된 것만 남기고 지워줘",
+  "ages": {
+    "a.txt": 10,
+    "a_copy.txt": 1,
+    "b.txt": 3
+  },
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {
+      "a_copy.txt": null
+    },
+    "must_run": [
+      "local__delete_files"
+    ]
+  }
+}

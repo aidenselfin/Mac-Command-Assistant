@@ -1,0 +1,40 @@
+{
+  "id": "see_find_by_ext",
+  "family": "file.find",
+  "axis": "see",
+  "level": 35,
+  "status": "active",
+  "files": {
+    "a.csv": "1",
+    "b.csv": "2",
+    "c.txt": "3",
+    "d.md": "4"
+  },
+  "request": "csv 파일만 찾아줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}"
+          }
+        }
+      ]
+    },
+    {
+      "text": "a.csv와 b.csv가 있습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "a.csv",
+      "b.csv"
+    ],
+    "reply_excludes": [
+      "c.txt",
+      "d.md"
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "see_find_partial_name",
+  "family": "file.find",
+  "axis": "see",
+  "level": 50,
+  "status": "active",
+  "files": {
+    "2026_예산표.txt": "x",
+    "회의록.txt": "y",
+    "예산초안_v2.md": "z"
+  },
+  "request": "이름에 예산이 들어간 파일을 모두 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}"
+          }
+        }
+      ]
+    },
+    {
+      "text": "2026_예산표.txt와 예산초안_v2.md입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "2026_예산표.txt",
+      "예산초안_v2.md"
+    ]
+  }
+}

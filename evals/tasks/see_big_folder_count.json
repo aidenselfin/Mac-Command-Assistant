@@ -1,0 +1,71 @@
+{
+  "id": "see_big_folder_count",
+  "family": "file.list",
+  "axis": "see",
+  "level": 70,
+  "status": "active",
+  "files": {
+    "f01.txt": "t",
+    "f02.txt": "t",
+    "f03.txt": "t",
+    "f04.txt": "t",
+    "f05.txt": "t",
+    "f06.txt": "t",
+    "f07.txt": "t",
+    "f08.txt": "t",
+    "f09.txt": "t",
+    "f10.txt": "t",
+    "f11.txt": "t",
+    "f12.txt": "t",
+    "f13.txt": "t",
+    "f14.txt": "t",
+    "f15.txt": "t",
+    "f16.txt": "t",
+    "f17.txt": "t",
+    "f18.txt": "t",
+    "g01.md": "m",
+    "g02.md": "m",
+    "g03.md": "m",
+    "g04.md": "m",
+    "g05.md": "m",
+    "g06.md": "m",
+    "g07.md": "m",
+    "g08.md": "m",
+    "g09.md": "m",
+    "g10.md": "m",
+    "g11.md": "m",
+    "g12.md": "m",
+    "h01.csv": "c",
+    "h02.csv": "c",
+    "h03.csv": "c",
+    "h04.csv": "c",
+    "h05.csv": "c",
+    "h06.csv": "c",
+    "h07.csv": "c",
+    "h08.csv": "c",
+    "h09.csv": "c",
+    "h10.csv": "c"
+  },
+  "request": "이 폴더에 txt 파일이 몇 개 있어?",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__list_directory",
+          "args": {
+            "path": "{root}"
+          }
+        }
+      ]
+    },
+    {
+      "text": "txt 파일은 18개입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "18"
+    ]
+  }
+}

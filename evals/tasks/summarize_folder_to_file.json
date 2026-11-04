@@ -1,0 +1,61 @@
+{
+  "id": "summarize_folder_to_file",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 76,
+  "status": "active",
+  "files": {
+    "보고/a.txt": "A팀 매출 증가",
+    "보고/b.txt": "B팀 비용 절감",
+    "보고/c.txt": "C팀 신규 고객 확보"
+  },
+  "request": "보고 폴더의 파일들을 읽고 요약.md로 정리해줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/a.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/b.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고/c.txt"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__write_file",
+          "args": {
+            "path": "{root}/요약.md",
+            "content": "A팀 매출 증가, B팀 비용 절감, C팀 신규 고객 확보"
+          }
+        }
+      ]
+    },
+    {
+      "text": "요약.md에 정리했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "요약.md": "*"
+    }
+  }
+}

@@ -1,17 +1,21 @@
 ---
 name: merge-worktrees
-description: 사용자가 "메인에 병합해"(지금 세션의 브랜치) 또는 "괜찮은 것만 골라 한 번에 합쳐줘"(여러 브랜치)라고 할 때 쓰는 voice-action 병합 절차. 병합·점검·worktree 삭제·패널 정리까지 한 번에 한다.
+description: 사용자가 "메인에 병합해"(지금 세션의 브랜치) 또는 "괜찮은 것만 골라 한 번에 합쳐줘"(여러 브랜치)라고 할 때 쓰는 voice-action 병합 절차. 병합·점검·worktree 삭제·웹 패널 정리까지 한 번에 한다.
 ---
 
-# 통합(병합) 절차
+# 병합 절차
 
-통합은 사용자가 요청할 때, 한 번에 한 세션이 한다. 작업 세션은 사용자가 "메인에 병합해"라고 하기 전에는 `main`에 합치지 않는다. 여러 브랜치를 합칠 때는 통합 세션 한 곳이 하고, push는 사용자가 말했을 때만 한다.
+사용자가 말했을 때만 한다. "메인에 병합해"는 지금 세션의 브랜치 하나, "골라 합쳐줘"는 사용자가 고른 브랜치들이 대상이다.
+메인 폴더 `M=~/voice-action-AI`에서는 `git -C $M …`로만 다루고 브랜치를 바꾸지 않는다.
 
-1. 시작: `python3 scripts/vibe.py sessions`와 `status`로 열린 세션을 본다. 메인 폴더에 다른 세션이 있거나 커밋 안 한 변경이 있으면 끝난 뒤로 미룬다.
-2. 후보 점검: 브랜치마다 `git log main..<브랜치>`와 `git diff main...<브랜치> --stat`로 범위를 보고 사용자가 고른 것만 대상으로 한다. 뒤처짐이 크면 먼저 최신 `main`을 가져와 충돌을 푼다.
-3. 병합: 통합용 브랜치에서 하나씩 병합한다. 충돌은 통합 세션이 푼다. 문서(`docs/status.md`·`features.md`)는 양쪽 내용을 모두 살린다.
-4. 검증: `scripts/check.sh full`(pytest 전체 + ruff)과 `uv run python evals/run_eval.py` 재생을 통과시킨다. 네이티브 변경이 있으면 `scripts/check.sh native`. 직접 보지 못한 UI는 확인했다고 쓰지 않는다.
-5. 반영: 통과한 뒤에만 `main`에 반영한다. push는 사용자가 말했을 때만 한다.
-   (지침 파일 추적을 처음 합칠 때: 메인에 untracked로 남은 `CLAUDE.md`·`AGENTS.md`·`native-preview/AGENTS.md`·`docs/내 작업 방식.md`가 병합 내용과 같은지 보고 지운 뒤 병합한다. 다른 worktree에 걸린 `AGENTS.md` 링크도 지운다.)
-6. 기록: `update-work-records`로 각 항목을 "완료", `todo`를 비우고 큰 변경은 milestones에 추가한다. `docs/status.md`의 최근 검증을 갱신한다.
-7. 정리: 병합한 브랜치만 삭제하고 끝난 worktree는 `git worktree remove 경로`로 지운다.
+1. 준비: 대상 브랜치의 변경을 모두 커밋한다. `git -C $M status --short`로 메인의 남은 변경을 본다. 사용자의 변경은 건드리지 않되, 병합할 파일과 겹치면 멈추고 묻는다.
+   메인에만 있는 같은 이름의 untracked 파일(예: 지침 문서 사본)이 막으면 내용을 비교해 브랜치 쪽에 이미 담겼을 때만 치운다.
+2. 최신화: 브랜치에서 `git merge main`으로 최신 `main`을 먼저 합치고 충돌을 푼다. 문서(`docs/status.md`·`features.md`)는 양쪽 내용을 모두 살린다.
+3. 점검: 코드(.py·.swift·.sh)가 바뀌었으면 `uv run python scripts/check.py`를 통과시킨다. 네이티브 변경이 있으면 `scripts/check.sh native`. 지침·문서만 바뀌었으면 건너뛴다. 직접 보지 못한 UI는 확인했다고 쓰지 않는다.
+4. 반영: `git -C $M merge --no-ff <브랜치>`. 여러 브랜치면 하나씩 하고 매번 3번을 다시 본다. push는 사용자가 말했을 때만 한다.
+5. 웹 패널 정리(`~/.claude/voice-action/`, 자기 항목만 Edit):
+   - `worklog.json`: 브랜치 항목을 `archive`로 옮겨 카드를 없앤다. 큰 변경이면 `milestones["<병합 커밋 해시 7자리>"]`에 짧은 제목.
+   - 새 큰 기능(새 도구·화면·묶음)이면 `structure-map.json` 알맞은 묶음에 블록(`added` 오늘 날짜)을 추가하고, 기능 파일이 바뀌었으면 `architecture.json` `features`를 고친 뒤 `update-architecture.py`를 돌린다.
+   - `docs/status.md`의 최근 검증을 갱신해야 하면 4번 전에 브랜치에서 커밋한다.
+   - `curl -s localhost:8765/api/state`로 반영됐는지 본다.
+6. 삭제(마지막): `git -C $M worktree remove --force <worktree 경로>` 뒤 `git -C $M branch -d <브랜치>`. 지금 세션이 그 worktree 안에 있으면 이 단계 뒤에는 명령을 더 돌리지 않는다.

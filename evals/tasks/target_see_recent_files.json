@@ -1,0 +1,46 @@
+{
+  "id": "target_see_recent_files",
+  "family": "file.info",
+  "axis": "see",
+  "level": 88,
+  "status": "active",
+  "files": {
+    "old.txt": "o",
+    "a.txt": "a",
+    "b.txt": "b",
+    "c.txt": "c"
+  },
+  "request": "최근 일주일 안에 수정한 파일을 알려줘",
+  "ages": {
+    "old.txt": 40,
+    "a.txt": 1,
+    "b.txt": 2,
+    "c.txt": 3
+  },
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "a.txt",
+      "b.txt",
+      "c.txt"
+    ],
+    "reply_excludes": [
+      "old.txt"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "modified_within_days": 7
+          }
+        }
+      ]
+    },
+    {
+      "text": "최근 일주일 안에 바뀐 파일: a.txt, b.txt, c.txt"
+    }
+  ]
+}

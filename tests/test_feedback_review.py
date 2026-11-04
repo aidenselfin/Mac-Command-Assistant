@@ -26,8 +26,7 @@ def all_stored_text(loop) -> str:
         *loop.db.execute("SELECT signature, rule FROM incidents"),
         *loop.db.execute("SELECT signature, text FROM lessons"),
     ]
-    report = loop.report_path.read_text() if loop.report_path.exists() else ""
-    return "\n".join(str(v) for row in rows for v in row) + report
+    return "\n".join(str(v) for row in rows for v in row)
 
 
 # ---- F01/F02 safe recording --------------------------------------------------------------
@@ -89,14 +88,13 @@ def test_corrupted_row_does_not_hide_valid_detection(tmp_path):
         )
         loop.outcome(Error("같은 실패"))
         found = loop.run_finished()
-    assert [rule for rule, *_ in found] == ["R1"]
+    assert "R1" in [rule for rule, *_ in found]  # R11 also sees the same request 3x
 
 
 async def test_analysis_result_is_sanitized_once_for_every_sink(tmp_path):
     result = {
         **LESSON,
         "lesson": f"키 {SECRET}를 쓰세요",
-        "user_hint": f"힌트 {SECRET}",
         "root_cause": f"원인 {SECRET}",
     }
     loop, emitted = make_loop(tmp_path, FakeAnalyzer(result), secrets=(SECRET,))
@@ -200,15 +198,8 @@ def test_store_refuses_symlinks_and_keeps_logs_private(tmp_path):
 
     clean = tmp_path / "clean"
     clean.mkdir()
-    (clean / "feedback-report.md").symlink_to(outside)
     loop = FeedbackLoop(clean / "feedback.sqlite3")
-    loop._report("sig", "cause", "detail")  # refused, and the command path must not see it
-    assert outside.read_text() == "original"
     assert stat.S_IMODE(os.stat(clean / "feedback.sqlite3").st_mode) == 0o600
-    loop.db.close()
-    loop = FeedbackLoop(tmp_path / "fresh" / "feedback.sqlite3")
-    loop._report("sig", "cause", "detail")
-    assert stat.S_IMODE(os.stat(loop.report_path).st_mode) == 0o600
     loop.db.close()
 
 
@@ -219,7 +210,7 @@ class RecordingAnalyzer:
     def __init__(self, result=None):
         self.bundles = []
         self.result = result or {
-            "action": "dev_report", "root_cause": "r", "category": "code_bug", "confidence": 0.9
+            "action": "none", "root_cause": "r", "confidence": 0.9
         }
 
     async def analyze(self, rule, bundle):
@@ -242,7 +233,7 @@ async def test_analysis_stays_with_its_origin_run(tmp_path):
     assert "UNRELATED_NEXT_RUN" not in analyzer.bundles[0]
     assert "signature: reject:tool" in analyzer.bundles[0]
     (run,) = loop.db.execute("SELECT run_id FROM events WHERE kind='feedback'").fetchone()
-    assert run == origin and origin in loop.report_path.read_text()
+    assert run == origin
 
 
 async def test_repeated_error_across_sessions_keeps_all_evidence(tmp_path):
@@ -311,7 +302,6 @@ async def test_recurrence_counts_only_distinct_runs_that_received_the_lesson(tmp
         loop._queue("R1", "error:x")  # the same run detected twice counts once
         active = [i for i, _ in loop.active_lessons()]
         assert (lesson_id in active) == (index < 2)
-    assert "재발을 막지 못해" in loop.report_path.read_text()
 
 
 # ---- F10 daily budget --------------------------------------------------------------------
@@ -347,10 +337,10 @@ async def test_cancelled_analysis_still_counts_against_the_daily_limit(tmp_path)
     "result",
     [
         {**LESSON, "lesson": None},
-        {**LESSON, "action": "user_hint", "user_hint": None},
+        {**LESSON, "action": "code_fix", "fix_request": None},
         {**LESSON, "root_cause": "x" * 301},
     ],
-    ids=["lesson-without-text", "hint-without-text", "long-root-cause"],
+    ids=["lesson-without-text", "fix-without-request", "long-root-cause"],
 )
 def test_analysis_schema_requires_the_value_its_action_needs(result):
     with pytest.raises(jsonschema.ValidationError):

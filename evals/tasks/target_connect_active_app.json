@@ -1,0 +1,18 @@
+{
+  "id": "target_connect_active_app",
+  "family": "app.query",
+  "axis": "connect",
+  "level": 62,
+  "status": "target",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "지금 어떤 앱을 쓰고 있어?",
+  "expect": {
+    "files": {},
+    "must_run": [
+      "macos__get_active_app"
+    ]
+  },
+  "note": "평가 하네스에 web·macos MCP 연결이 있어야 풀 수 있다(지금은 filesystem만)"
+}

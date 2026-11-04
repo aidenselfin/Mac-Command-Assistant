@@ -2337,3 +2337,33 @@ async def test_url_literal_explanation_does_not_require_navigation(config, user_
     model.generate.return_value = ModelTurn("주소 설명", [])
     assert await Planner(config, gateway, model).run(user_text) == Completed("주소 설명")
     gateway.call_tool.assert_not_awaited()
+
+
+async def test_mkdir_prompt_forbids_asking_location_or_confirmation(config):
+    mcp = fake_mcp()
+    model = AsyncMock()
+    model.generate.side_effect = [ModelTurn("폴더를 만들었습니다.", [])] * 5
+    await Planner(config, mcp, model).run("새 보관 폴더를 만들어줘")
+    system = model.generate.call_args.args[0][0]["content"]
+    assert "허용 루트가 하나뿐이면 위치를 묻지 말고" in system
+    assert "만들까요" in system
+    assert "폴더 이름은 '새'와 '폴더'를 뺀" in system
+
+
+def test_folder_question_is_refused_so_the_default_folder_is_used():
+    from types import SimpleNamespace
+
+    from voice_action.planner import _free_text_refusal
+
+    state = SimpleNamespace(
+        user_text="폴더 안에 뭐 있는지 알려줘",
+        find_tried=True, find_none=False, known_target=False,
+    )
+    ask = "어느 폴더의 내용을 알려드릴까요? 경로를 알려주세요."
+    assert "기본 폴더" in _free_text_refusal(state, ask)
+    assert "기본 폴더" in _free_text_refusal(state, "어느 폴더인가요?")
+    state.user_text = "a.txt를 다른 폴더로 옮겨줘"
+    assert _free_text_refusal(state, "대상 폴더의 경로를 알려주세요.") is None
+    state.user_text = "폴더 안에 뭐 있는지 알려줘"
+    state.user_text = "/Users/a/docs 안에 뭐 있어?"
+    assert _free_text_refusal(state, ask) is None

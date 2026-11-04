@@ -1,0 +1,48 @@
+{
+  "id": "target_see_size_ranked",
+  "family": "file.info",
+  "axis": "see",
+  "level": 90,
+  "status": "active",
+  "files": {
+    "a.txt": "xxxxxxxxxx",
+    "b.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "c.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "d.txt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "e.txt": "x"
+  },
+  "request": "용량이 큰 파일 상위 3개를 큰 순서대로 알려줘",
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "b.txt",
+      "d.txt",
+      "c.txt"
+    ],
+    "reply_excludes": [
+      "a.txt",
+      "e.txt"
+    ],
+    "reply_order": [
+      "b.txt",
+      "d.txt",
+      "c.txt"
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__list_files",
+          "args": {
+            "sort_by": "size",
+            "limit": 3
+          }
+        }
+      ]
+    },
+    {
+      "text": "큰 순서: b.txt, d.txt, c.txt"
+    }
+  ]
+}

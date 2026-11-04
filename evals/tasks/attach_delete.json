@@ -1,6 +1,9 @@
 {
   "id": "attach_delete",
   "family": "file.attach",
+  "axis": "organize",
+  "level": 58,
+  "status": "active",
   "attach": "오래된 로그.log",
   "files": {
     "오래된 로그.log": "x",

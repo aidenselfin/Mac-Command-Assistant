@@ -1,0 +1,40 @@
+{
+  "id": "read_two_files",
+  "family": "file.read",
+  "axis": "read",
+  "level": 38,
+  "status": "active",
+  "files": {
+    "a.txt": "사과",
+    "b.txt": "배"
+  },
+  "request": "a.txt와 b.txt 내용을 각각 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/a.txt"
+          }
+        },
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/b.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "a.txt는 사과, b.txt는 배입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "사과",
+      "배"
+    ]
+  }
+}

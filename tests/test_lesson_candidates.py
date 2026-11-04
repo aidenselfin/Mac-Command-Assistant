@@ -25,7 +25,6 @@ async def test_analysis_lesson_is_only_a_candidate(tmp_path):
     await asyncio.gather(*loop._tasks)
     assert loop.active_lessons() == []
     assert [text for _, text in loop.candidate_lessons()] == [LESSON["lesson"]]
-    assert any("후보 lesson" in m and "--lessons" in m for m in emitted)
     assert LESSON["lesson"] not in await system_prompt_for(loop)
 
 

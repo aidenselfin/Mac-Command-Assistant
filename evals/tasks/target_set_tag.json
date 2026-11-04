@@ -1,0 +1,22 @@
+{
+  "id": "target_set_tag",
+  "family": "target",
+  "axis": "finder",
+  "level": 48,
+  "status": "target",
+  "files": {
+    "memo.txt": "x"
+  },
+  "request": "memo.txt에 '중요' 태그를 달아줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__set_tags"
+    ]
+  }
+}

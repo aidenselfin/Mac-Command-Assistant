@@ -1,0 +1,33 @@
+{
+  "id": "summarize_one_line",
+  "family": "file.summary",
+  "axis": "summarize",
+  "level": 8,
+  "status": "active",
+  "files": {
+    "memo.txt": "11월 3일 마감. 담당자는 김하늘. 예산은 3천만원."
+  },
+  "request": "memo.txt 한 줄로 요약해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/memo.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "11월 3일 마감, 담당 김하늘, 예산 3천만원입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "11월",
+      "3천만원"
+    ]
+  }
+}

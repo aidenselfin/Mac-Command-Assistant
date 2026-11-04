@@ -292,6 +292,8 @@ class RuntimeController:
 
         normalized = answer.strip()
         if normalized.casefold() in {"취소", "cancel", "c"}:
+            if self._feedback is not None:  # the user gave up: feedback rule R10 counts it
+                self._feedback.record("cancelled", reason="clarification")
             return self._finish(
                 Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."), rateable=False
             )

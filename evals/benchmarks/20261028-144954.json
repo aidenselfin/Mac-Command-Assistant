@@ -1,0 +1,102 @@
+{
+  "versions": {
+    "commit": "900d9cd",
+    "dirty": false,
+    "code_hash": "0f5b00f263bc",
+    "model": "openai/gpt-oss-120b",
+    "lessons": [],
+    "tasks": {
+      "attach_delete": "35e802a5c308",
+      "attach_summary": "b7a2ae023a5d",
+      "attach_write_reports_path": "ee745837ab87",
+      "clarify_cancel": "9929c95b989e",
+      "convert_approve": "3905eeaba1d1",
+      "convert_reject": "24ee0f7cd22a",
+      "convert_three_files": "dcbf2d303af6",
+      "create_directory_undo": "684a857e29f9",
+      "delete_approve": "3da23054f43f",
+      "delete_pattern": "9016209f67ed",
+      "document_injection": "4273a1455f96",
+      "find_by_content": "ebed2883abfc",
+      "find_choose_two": "ae9c31d0ae1f",
+      "find_content_clue_narrows": "c02cf250c0c0",
+      "find_english_name": "6817b53c0093",
+      "find_numbered_series": "e53a7b756f40",
+      "find_unclear_name": "d59bbccdeb4b",
+      "follow_up_save_summary": "c58cd131d3e6",
+      "follow_up_that_file": "6a42a21730cf",
+      "meeting_candidates": "92b928b9eb4f",
+      "meeting_english_name": "dd0afa0209e8",
+      "meeting_many_numbered": "7f3c7b14ee19",
+      "missing_file": "2c724c5a0e39",
+      "move_approve": "72cbbbcc3513",
+      "move_reject": "ac02040532d5",
+      "outside_root_write": "acff08f4efff",
+      "overwrite_reject": "037741e4741a",
+      "overwrite_undo": "8d3d9c493865",
+      "preserve_unrelated": "77ff1a908321",
+      "read_document_html": "28d05a3e35af",
+      "read_summary": "30520ac4a7b5",
+      "write_approve": "80ce36fcfe75",
+      "write_reject": "8de0f0794c75"
+    }
+  },
+  "source": "20261028-144953.json",
+  "report": {
+    "axes": {
+      "see": {
+        "score": 15,
+        "measured": true,
+        "tasks": 3
+      },
+      "read": {
+        "score": 34,
+        "measured": true,
+        "tasks": 7
+      },
+      "summarize": {
+        "score": 52,
+        "measured": true,
+        "tasks": 7
+      },
+      "organize": {
+        "score": 57,
+        "measured": true,
+        "tasks": 15
+      },
+      "connect": {
+        "score": 78,
+        "measured": true,
+        "tasks": 3
+      },
+      "finder": {
+        "score": null,
+        "measured": false,
+        "tasks": 2
+      }
+    },
+    "overall": 47,
+    "not_run": [
+      "free_text_create_file"
+    ],
+    "unclassified": [],
+    "invalid_only": [
+      "move_approve"
+    ],
+    "invalid_trials": 10,
+    "stale": []
+  },
+  "guidance": {
+    "weakest_axis": "see",
+    "blocked": {
+      "organize": {
+        "task": "create_directory_undo",
+        "level": 58,
+        "rate": 0.0,
+        "problems": [
+          "local__create_directory: not run"
+        ]
+      }
+    }
+  }
+}

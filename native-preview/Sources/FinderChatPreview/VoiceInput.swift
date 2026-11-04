@@ -8,11 +8,22 @@ final class VoiceInput: ObservableObject {
     static let shared = VoiceInput()
     @Published var recording = false
     @Published var denied = false
+    /// Menu bar switch: off means the right Option key is ignored. Survives restarts.
+    @Published var enabled = UserDefaults.standard.object(forKey: "voiceKeyEnabled") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(enabled, forKey: "voiceKeyEnabled")
+            if !enabled { discard() }
+        }
+    }
     private var recorder: AVAudioRecorder?
     private var monitors: [Any] = []
     private var started = Date()
     private var limit: Task<Void, Never>?
     private var badge: NSPanel?
+    private var meter: Timer?
+    private var loudest: Float = -160
+    /// Peak level (dB) below which a clip is room noise, not speech.
+    private static let speechFloor: Float = -40
 
     /// Right Option is key code 61; the device-dependent bit 0x40 tells it apart from the left one.
     private static let rightOptionKey: UInt16 = 61
@@ -39,17 +50,31 @@ final class VoiceInput: ObservableObject {
             typed(event)
             return event
         }) { monitors.append(local) }
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: typed) {
-            monitors.append(global)
+        // A worktree build listens only while frontmost; main's app hears the key everywhere
+        // except when another Symbio window is in front, so one press never starts two recordings.
+        let global = worktreeLabel == nil
+        let otherSymbioFront = {
+            guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+            return front != NSRunningApplication.current
+                && (front.bundleIdentifier ?? "").hasPrefix("local.voiceaction.finder-chat-preview")
+        }
+        if global, let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { event in
+            if !otherSymbioFront() { typed(event) }
+        }) {
+            monitors.append(monitor)
         }
         // Without Input Monitoring the key-up is lost once another app is frontmost.
         let resign = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in if !CGPreflightListenEventAccess() { VoiceInput.shared.finish() } }
+            // A worktree build never hears the key-up once it is in the background.
+            Task { @MainActor in if !global || !CGPreflightListenEventAccess() { VoiceInput.shared.finish() } }
         }
         monitors.append(resign)
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) {
-            monitors.append(global)
+        if global, let monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { event in
+            // Still let a key-up end a recording that began before another Symbio came forward.
+            if otherSymbioFront() { Task { @MainActor in VoiceInput.shared.finish() } } else { handler(event) }
+        }) {
+            monitors.append(monitor)
         }
     }
 
@@ -66,7 +91,7 @@ final class VoiceInput: ObservableObject {
 
     private func begin() {
         let backend = Backend.shared
-        guard !recording, backend.canSubmit else { return }
+        guard enabled, !recording, backend.canSubmit else { return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: break
         case .notDetermined:
@@ -89,6 +114,16 @@ final class VoiceInput: ObservableObject {
             return
         }
         recorder = new
+        new.isMeteringEnabled = true
+        loudest = -160
+        meter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            Task { @MainActor in
+                let voice = VoiceInput.shared
+                guard let rec = voice.recorder else { return }
+                rec.updateMeters()
+                voice.loudest = max(voice.loudest, rec.peakPower(forChannel: 0))
+            }
+        }
         started = Date()
         recording = true
         showBadge()
@@ -103,6 +138,7 @@ final class VoiceInput: ObservableObject {
         guard recording, let current = recorder else { return }
         recording = false
         badge?.orderOut(nil)
+        meter?.invalidate()
         limit?.cancel()
         recorder = nil
         current.stop()
@@ -113,11 +149,13 @@ final class VoiceInput: ObservableObject {
         guard recording, let current = recorder else { return }
         recording = false
         badge?.orderOut(nil)
+        meter?.invalidate()
         limit?.cancel()
         recorder = nil
         current.stop()
         // A tap shorter than this is an accidental press, not a command.
-        if Date().timeIntervalSince(started) < 0.4 {
+        // Nothing but silence: drop it so no "transcribing" state or wrong text ever appears.
+        if Date().timeIntervalSince(started) < 0.4 || loudest < Self.speechFloor {
             try? FileManager.default.removeItem(at: current.url)
             return
         }

@@ -1,0 +1,80 @@
+{
+  "id": "connect_batch_convert_folder",
+  "family": "file.convert.many",
+  "axis": "connect",
+  "level": 58,
+  "status": "active",
+  "files": {
+    "변환/d1.csv": "name,amount\nitem1,100\n",
+    "변환/d2.csv": "name,amount\nitem2,200\n",
+    "변환/d3.csv": "name,amount\nitem3,300\n",
+    "변환/d4.csv": "name,amount\nitem4,400\n",
+    "변환/d5.csv": "name,amount\nitem5,500\n"
+  },
+  "request": "변환 폴더의 csv 파일을 전부 json으로 바꿔줘",
+  "user": {
+    "approve": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/변환/d1.csv",
+            "target_format": "json"
+          }
+        },
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/변환/d2.csv",
+            "target_format": "json"
+          }
+        },
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/변환/d3.csv",
+            "target_format": "json"
+          }
+        },
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/변환/d4.csv",
+            "target_format": "json"
+          }
+        },
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/변환/d5.csv",
+            "target_format": "json"
+          }
+        }
+      ]
+    },
+    {
+      "text": "다섯 개를 변환했습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "변환/d1.json": "*",
+      "변환/d2.json": "*",
+      "변환/d3.json": "*",
+      "변환/d4.json": "*",
+      "변환/d5.json": "*"
+    },
+    "must_run": [
+      "local__convert_file"
+    ]
+  }
+}

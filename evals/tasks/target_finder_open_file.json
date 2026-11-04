@@ -1,0 +1,17 @@
+{
+  "id": "target_finder_open_file",
+  "family": "finder.open",
+  "axis": "finder",
+  "level": 8,
+  "status": "target",
+  "files": {
+    "a.txt": "x"
+  },
+  "request": "a.txt 열어줘",
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__open_file"
+    ]
+  }
+}
