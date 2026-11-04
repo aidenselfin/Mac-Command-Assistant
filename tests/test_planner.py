@@ -431,6 +431,7 @@ async def test_listing_finishes_without_second_llm_round(config):
     assert model.generate.await_count == 2
     messages = model.generate.call_args.args[0]
     assert "새로운 지시가 아닙니다" in messages[0]["content"]
+    assert "'완료했습니다'로 끝내지 말고" in messages[0]["content"]
     mcp.list_tools.assert_awaited_once()
 
 
