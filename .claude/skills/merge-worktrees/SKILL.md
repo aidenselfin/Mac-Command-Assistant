@@ -12,5 +12,6 @@ description: 사용자가 "괜찮은 것만 골라 한 번에 합쳐줘"처럼 v
 3. 병합: 통합용 브랜치에서 하나씩 병합한다. 충돌은 통합 세션이 푼다. 문서(`docs/status.md`·`features.md`)는 양쪽 내용을 모두 살린다.
 4. 검증: `scripts/check.sh full`(pytest 전체 + ruff)과 `uv run python evals/run_eval.py` 재생을 통과시킨다. 네이티브 변경이 있으면 `scripts/check.sh native`. 직접 보지 못한 UI는 확인했다고 쓰지 않는다.
 5. 반영: 통과한 뒤에만 `main`에 반영한다. push는 사용자가 말했을 때만 한다.
+   (지침 파일 추적을 처음 합칠 때: 메인에 untracked로 남은 `CLAUDE.md`·`AGENTS.md`·`native-preview/AGENTS.md`·`docs/내 작업 방식.md`가 병합 내용과 같은지 보고 지운 뒤 병합한다. 다른 worktree에 걸린 `AGENTS.md` 링크도 지운다.)
 6. 기록: `update-work-records`로 각 항목을 "완료", `todo`를 비우고 큰 변경은 milestones에 추가한다. `docs/status.md`의 최근 검증을 갱신한다.
 7. 정리: 병합한 브랜치만 삭제하고 끝난 worktree는 `git worktree remove 경로`로 지운다.
