@@ -27,6 +27,7 @@
 | **오른쪽 옵션 키 음성 명령** | ✅ 네이티브 앱 | 꾹 누르는 동안 녹음 → Groq Whisper → 일반 `submit` | `VoiceInput.swift` `transcribe.py` `native_bridge.py` | 마이크 권한 필요, 앱 밖 감지는 입력 모니터링 권한 | `test_voice_input.py` `test_native_protocol.py` | 실제 마이크·Groq 호출은 사람 확인 전 | 2026-10-28 |
 | 창이 닫혀 있을 때 선택·승인 칩(칩 크기 통일, 두 번 누르면 녹음 칩 없이 입력창) | ✅ 네이티브 앱 | | `ChoiceChips.swift` `Toast.swift` `VoiceInput.swift` `Backend.swift` | 화면 확인은 병합 후 | | | 2026-11-04 |
 | 능력 점수 벤치마크 | ✅ live 결과로만 | `python evals/benchmark.py` | `evals/benchmark.py` `evals/benchmark.json` | | `test_benchmark.py` `test_eval_runner.py` | 모든 과제의 `axis`·`level`·`status` | 2026-10-28 능력 점수 |
+| 화면 반영 검사(옛 빌드 경고, 창·칩 시나리오 재생) | ✅ | `python3 scripts/ui_check.py status` / `run` | `scripts/ui_check.py` `scripts/ui_scenarios/` `UITest.swift` | 재생 중 몇 초간 창이 뜬다 | `test_native_bridge.py` | 시나리오 3개 | 2026-11-04 |
 | 수정 세션·worktree 도구 | ✅ | | `scripts/vibe.py` | | `test_vibe.py` | | 2026-10-14 병렬 수정 세션 |
 
 과제 이름은 `evals/tasks/*.json` 파일명이다. `status: "target"` 과제(`target_*`)는 아직 없는 능력의 목표이며 `--include-targets` 없이는 실행하지 않는다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.
