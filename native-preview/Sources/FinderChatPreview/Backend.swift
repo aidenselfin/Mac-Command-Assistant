@@ -361,7 +361,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshIcon()
     }
 
-    @objc private func openWindow() {
+    @objc private func openWindow() { Self.showChat() }
+
+    static func showChat() {
         NSApp.activate()
         // The app also owns small helper windows (status item, 64pt stub): pick the chat window by title.
         NSApp.windows.first { $0.title == "Symbio" }?.makeKeyAndOrderFront(nil)
