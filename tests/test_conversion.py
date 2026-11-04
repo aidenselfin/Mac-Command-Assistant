@@ -2,6 +2,7 @@ import json
 import shutil
 import struct
 import sys
+import zipfile
 from unittest.mock import AsyncMock
 
 import pytest
@@ -91,6 +92,28 @@ def test_csv_and_json_round_trip(root):
     assert back.data.decode() == "이름,금액\n점심,12000\n"
 
 
+def hwpx(path, *paragraphs, mimetype=b"application/hwp+zip"):
+    ns = 'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"'
+    body = "".join(f"<hp:p><hp:run><hp:t>{text}</hp:t></hp:run></hp:p>" for text in paragraphs)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", mimetype)
+        archive.writestr("Contents/section0.xml", f"<hs:sec {ns} xmlns:hs='s'>{body}</hs:sec>")
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS PDF tools needed")
+def test_hangul_hwpx_to_pdf(root):
+    hwpx(root / "공문.hwpx", "회의 안내", "일시: 11월 5일")
+    pdf = convert(root, root / "공문.hwpx", "pdf")
+    assert pdf.output.endswith("공문.pdf") and pdf.data.startswith(b"%PDF")
+    text = convert(root, root / "공문.pdf", "txt").data.decode()
+    assert "회의 안내" in text and "11월 5일" in text
+
+
+def _hwpx_not_hangul(root):
+    hwpx(root / "a.hwpx", "x", mimetype=b"application/zip")
+    return {"target_format": "pdf"}, "실제 파일"
+
+
 def _unsupported(root):
     (root / "a.csv").write_text("x")
     return {"target_format": "pdf"}, "지원하지 않는"
@@ -112,7 +135,9 @@ def _output_taken(root):
     return {"target_format": "json", "output": str(root / "out.json")}, "이미 있습니다"
 
 
-@pytest.mark.parametrize("case", [_unsupported, _bad_signature, _json_shape, _output_taken])
+@pytest.mark.parametrize(
+    "case", [_unsupported, _bad_signature, _hwpx_not_hangul, _json_shape, _output_taken]
+)
 def test_conversion_rejections(root, case):
     arguments, message = case(root)
     source = next(p for p in root.iterdir() if p.name.startswith("a."))

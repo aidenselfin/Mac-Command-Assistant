@@ -372,6 +372,7 @@ local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
 | --- | --- |
 | txt·md·rtf·html·doc·docx·odt → txt·rtf·html·doc·docx·odt | `textutil` |
 | txt·md → pdf (서식 없는 글) | `cupsfilter` |
+| hwpx(한글) → pdf (글자만, 그림·표 모양 빠짐) | Python 표준 라이브러리 + `cupsfilter` |
 | pdf → txt | PDFKit (pyobjc) |
 | png·jpeg(jpg)·heic·tiff·gif·bmp 서로 (아이폰 HEIC → JPG·PNG 포함) | `sips` |
 | csv ↔ json | Python 표준 라이브러리 |
