@@ -41,7 +41,6 @@ class FakeView:
         self.requests = []
         self.approval_enabled = []
         self.choices = ()
-        self.rating = (False, None, ())
         self.revealed = []
         self.attachment = None
 
@@ -53,9 +52,6 @@ class FakeView:
 
     def set_choices(self, labels):
         self.choices = labels
-
-    def set_rating(self, visible, score=None, tags=()):
-        self.rating = (visible, score, tags)
 
     def set_status(self, value):
         self.statuses.append(value)
@@ -90,8 +86,6 @@ class FakeAdapter:
         self.undos = 0
         self.cancellations = 0
         self.shutdowns = 0
-        self.ratings = []
-        self.rateable = True
         self.attached, self.detached = [], 0
 
     def attach(self, path):
@@ -100,13 +94,6 @@ class FakeAdapter:
 
     def detach(self):
         self.detached += 1
-
-    def can_rate(self):
-        return self.rateable
-
-    def rate(self, score, tags):
-        self.ratings.append((score, tags))
-        return True
 
     def submit(self, text):
         self.submissions.append(text)
@@ -502,152 +489,6 @@ def test_free_text_still_answers_a_question_with_buttons():
     pick_question(presenter, "narrow_search")
     assert presenter.execute("임시-12번")
     assert adapter.submissions == ["임시-12번"] and view.choices == ()
-
-
-def test_completed_answer_opens_rating_and_next_command_closes_it():
-    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
-    assert view.rating[0] is False
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
-    assert view.rating == (True, None, ())
-    assert presenter.rate(5) and adapter.ratings == [(5, ())]
-    assert view.rating == (True, 5, ())
-    assert not presenter.rate(0) and not presenter.rate(6)
-    assert presenter.execute("다음")
-    assert view.rating[0] is False and not presenter.rate(4)
-
-
-def test_errors_and_questions_cannot_be_rated():
-    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Error("실패")))
-    assert not presenter.rate(5) and adapter.ratings == [] and view.rating[0] is False
-
-
-@pytest.mark.parametrize("score", [1, 2, 3, 4, 5])
-def test_saved_rating_closes_after_high_score_or_one_cause(score):
-    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
-    assert presenter.rate(score)
-    assert view.rating[0]  # scheduling alone does not confirm storage
-    presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (score, ())))
-    if score <= 3:
-        assert view.rating[0]
-        assert presenter.toggle_tag("wrong_file")
-        presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (score, ())))
-        assert view.rating[0]  # a delayed score acknowledgement cannot close the cause picker
-        presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (score, ("wrong_file",))))
-        assert adapter.ratings[-1] == (score, ("wrong_file",))
-    assert not view.rating[0]
-    assert not presenter.rate(5) and not presenter.toggle_tag("too_slow")
-    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
-    assert not view.rating[0]
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("다음 답")))
-    assert view.rating == (True, None, ())
-
-
-def test_failed_rating_stays_open_and_old_success_does_not_close_next_answer():
-    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
-    adapter.rate = lambda *_: False
-    assert not presenter.rate(5)
-    assert view.rating == (True, None, ())
-    adapter.rate = lambda *_: True
-    assert presenter.rate(5)
-    presenter.handle(UIMessage(UIMessageType.NOTICE, "평가를 저장하지 못했어요."))
-    assert view.rating == (True, 5, ())
-    assert presenter.execute("다음")
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("다음 답")))
-    presenter.handle(UIMessage(UIMessageType.RATING_SAVED, (5, ())))
-    assert view.rating == (True, None, ())
-
-
-def test_low_score_collects_causes_and_a_better_score_drops_them():
-    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
-    assert not presenter.toggle_tag("wrong_file")  # nothing rated yet
-    presenter.rate(2)
-    assert presenter.toggle_tag("wrong_file") and presenter.toggle_tag("too_slow")
-    assert presenter.toggle_tag("wrong_file")  # toggled off
-    assert adapter.ratings[-1] == (2, ("too_slow",))
-    assert view.rating == (True, 2, ("too_slow",))
-    presenter.rate(4)
-    assert adapter.ratings[-1] == (4, ()) and not presenter.toggle_tag("other")
-    presenter.rate(1)  # a new low score starts without the old causes
-    assert adapter.ratings[-1] == (1, ())
-
-
-def test_rating_hides_outside_idle():
-    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("답")))
-    presenter.handle(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
-    assert view.rating[0] is False and not presenter.rate(5)
-
-
-class AnsweringModel:
-    async def generate(self, *_args, **_kwargs):
-        from voice_action.planner import ModelTurn
-
-        return ModelTurn("답", [])
-
-
-def test_worker_records_a_rating_for_the_answered_run(config, tmp_path):
-    import sqlite3
-
-    from voice_action.feedback import FeedbackLoop
-
-    messages = queue.Queue()
-    manager, client = FakeManager(), FakeClient()
-    store = tmp_path / "ui-rating.sqlite3"
-    worker = AsyncRuntimeWorker(
-        config,
-        messages,
-        manager_factory=lambda _config: manager,
-        client_factory=lambda _config: client,
-        model_factory=lambda _client, _model_name: AnsweringModel(),
-        feedback_factory=lambda _config, _emit: FeedbackLoop(store),  # built on the worker thread
-    )
-    worker.start()
-    wait_for_message(messages, UIMessageType.STATE)
-    assert worker.submit("질문")
-    done, _ = wait_for_message(messages, UIMessageType.OUTCOME)
-    assert done.value == Completed("답")
-
-    assert worker.rate(2, ("wrong_file",))
-    saved, _ = wait_for_message(messages, UIMessageType.RATING_SAVED)
-    assert saved.value == (2, ("wrong_file",))
-    worker.shutdown()
-
-    rows = sqlite3.connect(store).execute(
-        "SELECT json_extract(payload, '$.score'), json_extract(payload, '$.tags') "
-        "FROM events WHERE kind = 'rating'"
-    ).fetchall()
-    assert rows == [(2, '["wrong_file"]')]
-
-
-def test_worker_says_so_when_a_rating_could_not_be_stored(config):
-    messages = queue.Queue()
-    manager, client = FakeManager(), FakeClient()
-    worker = AsyncRuntimeWorker(
-        config,
-        messages,
-        manager_factory=lambda _config: manager,
-        client_factory=lambda _config: client,
-        model_factory=lambda _client, _model_name: object(),
-    )
-    worker.start()
-    wait_for_message(messages, UIMessageType.STATE)
-
-    assert worker.rate(3, ())  # scheduled, but nothing was answered yet
-    notice, _ = wait_for_message(messages, UIMessageType.NOTICE)
-    worker.shutdown()
-
-    assert "평가를 저장하지 못했어요" in notice.value
-
-
-def test_a_cancel_or_undo_result_offers_no_rating_bar():
-    presenter, adapter, view = presenter_at(RuntimeState.IDLE)
-    adapter.rateable = False
-    presenter.handle(UIMessage(UIMessageType.OUTCOME, Completed("요청을 취소했습니다.")))
-    assert view.rating[0] is False and not presenter.rate(5) and adapter.ratings == []
 
 
 def test_only_a_completed_result_with_changed_files_reveals_them():

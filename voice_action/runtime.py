@@ -102,6 +102,8 @@ RuntimeLog = Callable[[str], None]
 StateObserver = Callable[[StateTransition], None]
 
 
+# `/feedback 내용` is a note to the feedback loop, not a command.
+FEEDBACK_COMMAND = re.compile(r"\s*/feedback(?:\s+|$)", re.IGNORECASE)
 MEMORY_SECONDS = 600  # a follow-up counts only for this long after the answer it follows
 
 
@@ -136,7 +138,6 @@ class RuntimeController:
         self._clock = clock
         self._previous: tuple[Exchange, float] | None = None
         self._request: str | None = None  # the command now being worked on
-        self._answered_run: str | None = None  # the run whose Completed answer can be rated
         self.planner.set_event_observer(self._on_planner_event)
 
     @property
@@ -172,23 +173,8 @@ class RuntimeController:
         """Forget the follow-up context so the next command starts a new conversation."""
         if self._in_flight or self.state is not RuntimeState.IDLE:
             return False
-        self._previous = self._answered_run = self._attachment = None
+        self._previous = self._attachment = None
         return True
-
-    @property
-    def ratable(self) -> bool:
-        """True while the last answer is still the current run, i.e. before the next command."""
-        return (
-            self._feedback is not None
-            and self._answered_run is not None
-            and self._feedback.run_id == self._answered_run
-        )
-
-    async def rate(self, score: int, tags: tuple[str, ...] = ()) -> bool:
-        """Record a 1-5 rating for the last answer. False if there is nothing to rate."""
-        if not self.ratable or self.state is not RuntimeState.IDLE:
-            return False
-        return bool(self._feedback.rating(score, tags))
 
     async def submit(self, text: str) -> RuntimeResult:
         if self._in_flight or self.state not in {
@@ -197,6 +183,8 @@ class RuntimeController:
         }:
             return Busy("다른 명령을 처리 중입니다.", self.state)
 
+        if FEEDBACK_COMMAND.match(text):
+            return self._report(FEEDBACK_COMMAND.sub("", text, count=1))
         self._in_flight = True
         try:
             if self._feedback is not None:
@@ -226,6 +214,17 @@ class RuntimeController:
             raise
         finally:
             self._in_flight = False
+
+    def _report(self, text: str) -> RuntimeResult:
+        """`/feedback 내용`: goes to the feedback loop about the last answer, never the planner.
+        The conversation, attachment and state stay as they were."""
+        if self.state is not RuntimeState.IDLE:
+            return Error("질문에 먼저 답한 뒤 /feedback을 보내 주세요.")
+        if not text.strip():
+            return Error("/feedback 뒤에 고칠 점을 적어 주세요. 예: /feedback 결과가 너무 많아")
+        if self._feedback is None or not self._feedback.user_report(text):
+            return Error("피드백을 저장하지 못했어요. 피드백 기록이 켜져 있는지 확인해 주세요.")
+        return Completed("피드백을 받았어요. 원인을 분석해 반영할게요.")
 
     async def approve_pending(self) -> RuntimeResult:
         if self._in_flight:
@@ -261,7 +260,7 @@ class RuntimeController:
         try:
             if self._feedback is not None:
                 self._feedback.decision("reject", pending.tool_name)
-            return self._finish(self.planner.reject(pending.context), rateable=False)
+            return self._finish(self.planner.reject(pending.context), remember=False)
         except BaseException as exc:
             if self._feedback is not None:
                 self._feedback.exception(exc)
@@ -281,7 +280,7 @@ class RuntimeController:
             if self._feedback is not None:
                 self._feedback.decision("undo")
             outcome = await self.planner.undo_last_write()
-            return self._finish(outcome, rateable=False)
+            return self._finish(outcome, remember=False)
         except BaseException as exc:
             if self._feedback is not None:
                 self._feedback.exception(exc)
@@ -302,7 +301,7 @@ class RuntimeController:
             if self._feedback is not None:  # the user gave up: feedback rule R10 counts it
                 self._feedback.record("cancelled", reason="clarification")
             return self._finish(
-                Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."), rateable=False
+                Completed("요청을 취소했습니다. 파일은 변경하지 않았습니다."), remember=False
             )
 
         typed = pending.context.kind == "free_text"
@@ -342,8 +341,8 @@ class RuntimeController:
         exchange, at = self._previous
         return exchange if self._clock() - at <= MEMORY_SECONDS else None
 
-    def _finish(self, outcome: PlannerOutcome, *, rateable: bool = True) -> PlannerOutcome:
-        """Settle an outcome. Only a real answer is rateable, not a cancel, a reject or an undo."""
+    def _finish(self, outcome: PlannerOutcome, *, remember: bool = True) -> PlannerOutcome:
+        """Settle an outcome. Only a real answer is remembered, not a cancel, reject or undo."""
         if self._feedback is not None:
             self._feedback.outcome(outcome)
         if isinstance(outcome, Clarification):
@@ -361,14 +360,12 @@ class RuntimeController:
         self._pending = None
         self._pending_approval = None
         if isinstance(outcome, Completed):
-            if rateable and self._request:
+            if remember and self._request:
                 files = tuple(dict.fromkeys((*outcome.changed_paths, *outcome.read_paths)))
                 self._previous = (
                     Exchange(self._request, outcome.text, files[:MEMORY_MAX_FILES]),
                     self._clock(),
                 )
-            if self._feedback is not None:
-                self._answered_run = self._feedback.run_id if rateable else None
             self._transition(RuntimeState.DONE, "completed")
             self._transition(RuntimeState.IDLE, "result_observed")
             return outcome

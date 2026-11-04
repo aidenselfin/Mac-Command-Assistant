@@ -22,7 +22,7 @@ def test_every_command_the_bridge_accepts_is_documented():
     actions = set(re.findall(r'action (?:==|in \{)\s*"([a-z_]+)"', BRIDGE))
     groups = re.findall(r"action in \{([^}]*)\}", BRIDGE)
     actions |= set(re.findall(r'"([a-z_]+)"', " ".join(groups)))
-    known = {"submit", "approve", "reject", "cancel", "undo", "attach", "detach", "rate"}
+    known = {"submit", "approve", "reject", "cancel", "undo", "attach", "detach"}
     known |= {"shutdown", "voice", "reset"}
     assert known <= actions
     assert all(f"`{name}`" in DOC for name in actions), "docs/native-protocol.md misses a command"
