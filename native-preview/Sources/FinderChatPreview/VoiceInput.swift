@@ -20,6 +20,10 @@ final class VoiceInput: ObservableObject {
     private var started = Date()
     private var limit: Task<Void, Never>?
     private var badge: NSPanel?
+    private var inputPanel: TypePanel?
+    private var lastPress = Date.distantPast
+    /// Two right-Option presses within this window open the text box instead of recording.
+    private static let doubleTap: TimeInterval = 0.4
     private var meter: Timer?
     private var loudest: Float = -160
     /// Peak level (dB) below which a clip is room noise, not speech.
@@ -71,7 +75,16 @@ final class VoiceInput: ObservableObject {
             .intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
         if flags & Self.rightOptionBit != 0 {
             // Shift/Command/Control already down means a shortcut, not a spoken command.
-            if held == .option { begin() } else { discard() }
+            guard held == .option else { discard(); return }
+            let now = Date()
+            if inputPanel?.isVisible != true, now.timeIntervalSince(lastPress) < Self.doubleTap {
+                lastPress = .distantPast
+                discard()
+                showInput()
+            } else {
+                lastPress = now
+                if inputPanel?.isVisible != true { begin() }
+            }
         } else { finish() }
     }
 
@@ -184,5 +197,71 @@ final class VoiceInput: ObservableObject {
             badge?.setFrameOrigin(NSPoint(x: area.minX + 16, y: area.minY + 16))
         }
         badge?.orderFrontRegardless()
+    }
+
+    /// Second quick tap: the listening pill becomes a text box at the same spot. Return sends, Esc closes.
+    private func showInput() {
+        let size = NSSize(width: 360, height: 44)
+        let panel = inputPanel ?? TypePanel(contentRect: NSRect(origin: .zero, size: size),
+                                            styleMask: [.borderless, .nonactivatingPanel],
+                                            backing: .buffered, defer: false)
+        if inputPanel == nil {
+            panel.level = .statusBar
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = true
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            let pill = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+            pill.material = .hudWindow
+            pill.state = .active
+            pill.wantsLayer = true
+            pill.layer?.cornerRadius = size.height / 2
+            pill.layer?.masksToBounds = true
+            let field = NSTextField(frame: NSRect(x: 20, y: 11, width: size.width - 40, height: 22))
+            field.placeholderString = "Symbio에게 입력…"
+            field.isBordered = false
+            field.drawsBackground = false
+            field.focusRingType = .none
+            field.font = .systemFont(ofSize: 15)
+            field.delegate = panel
+            panel.field = field
+            panel.onDone = { [weak self] text in
+                self?.inputPanel?.orderOut(nil)
+                if let text { Backend.shared.submit(text) }
+            }
+            pill.addSubview(field)
+            panel.contentView = pill
+            inputPanel = panel
+        }
+        badge?.orderOut(nil)
+        panel.field?.stringValue = ""
+        if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            panel.setFrameOrigin(NSPoint(x: area.minX + 16, y: area.minY + 16))
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(panel.field)
+    }
+}
+
+/// Borderless panels refuse key focus by default; the text box needs it to receive typing.
+private final class TypePanel: NSPanel, NSTextFieldDelegate {
+    var field: NSTextField?
+    var onDone: ((String?) -> Void)?
+    override var canBecomeKey: Bool { true }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertNewline(_:)) {
+            let text = (field?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            onDone?(text.isEmpty ? nil : text)
+            return true
+        }
+        if selector == #selector(NSResponder.cancelOperation(_:)) { onDone?(nil); return true }
+        return false
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        orderOut(nil)
     }
 }
