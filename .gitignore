@@ -28,10 +28,7 @@ Final/.venv/
 *.mov
 evals/results/
 
-# AI 규칙 파일은 GitHub에 올리지 않는다 (로컬 전용)
-CLAUDE.md
-AGENTS.md
+# CLAUDE.md·AGENTS.md는 추적한다. 개인용·설정 파일만 제외
 CLAUDE.local.md
-native-preview/AGENTS.md
 .claude/settings.json
 evals/generated/

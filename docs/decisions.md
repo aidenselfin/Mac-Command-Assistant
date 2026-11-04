@@ -9,6 +9,8 @@
 
 - 2026-10-27 GitHub에는 프로그램 파일만 올린다. `CLAUDE.md`·`AGENTS.md`·`native-preview/AGENTS.md`·
   `.claude/settings.json` 같은 AI 규칙 파일은 `.gitignore`로 추적에서 제외하고 로컬에만 둔다(이전 기록에는 남아 있음).
+  → 2026-11-04 뒤집음: `CLAUDE.md`·`AGENTS.md`·`native-preview/AGENTS.md`·`docs/내 작업 방식.md`는 git에 올려 worktree에도 생기게 한다.
+  전역 `~/.claude/CLAUDE.md`는 개인 공통 몇 줄만 두고, Symbio 세션 운영은 저장소 `CLAUDE.md`와 스킬로 옮겼다.
 
 - 2026-10-27 Codex 위임: 설치된 Codex CLI(0.162)에는 `mcp-server` 하위 명령이 없어 MCP 대신
   `codex exec`를 Bash로 부른다(설정 파일 없이 동작). 규칙은 `CLAUDE.md` "Codex 위임". 읽기 검토는 read-only,
