@@ -249,16 +249,18 @@ def test_non_delete_intent_does_not_enable_deletion(text):
     assert not _destructive_request(text)
 
 
-def test_delete_scope_is_the_models_choice_but_needs_a_plain_delete_request(tmp_path):
+def test_delete_scope_allows_named_or_searched_files_only(tmp_path):
     root = tmp_path / "allowed"
     args = {"directory": str(root), "pattern": "*.txt"}
     assert _delete_scope_error(args, "allowed 폴더의 *.txt 파일을 삭제해줘", (root,)) is None
-    assert _delete_scope_error(args, "피그마 파일들 다 지워줘", (root,)) is None
-    assert _delete_scope_error({"paths": [str(root / "b.txt")]}, "a.txt 삭제해줘", (root,)) is None
+    assert _delete_scope_error(args, "다른 폴더의 *.txt 파일을 삭제해줘", (root,))
     assert _delete_scope_error(args, "allowed 폴더의 *.txt 파일을 읽어줘", (root,))
-    assert _delete_scope_error({"directory": str(root)}, "파일을 삭제해줘", (root,))
-    assert _delete_scope_error({"paths": []}, "파일을 삭제해줘", (root,))
     assert _delete_scope_error(args, "allowed 폴더의 *.txt 중 a.txt 제외하고 삭제해줘", (root,))
+    b = str(root / "b.txt")
+    assert _delete_scope_error({"paths": [b]}, "a.txt 삭제해줘", (root,))
+    assert _delete_scope_error({"paths": [b]}, "피그마 파일 지워줘", (root,), seen=(b,)) is None
+    assert _delete_scope_error({"paths": [b]}, "a.txt 삭제해줘", (root,), seen=(b,)) is None
+    assert _delete_scope_error({"paths": []}, "파일을 삭제해줘", (root,))
 
 
 async def test_backup_failure_never_deletes_files(tmp_path, monkeypatch):

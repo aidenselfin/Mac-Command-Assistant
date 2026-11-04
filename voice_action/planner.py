@@ -701,23 +701,33 @@ def _mentioned_directory(directory: Path, text: str, roots: tuple[Path, ...]) ->
 
 
 def _delete_scope_error(
-    arguments: dict, text: str, roots: tuple[Path, ...], web: bool = True
+    arguments: dict, text: str, roots: tuple[Path, ...], web: bool = True,
+    seen: tuple[str, ...] = (),
 ) -> str | None:
-    """Deletion scope is the model's call (found by search); the approval screen confirms it."""
+    """The model may pick what to delete, but only among files the user named or a search found."""
     if not _destructive_request(text) or (web and USER_URL_PATTERN.search(text)):
         return "사용자가 직접 요청한 파일 삭제만 허용합니다. 웹 명령과 삭제를 분리하세요."
+    text = _without_quoted_text(text, action_pattern=DELETE_ACTION_PATTERN)
     if "directory" in arguments:
-        text = _without_quoted_text(text, action_pattern=DELETE_ACTION_PATTERN)
         if re.search(r"제외|빼고|남기|\b(?:except|excluding|keep)\b", text, re.IGNORECASE):
             return "directory·pattern은 제외 조건을 못 씁니다. paths로 파일을 지정하세요."
-        if not isinstance(arguments.get("directory"), str) or not isinstance(
-            arguments.get("pattern"), str
-        ):
+        directory, pattern = arguments.get("directory"), arguments.get("pattern")
+        if not isinstance(directory, str) or not isinstance(pattern, str):
             return "삭제 폴더와 패턴을 지정해야 합니다."
+        if not _mentioned_directory(Path(directory), text, roots):
+            return "일괄 삭제 폴더가 사용자 명령에 명시되지 않았습니다."
+        if pattern == "*":
+            if not re.search(r"모두|전부|전체|모든|\ball\b|\*", text, re.IGNORECASE):
+                return "모든 파일 삭제가 사용자 명령에 명시되지 않았습니다."
+        elif pattern not in text:
+            return "삭제 패턴이 사용자 명령에 명시되지 않았습니다."
         return None
     paths = arguments.get("paths")
     if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
         return "삭제 파일 목록을 지정해야 합니다."
+    for raw in paths:
+        if raw not in seen and not _write_target_is_explicit(raw, text, ()):
+            return "삭제 대상은 사용자가 말한 파일이거나 local__find_files 결과여야 합니다."
     return None
 
 
@@ -1065,6 +1075,7 @@ class _LoopState:
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
     found_paths: tuple[str, ...] = ()
+    seen_paths: tuple[str, ...] = ()
     empty_retries: int = 0  # times an empty final reply was sent back for a real answer
     confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
     find_tried: bool = False  # local__find_files has run in this command
@@ -1927,7 +1938,8 @@ class Planner:
             if state.search_required and not state.search_completed:
                 return "삭제 대상을 추측하지 말고 먼저 local__find_files로 찾으세요."
             return _delete_scope_error(
-                arguments, state.user_text, self.config.allowed_directories, self._web_active
+                arguments, state.user_text, self.config.allowed_directories, self._web_active,
+                state.seen_paths,
             )
         if call.name == FILESYSTEM_WRITE_TOOL and (
             state.user_urls or (self._web_active and USER_URL_PATTERN.search(state.user_text))
@@ -2139,6 +2151,7 @@ class Planner:
     ) -> PlannerOutcome | None:
         """One decision for every file lookup: ask the user, stop, or pin the single match."""
         state.search_completed = True
+        state.seen_paths += tuple(item["path"] for item in response.get("candidates", []))
         state.find_tried = True
         state.find_none = response.get("decision") == "none"
         if response.get("decision") == "single":
