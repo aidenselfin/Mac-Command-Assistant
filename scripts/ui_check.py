@@ -85,6 +85,7 @@ def serve(scenario_path, result_path):
 
     emit({"type": "config", "folders": [str(folder)], "finder_reveal": False})
     emit({"type": "state", "state": "IDLE"})
+    time.sleep(1)  # let launch focus settle: a type box that loses focus closes itself
     for number, step in enumerate(scenario["steps"], 1):
         if "touch" in step:
             for name in step["touch"]:
