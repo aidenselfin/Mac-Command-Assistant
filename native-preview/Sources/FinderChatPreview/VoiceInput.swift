@@ -247,7 +247,7 @@ final class VoiceInput: ObservableObject {
         if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: area.minX + ChipStyle.margin, y: area.minY + ChipStyle.margin))
         }
-        NSApp.activate(ignoringOtherApps: true)
+        // No NSApp.activate: it would raise the chat window too. A nonactivating panel can still take keys.
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(panel.field)
     }
