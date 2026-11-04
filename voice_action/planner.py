@@ -133,7 +133,8 @@ def _operation_requested(tool: str, text: str) -> bool:
 
 def _open_requested(text: str) -> bool:
     plain = _without_quoted_text(text, action_pattern=OPEN_PATTERN)
-    if re.search(r"열지|(?:do\s+not|don't|never)\s+open", plain, re.IGNORECASE):
+    if re.search(r"열지|열어\s*주지|띄우지|띄워\s*주지|(?:열기|열어|띄워)\s*(?:취소|말)|"
+                 r"(?:do\s+not|don't|never)\s+open", plain, re.IGNORECASE):
         return False
     return OPEN_PATTERN.search(plain) is not None
 

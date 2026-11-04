@@ -377,7 +377,8 @@ def test_open_file_is_read_only_and_routed_through_the_guard(tmp_path, monkeypat
     ("text", "offered"),
     [("a.txt 열어줘", True), ("보고서 열어 줘", True), ("a.txt를 기본 앱으로 열기", True),
      ("open a.txt", True), ("a.txt 띄워줘", True),
-     ("a.txt 열어서 요약해줘", False), ("a.txt 열지 마", False), ("a.txt 요약해줘", False)],
+     ("a.txt 열어서 요약해줘", False), ("a.txt 열지 마", False), ("a.txt 띄워주지 마", False),
+     ("a.txt 열기 취소", False), ("a.txt 열어주지 마", False), ("a.txt 요약해줘", False)],
 )
 def test_open_tool_is_offered_only_when_asked_to_open(text, offered):
     from voice_action.planner import _open_requested

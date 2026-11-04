@@ -89,6 +89,9 @@ def open_file(
         raise ToolRejectedError("일반 파일만 열 수 있습니다.")
     if path.suffix.lower() in PROGRAM_SUFFIXES or metadata.st_mode & 0o111:
         raise ToolRejectedError("프로그램·스크립트 파일은 열지 않습니다.")
+    # ponytail: macOS opens by path, so a swap to a link after this check is not caught;
+    # only a process already writing in the folder can race it. Close it with a file handle
+    # if Launch Services ever takes one.
     try:
         from Foundation import NSURL
 
