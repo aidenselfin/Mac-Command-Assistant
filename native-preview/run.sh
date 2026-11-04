@@ -20,10 +20,15 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
     exit 1
 fi
 RUNTIME_FILE="$PROJECT_DIR/.build/runtime.json"
-"$PYTHON_BIN" - "$REPO_DIR" "$PYTHON_BIN" > "$RUNTIME_FILE" <<'PYTHON'
+# Which native-preview code this build holds; the backend warns when the checkout has moved past it.
+APP_TREE=$(git -C "$REPO_DIR" rev-parse HEAD:native-preview 2>/dev/null || true)
+if [[ -n "$(git -C "$REPO_DIR" status --porcelain -- native-preview 2>/dev/null || true)" ]]; then
+    APP_TREE="$APP_TREE-dirty"
+fi
+"$PYTHON_BIN" - "$REPO_DIR" "$PYTHON_BIN" "$APP_TREE" > "$RUNTIME_FILE" <<'PYTHON'
 import json
 import sys
-print(json.dumps({"project": sys.argv[1], "python": sys.argv[2]}))
+print(json.dumps({"project": sys.argv[1], "python": sys.argv[2], "app_tree": sys.argv[3]}))
 PYTHON
 APP_DIR="$PROJECT_DIR/.build/FinderChatPreview.app"
 EXECUTABLE="$APP_DIR/Contents/MacOS/FinderChatPreview"

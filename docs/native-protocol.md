@@ -20,13 +20,18 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 | `rating_saved` | `score` `tags` | 평가 저장됨 |
 | `rejected` | `text` | 현재 상태에서 처리할 수 없는 명령 |
 | `transcript` | `text` `error` | 녹음을 글로 바꾼 결과. `error`가 null이면 Swift가 `text`를 `submit`한다 |
-| `notice` | `text` | 안내 |
+| `notice` | `text` | 안내. 앱이 옛 빌드(`SYMBIO_APP_TREE`가 현재 `native-preview` 트리와 다름)면 시작할 때 재설치 안내 |
 | `stopped` | | 백엔드 종료 |
 
 ## Swift → Python 명령 (`action`)
 
 `submit`(`text`) · `approve`/`reject`(`approval_id`) · `cancel` · `undo` · `reset`(후속 질문 기억 삭제, IDLE에서만) · `attach`(`path`) · `detach` ·
 `rate`(`score`, 선택 `tags`) · `voice`(`path`: 임시 폴더의 `voice-action-voice-*.m4a`, 변환 뒤 지운다) · `shutdown`. 상태와 맞지 않거나 `approval_id`가 다르면 `rejected`.
+
+## 화면 시험 (`scripts/ui_check.py run`)
+
+`SYMBIO_UI_TEST_RUNTIME`이 있을 때만 대본 백엔드가 `_test`(`do`: `snapshot` `option_double_tap` `click_toast` `key` `open_chat` `close_chat` `quit`)를 보낸다.
+앱은 `_done`(`do` `ok`)과 `_snapshot`(`state`: 창·입력 칩·알림·선택 칩·파일 칩 상태)으로 답한다. 평소 앱에서는 무시된다.
 
 ## 새 승인 종류를 추가할 때
 

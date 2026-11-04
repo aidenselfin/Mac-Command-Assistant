@@ -177,6 +177,7 @@ def test_json_stream_rejects_malformed_input_and_closes_worker_on_shutdown(
     monkeypatch.setattr(native_bridge, "load_config", lambda: config)
     monkeypatch.setattr(native_bridge, "AsyncRuntimeWorker", lambda *_: worker)
     monkeypatch.setattr(native_bridge.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(native_bridge, "stale_app_notice", lambda *_: None)
     read_fd, write_fd = os.pipe()
     os.write(write_fd, b'not json\n{"action":"shutdown"}\n')
     os.close(write_fd)
@@ -262,3 +263,23 @@ def test_completed_event_offers_made_files_as_chips_up_to_five(tmp_path):
     assert offered(Completed("저장했어요", tuple(files))) == []
     assert offered(Completed("찾았어요", found_paths=(files[0],)), "회의록 요약해줘") == []
     assert offered(Completed("찾았어요", found_paths=(files[0],)), "회의록 줘") == [files[0]]
+
+
+def test_stale_app_notice_compares_the_built_tree_with_the_checkout(tmp_path):
+    import subprocess
+
+    from voice_action.native_bridge import STALE_APP, stale_app_notice
+
+    (tmp_path / "native-preview").mkdir()
+    (tmp_path / "native-preview" / "App.swift").write_text("v1")
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "v1"], check=True)
+    tree = subprocess.run([*git, "rev-parse", "HEAD:native-preview"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+    assert stale_app_notice(tree, tmp_path) is None
+    assert stale_app_notice(None, tmp_path) == STALE_APP  # built before the version was recorded
+    assert stale_app_notice(tree + "-dirty", tmp_path) == STALE_APP
+    assert stale_app_notice(tree, tmp_path / "not-a-repo") is None  # no git: stay quiet

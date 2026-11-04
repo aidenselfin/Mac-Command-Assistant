@@ -7,6 +7,8 @@ final class FileBox {
     static let shared = FileBox()
     private var panel: NSPanel?
     private var files: [URL] = []
+    /// File names while the box is on screen (UI test snapshot).
+    var shownFiles: [String]? { panel?.isVisible == true ? files.map(\.lastPathComponent) : nil }
 
     /// Empty hides the box; the caller has already checked every file is inside an allowed folder.
     func show(_ files: [URL]) {
