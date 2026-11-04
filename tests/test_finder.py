@@ -275,3 +275,111 @@ def test_no_room_and_a_failing_accessibility_call_never_raise():
     app = Frame(100, 80, 700, 800)
     assert arrange("voice-action-test", app, SCREEN, windows=Broken([])) == "waiting"
 
+
+
+# ---- opening a file in its default app ---------------------------------------------------
+
+from voice_action.mcp_client import ToolRejectedError  # noqa: E402
+
+
+class FakeOpener:
+    def __init__(self, ok=True):
+        self.opened, self.ok = [], ok
+
+    def openURL_(self, url):  # noqa: N802 - the Cocoa method name
+        self.opened.append(unicodedata.normalize("NFC", str(url.path())))
+        return self.ok
+
+
+@pytestmark_mac
+def test_open_file_opens_exactly_the_checked_file(tmp_path):
+    root = tmp_path.resolve()
+    target = root / "한글 메모.txt"
+    target.write_text("x")
+    opener = FakeOpener()
+
+    result = finder.open_file({"path": str(target)}, (root,), workspace=lambda: opener)
+
+    assert result.ok and opener.opened == [unicodedata.normalize("NFC", str(target))]
+
+
+@pytestmark_mac
+@pytest.mark.parametrize("make", ["outside", "link", "missing", "relative", "folder"])
+def test_open_file_refuses_anything_but_a_file_inside_the_allowed_folders(tmp_path, make):
+    (tmp_path / "work").mkdir()
+    root = (tmp_path / "work").resolve()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x")
+    paths = {
+        "outside": str(outside),
+        "link": str(root / "link.txt"),
+        "missing": str(root / "missing.txt"),
+        "relative": "a.txt",
+        "folder": str(root / "sub"),
+    }
+    (root / "link.txt").symlink_to(outside)
+    (root / "sub").mkdir()
+    opener = FakeOpener()
+
+    with pytest.raises(ToolRejectedError):
+        finder.open_file({"path": paths[make]}, (root,), workspace=lambda: opener)
+    assert opener.opened == []
+
+
+@pytestmark_mac
+@pytest.mark.parametrize("name", ["run.command", "x.sh", "a.app", "s.scpt", "w.workflow", "t"])
+def test_open_file_never_runs_programs(tmp_path, name):
+    root = tmp_path.resolve()
+    target = root / name
+    if name.endswith(".app"):
+        (target / "Contents").mkdir(parents=True)  # an app is a folder
+    else:
+        target.write_text("echo hi")
+    if name == "t":
+        target.chmod(0o755)  # no extension, but executable
+    opener = FakeOpener()
+
+    with pytest.raises(ToolRejectedError):
+        finder.open_file({"path": str(target)}, (root,), workspace=lambda: opener)
+    assert opener.opened == []
+
+
+@pytestmark_mac
+def test_open_file_reports_a_refusal_by_macos(tmp_path):
+    root = tmp_path.resolve()
+    (root / "a.txt").write_text("x")
+    result = finder.open_file(
+        {"path": str(root / "a.txt")}, (root,), workspace=lambda: FakeOpener(ok=False)
+    )
+    assert not result.ok
+
+
+def test_open_file_is_read_only_and_routed_through_the_guard(tmp_path, monkeypatch):
+    import asyncio
+
+    from voice_action.risk_guard import RiskGuard, ToolRisk, classify_tool
+
+    assert classify_tool(finder.OPEN_FILE_TOOL) is ToolRisk.READ_ONLY
+    root = tmp_path.resolve()
+    (root / "a.txt").write_text("x")
+    opener = FakeOpener()
+    monkeypatch.setattr(finder, "_workspace", lambda: opener)
+    monkeypatch.setattr(finder.sys, "platform", "darwin")
+
+    guard = RiskGuard(gateway=None, roots=(root,))
+    arguments = {"path": str(root / "a.txt")}
+    result = asyncio.run(guard.execute_read_only(finder.OPEN_FILE_TOOL, arguments))
+
+    assert result.ok and len(opener.opened) == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "offered"),
+    [("a.txt 열어줘", True), ("보고서 열어 줘", True), ("a.txt를 기본 앱으로 열기", True),
+     ("open a.txt", True), ("a.txt 띄워줘", True),
+     ("a.txt 열어서 요약해줘", False), ("a.txt 열지 마", False), ("a.txt 요약해줘", False)],
+)
+def test_open_tool_is_offered_only_when_asked_to_open(text, offered):
+    from voice_action.planner import _open_requested
+
+    assert _open_requested(text) is offered

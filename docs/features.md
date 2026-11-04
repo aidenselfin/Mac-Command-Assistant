@@ -8,6 +8,7 @@
 | 목록·읽기·요약 | ✅ | `폴더 파일 목록 보여줘` `test1.md 요약해줘` | `planner.py` + filesystem MCP | 읽기(자동) | `test_planner.py` `test_integration_filesystem.py` | `read_summary` `preserve_unrelated` | |
 | 파일 찾기 | ✅ | `회의록 요약해줘` | `file_search.py` | 읽기 | `test_file_search.py` `test_find_files_flow.py` | `find_*` `meeting_*` `clarify_cancel` `missing_file` | 2026-10-07 파일 검색 |
 | 크기·날짜 목록 | ✅ | `가장 용량이 큰 파일이 뭐야?` | `file_search.py`(`list_files`) | 읽기 | `test_list_files.py` `test_find_files_flow.py` | `target_see_*` `target_finder_sort_*` `target_finder_disk_usage` `target_read_latest_version` | 2026-10-28 크기·날짜 목록 |
+| **파일 열기(기본 앱)** | ✅ | `a.txt 열어줘` `회의 메모 열어줘` | `finder.py`(`open_file`) `planner.py`(열기 요청일 때만 노출) | 읽기(자동, 프로그램·스크립트·앱은 거부) | `test_finder.py` | `target_finder_open_file` `target_connect_open_in_app` `open_file_in_subfolder` `neg_open_*` | 2026-11-04 파일 열기 |
 | 쓰기·덮어쓰기 | ✅ | `result.txt에 저장해줘` | `planner.py` `risk_guard.py` | 쓰기(승인) | `test_risk_guard.py` `test_integration_undo.py` | `write_*` `overwrite_*` `outside_root_write` | |
 | 삭제(단일·패턴) | ✅ | `*.txt 모두 삭제해줘` | `deletion.py` | 쓰기(승인·백업) | `test_deletion.py` | `delete_*` `attach_delete` `neg_delete_too_much` | |
 | **이동·복사·폴더 생성** | ✅ | `보고서를 보관 폴더로 옮겨줘` | `file_operations.py` | 쓰기(승인·Undo) | `test_file_operations.py` | `move_*` `create_directory_undo` | 2026-10-14 파일 정리 도구 |

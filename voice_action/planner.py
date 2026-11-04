@@ -32,6 +32,7 @@ from voice_action.file_search import (
     LIST_FILES_TOOL,
     clarification_spec,
 )
+from voice_action.finder import OPEN_DEFINITION, OPEN_FILE_TOOL
 from voice_action.mcp_client import (
     TRUNCATION_MARKER,
     MCPError,
@@ -114,6 +115,10 @@ MOVE_PATTERN = re.compile(
     r"(?<![\w./-])(?:move|rename)(?![\w./-])", re.IGNORECASE
 )
 COPY_PATTERN = re.compile(r"복사(?=$|\s|해|하|할|를|줘)|(?<![\w./-])copy(?![\w./-])", re.IGNORECASE)
+# "열어줘", "기본 앱으로 열기", "open a.txt"; "열어서 요약해줘" only wants the content.
+OPEN_PATTERN = re.compile(
+    r"열어\s*(?:줘|주|봐|달)|열기|띄워|(?<![\w./-])open(?![\w./-])", re.IGNORECASE
+)
 MKDIR_PATTERN = re.compile(r"(?:폴더|디렉터리).*?(?:만들|생성)|\bmkdir\b", re.IGNORECASE)
 
 
@@ -124,6 +129,13 @@ def _operation_requested(tool: str, text: str) -> bool:
                  r"(?:do\s+not|don't|never)\s+(?:move|rename|copy|mkdir)", plain, re.IGNORECASE):
         return False
     return pattern.search(plain) is not None
+
+
+def _open_requested(text: str) -> bool:
+    plain = _without_quoted_text(text, action_pattern=OPEN_PATTERN)
+    if re.search(r"열지|(?:do\s+not|don't|never)\s+open", plain, re.IGNORECASE):
+        return False
+    return OPEN_PATTERN.search(plain) is not None
 
 
 class ToolLoopLimitError(PlannerError):
@@ -770,9 +782,10 @@ def _wants_content(text: str) -> bool:
 
 
 def _acts_without_reading(text: str) -> bool:
-    """Delete and conversion name their own target, so a chosen file need not be read first."""
+    """Delete, conversion and opening name their own target: a chosen file need not be read."""
     return bool(_destructive_request(text) or CONVERSION_REQUEST_PATTERN.search(text)
-                or _operation_requested(MOVE_TOOL, text) or _operation_requested(COPY_TOOL, text))
+                or _operation_requested(MOVE_TOOL, text) or _operation_requested(COPY_TOOL, text)
+                or _open_requested(text))
 
 
 RANKED_PICK_PATTERN = re.compile(
@@ -1276,6 +1289,8 @@ class Planner:
                 tools = [tool for tool in tools if tool.name != FILESYSTEM_SEARCH_TOOL]
             if CONVERSION_REQUEST_PATTERN.search(user_text):
                 tools.append(CONVERT_DEFINITION)
+            if self.config.allowed_directories and _open_requested(user_text):
+                tools.append(OPEN_DEFINITION)
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
         resolution_rule = f"\n확정된 사용자 답변: {resolution}" if resolution else ""
         memory_rule = _memory_block(previous) if previous is not None else ""
@@ -1289,6 +1304,8 @@ class Planner:
                     "도구는 요청별로 제공되므로 이번 목록에 없다고 앱 전체에 기능이 없다고 "
                     "말하지 마세요. 이동은 local__move_file, 복사는 local__copy_file, "
                     "폴더 생성은 local__create_directory를 사용하세요. "
+                    "파일을 열어 달라고 하면 찾은 파일을 local__open_file로 기본 앱에서 "
+                    "여세요. "
                     "폴더 이름이 요청에 있고 허용 루트가 하나뿐이면 위치를 묻지 말고 "
                     "그 루트 안에 바로 만드세요. 승인은 앱이 받으니 '만들까요' 같은 "
                     "확인 질문은 하지 마세요. "
@@ -2008,13 +2025,16 @@ class Planner:
         ):
             # Checked before approval, so a resumed approval needs no copy of this state.
             return "고른 후보 파일을 읽기 전에는 파일을 바꿀 수 없습니다."
-        if call.name in CONTENT_READ_TOOLS and state.single_search_candidate is not None:
+        if (
+            call.name in CONTENT_READ_TOOLS | {OPEN_FILE_TOOL}
+            and state.single_search_candidate is not None
+        ):
             try:
                 requested = await self._gateway.validate_result_path(arguments.get("path"))
             except (MCPError, OSError):
                 requested = None
             if requested is None or requested != Path(state.single_search_candidate):
-                return "검증된 단일 후보 파일만 읽을 수 있습니다."
+                return "검증된 단일 후보 파일만 읽거나 열 수 있습니다."
         return None
 
     async def _execute_read_only(
