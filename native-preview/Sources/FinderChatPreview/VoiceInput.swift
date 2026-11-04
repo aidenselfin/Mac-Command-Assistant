@@ -80,10 +80,11 @@ final class VoiceInput: ObservableObject {
             // Shift/Command/Control already down means a shortcut, not a spoken command.
             guard held == .option else { discard(); return }
             let now = Date()
-            if inputPanel?.isVisible != true, now.timeIntervalSince(lastPress) < Self.doubleTap {
+            if now.timeIntervalSince(lastPress) < Self.doubleTap {
                 lastPress = .distantPast
                 discard()
-                showInput()
+                // Second double tap puts the type box away again.
+                if inputPanel?.isVisible == true { inputPanel?.orderOut(nil) } else { showInput() }
             } else {
                 lastPress = now
                 if inputPanel?.isVisible != true { begin() }

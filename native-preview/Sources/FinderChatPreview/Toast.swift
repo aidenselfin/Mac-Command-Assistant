@@ -67,6 +67,12 @@ private extension NSBezierPath {
     }
 }
 
+/// A chip background that opens the chat window when clicked.
+private final class ClickableEffectView: NSVisualEffectView {
+    var onClick: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onClick?() }
+}
+
 /// Small always-on-top note at the bottom-left of the screen: what was heard, asked and answered.
 /// Plain AppKit like the listening pill (an NSHostingView in a borderless panel crashed).
 @MainActor
@@ -155,9 +161,9 @@ final class Toast {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let box = NSVisualEffectView(frame: panel.contentRect(forFrameRect: panel.frame))
+        let box = ClickableEffectView(frame: panel.contentRect(forFrameRect: panel.frame))
+        box.onClick = { AppDelegate.showChat() }
         box.material = .hudWindow
         box.state = .active
         box.autoresizingMask = [.width, .height]
