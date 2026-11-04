@@ -509,7 +509,9 @@ class FeedbackLoop:
             return False
         self.run_id = self.run_id or uuid.uuid4().hex  # nothing answered yet: its own run
         signature = f"user:{self._sig(text, 60)}"
-        if not self.record("user_feedback", signature=signature, text=self._text(text)):
+        if not self.record(
+            "user_feedback", signature=signature, text=self._text(text, FIELD_CHARS)
+        ):
             return False
         self._queue("U1", signature)
         return True

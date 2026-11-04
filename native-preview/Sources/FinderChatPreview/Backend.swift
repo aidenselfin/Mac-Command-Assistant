@@ -261,7 +261,9 @@ final class Backend: ObservableObject {
             pending = true
             choices = []
             // `/feedback 내용` is a note about the last answer: the attachment waits for a real command.
-            if !text.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("/feedback") { attachment = nil }
+            if text.range(of: #"^\s*/feedback(\s|$)"#, options: [.regularExpression, .caseInsensitive]) == nil {
+                attachment = nil
+            }
             dragFiles = []
             append("user", text)
             Toast.shared.thinking("생각하는 중…")

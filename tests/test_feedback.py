@@ -255,7 +255,7 @@ async def test_user_feedback_is_analyzed_at_once_with_the_last_run_as_evidence(t
     loop.user_input("사진 찾아줘", new_run=True)
     await model.generate([], [], allow_tools=True)
     run = loop.run_id
-    assert loop.user_report("  검색 결과가 너무 많아, 수정해줘 ")
+    assert loop.user_report("  검색 결과가 너무 많아, 수정해줘 " + "끝까지 저장" * 60)
     assert loop.db.execute(
         "SELECT run_id FROM events WHERE kind = 'user_feedback'"
     ).fetchall() == [(run,)]
@@ -263,6 +263,7 @@ async def test_user_feedback_is_analyzed_at_once_with_the_last_run_as_evidence(t
     assert [rule for rule, _ in analyzer.calls] == ["U1"]  # one report is enough
     bundle = analyzer.calls[0][1]
     assert "사진 찾아줘" in bundle and "검색 결과가 너무 많아" in bundle
+    assert ("끝까지 저장" * 60) in bundle  # a long note is kept whole
     assert any("분석 완료 U1" in line for line in emitted)
 
 
