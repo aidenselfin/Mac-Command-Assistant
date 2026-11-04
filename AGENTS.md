@@ -3,6 +3,7 @@ Symbio: 자연어 명령(글·음성)을 LLM(OpenRouter/Groq/OpenAI)이 고정�
 실행하는 안전 중심 Python 앱이다. 음성은 오른쪽 ⌥를 누르고 말하면 Whisper로 글로 바뀐다.
 화면은 SwiftUI 네이티브 앱(`native-preview/`) 하나다. CLI·Tk 화면과 `--text`는 제거했고 `main.py`는 lesson 관리만 한다.
 
+앱 이름·창 제목·문서에는 항상 Symbio를 쓴다(저장소 폴더 이름 voice-action-AI와 다름).
 작업 방식의 기준은 `docs/내 작업 방식.md`다. 세션 운영(응답 형식·작업 순서·기록·위임)은 `CLAUDE.md`가 맡고,
 이 파일은 Symbio 코드를 다루는 규칙만 둔다.
 
