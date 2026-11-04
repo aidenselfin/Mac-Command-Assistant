@@ -48,7 +48,7 @@ Symbio: 자연어 명령(글·음성)을 LLM(OpenRouter/Groq/OpenAI)이 고정�
 
 # worktree와 병합
 - 메인 폴더(`~/voice-action-AI`, `main`)는 사용자가 앱을 실행하는 곳이다. 코드는 전용 worktree에서만 고치고, 메인에서 브랜치를 바꾸지 않는다.
-  지침 파일(이 파일·`CLAUDE.md`·`docs/내 작업 방식.md`·스킬 설명)만 메인에서 직접 고칠 수 있다.
+  지침 파일(이 파일·`native-preview/AGENTS.md`·`CLAUDE.md`·`docs/내 작업 방식.md`·스킬 설명)만 메인에서 직접 고칠 수 있다.
 - 한 폴더에 수정 세션은 하나다. 여러 세션을 동시에 돌리려면 세션마다 worktree를 따로 만든다.
 - 만들기: `python3 scripts/vibe.py worktree --name 작업명` → `../voice-action-AI-worktrees/작업명`에 브랜치 `work/작업명`(기준 `main`).
   `config.json`·`.voice-action/config.env`·`node_modules`는 메인 폴더를 가리키는 링크로 연결된다. 그 폴더에서 `uv sync --locked`로 `.venv`를 만든다.
