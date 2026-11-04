@@ -55,6 +55,8 @@ ERROR_REPEAT_COUNT, ERROR_WINDOW = 3, 86400
 RETRY_COUNT, RETRY_WINDOW, RETRY_RATIO = 3, 600, 0.8
 UNDO_WINDOW = 300
 # ponytail: guesses for the 10-call limit; tune against real runs.
+FAILURE_DIR = "failure-tasks"  # next to the feedback DB; run_eval --live reads it
+LIST_TOOLS = {"filesystem__list_directory", "local__list_files"}
 WASTE_CALLS = 6  # R8: model calls in one run
 SEARCH_CALLS = 4  # R9: search tool calls in one run
 SEARCH_TOOLS = ("local__find_files", "filesystem__search_files")
@@ -737,10 +739,44 @@ class FeedbackLoop:
             self.run_id = None
         return queued
 
+    def _failure_tasks(self, runs: tuple[str, ...]) -> None:
+        """Keep the exact words of a failed folder-listing request as a live eval task, so the
+        next evaluation asks the model what the user really asked. Other requests have no answer
+        a grader can know in advance, so they are skipped. Never raises."""
+        try:
+            for run in runs:
+                text, tools = "", set()
+                for kind, payload in self._rows(
+                    "SELECT kind, payload FROM events WHERE run_id = ? "
+                    "AND kind IN ('user_input', 'llm_response') ORDER BY id", run,
+                ):
+                    data = _load(payload) or {}
+                    if kind == "user_input":
+                        text = text or data.get("text") or ""
+                    else:
+                        tools |= {c.get("name") for c in data.get("tool_calls") or []}
+                if not text or not tools & LIST_TOOLS:
+                    continue
+                folder = self.path.parent / FAILURE_DIR
+                target = folder / f"failure_{hashlib.sha256(text.encode()).hexdigest()[:8]}.json"
+                if target.exists():
+                    continue
+                folder.mkdir(parents=True, exist_ok=True)
+                files = ("a.txt", "b.md", "c.csv")
+                task = {
+                    "id": target.stem, "family": "file.list", "axis": "see", "status": "active",
+                    "source": "failure", "files": dict(zip(files, "123", strict=True)),
+                    "request": text, "expect": {"files": {}, "reply_contains": list(files)},
+                }
+                target.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            self._warn()
+
     def _queue(self, rule: str, signature: str, evidence: tuple[str, ...] = ()) -> None:
         now, origin = self.clock(), self.run_id
         # Pinned now: by the time the task runs the user may have started another command.
         evidence = tuple(dict.fromkeys((*evidence, origin))) if origin else tuple(evidence)
+        self._failure_tasks(evidence)
         with self.db:
             for lesson_id, _text in self._rows(
                 "SELECT id, text FROM lessons WHERE signature = ? AND active = 1", signature
