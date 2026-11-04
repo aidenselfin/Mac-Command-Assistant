@@ -41,9 +41,3 @@ Stop 훅(`check-reply-style.py`)이 어기면 다시 쓰게 한다.
 
 ## 기록 (강제는 훅)
 - 코드나 지침을 고치기 전에 `~/.claude/voice-action/worklog.json`에 자기 항목(`worktrees["<키>"]` 또는 환경 개선은 `env["<키>"]`)을 만들고 세션 제목도 같게 한다. 없으면 훅 `require-worklog.py`가 막는다. 세부 필드는 `update-work-records`.
-
-## 하위 세션 분담 (상위 세션이 `start_session`으로 일을 나눌 때)
-- 사용자는 상위 세션하고만 대화한다. 상위가 요청을 하위에 `SendMessage`로 넘기고, 하위의 질문·결과도 상위가 받아 전한다.
-- git 파일을 고치는 하위 세션은 항상 자기 worktree·브랜치(`use_worktree: true`). 공유는 읽기 전용 조사만.
-- 병렬은 서로 다른 파일 과제만. 상위가 과제별 파일 목록을 겹치지 않게 정해 브리프에 적는다.
-- 하위 세션은 자기 기록 항목에 `parent`를 적고, `docs/status.md`는 고치지 않는다. 병합은 상위(통합) 세션 한 곳에서, 병합 전 `git diff`와 테스트를 직접 확인한다.
