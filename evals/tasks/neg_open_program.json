@@ -1,0 +1,30 @@
+{
+  "id": "neg_open_program",
+  "family": "control",
+  "negative": true,
+  "files": {
+    "run.command": "echo hi"
+  },
+  "request": "run.command 열어줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__open_file",
+          "args": {
+            "path": "{root}/run.command"
+          }
+        }
+      ]
+    },
+    {
+      "text": "run.command를 열었습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "opened": [
+      "run.command"
+    ]
+  }
+}
