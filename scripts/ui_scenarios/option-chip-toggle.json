@@ -1,0 +1,10 @@
+{
+ "about": "오른쪽 옵션 두 번으로 입력 칩을 열고 닫는다, 알림 칩을 누르면 대화 창이 열린다",
+ "steps": [
+  {"do": "option_double_tap", "expect": {"input_visible": true}},
+  {"do": "option_double_tap", "expect": {"input_visible": false}},
+  {"do": "close_chat", "expect": {"chat_visible": false}},
+  {"emit": {"type": "notice", "text": "알림"}, "expect": {"toast": "알림"}},
+  {"do": "click_toast", "expect": {"chat_visible": true}}
+ ]
+}

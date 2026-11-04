@@ -121,6 +121,10 @@ final class Toast {
         scheduleHide(seconds: max(5, Double(shown.count) / 12))
     }
 
+    /// What the note says while it is on screen (UI test snapshot).
+    var shownText: String? { panel?.isVisible == true ? label.stringValue : nil }
+    var panelWindow: NSWindow? { panel }
+
     /// The choice chips carry the question themselves, so the note must not sit under them.
     func dismiss() { hide?.cancel(); panel?.orderOut(nil) }
 

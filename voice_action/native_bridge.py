@@ -5,6 +5,7 @@ import os
 import queue
 import selectors
 import signal
+import subprocess
 import sys
 import threading
 import uuid
@@ -67,6 +68,19 @@ def offer_paths(changed, found, wants_file):
     """Drag-chip files: what the command made or edited, else the found file if it was asked for."""
     paths = [path for path in (changed or (found if wants_file else ())) if os.path.isfile(path)]
     return paths if len(paths) <= OFFER_LIMIT else []
+
+
+STALE_APP = "화면 앱이 최신 코드보다 옛 빌드예요. native-preview/install-app.sh를 다시 실행하세요."
+
+
+def stale_app_notice(built, project):
+    """Warn when the screen app holds older native-preview code than the checkout it runs from."""
+    try:
+        current = subprocess.run(["git", "-C", str(project), "rev-parse", "HEAD:native-preview"],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return STALE_APP if current and built != current else None
 
 
 class NativeBridge:
@@ -264,6 +278,10 @@ def main():
     signal.signal(signal.SIGINT, stop)
     emit({"type": "config", "folders": [str(path) for path in config.allowed_directories],
           "finder_reveal": config.finder_reveal})
+    notice = stale_app_notice(os.environ.get("SYMBIO_APP_TREE"), os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    if notice:
+        emit({"type": "notice", "text": notice})
     worker.start()
     # Read bytes ourselves: buffered readline can leave the next JSON message invisible to select.
     buffered = b""
