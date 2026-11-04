@@ -264,7 +264,8 @@ def _hwpx_text(data: bytes) -> bytes:
     """Paragraph text of every section, in order; tables come out one cell per line."""
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            if archive.read("mimetype").strip() != b"application/hwp+zip":
+            mimetype = archive.getinfo("mimetype")
+            if mimetype.file_size > 64 or archive.read(mimetype) != b"application/hwp+zip":
                 raise ToolRejectedError("확장자와 실제 파일 형식이 다릅니다.")
             sections = sorted(
                 (info for info in archive.infolist()
@@ -278,7 +279,10 @@ def _hwpx_text(data: bytes) -> bytes:
                 raise ToolRejectedError("한글 문서 내용이 너무 큽니다.")
             lines = []
             for info in sections:
-                tree = ElementTree.fromstring(archive.read(info))
+                xml = archive.read(info)
+                if b"<!DOCTYPE" in xml:  # entities could inflate past the size bound
+                    raise ToolRejectedError("한글(hwpx) 파일을 읽을 수 없습니다.")
+                tree = ElementTree.fromstring(xml)
                 for paragraph in tree.iter(f"{HWPX_PARAGRAPH}p"):
                     lines.append("".join(
                         "".join(text.itertext())

@@ -114,6 +114,13 @@ def _hwpx_not_hangul(root):
     return {"target_format": "pdf"}, "실제 파일"
 
 
+def _hwpx_entities(root):
+    hwpx(root / "a.hwpx", "x")
+    with zipfile.ZipFile(root / "a.hwpx", "a") as archive:
+        archive.writestr("Contents/section1.xml", '<!DOCTYPE x [<!ENTITY e "y">]><x/>')
+    return {"target_format": "pdf"}, "읽을 수 없습니다"
+
+
 def _unsupported(root):
     (root / "a.csv").write_text("x")
     return {"target_format": "pdf"}, "지원하지 않는"
@@ -136,7 +143,8 @@ def _output_taken(root):
 
 
 @pytest.mark.parametrize(
-    "case", [_unsupported, _bad_signature, _hwpx_not_hangul, _json_shape, _output_taken]
+    "case",
+    [_unsupported, _bad_signature, _hwpx_not_hangul, _hwpx_entities, _json_shape, _output_taken],
 )
 def test_conversion_rejections(root, case):
     arguments, message = case(root)
