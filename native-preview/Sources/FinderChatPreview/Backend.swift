@@ -24,8 +24,8 @@ final class Backend: ObservableObject {
     @Published var state = "STARTING"
     @Published var tool = ""
     @Published var folders: [String] = []
-    @Published var choices: [String] = []
-    @Published var approval: Approval?
+    @Published var choices: [String] = [] { didSet { syncChips() } }
+    @Published var approval: Approval? { didSet { syncChips() } }
     @Published var attachment: String?
     // The one found file, offered as a chip the user drags out; "파일 줘" also floats it over other apps.
     @Published var dragFile: URL? { didSet { if dragFile == nil { FileBox.shared.show(nil) } } }
@@ -43,6 +43,40 @@ final class Backend: ObservableObject {
     private var session = UUID()
 
     var running: Bool { process != nil }
+
+    // canBecomeMain: the menu-bar item's own window is visible but is not the chat
+    private var chatShown: Bool {
+        NSApp.isActive && NSApp.windows.contains { $0.isVisible && $0.canBecomeMain && !($0 is NSPanel) }
+    }
+
+    /// With the chat window closed or behind another app, a pending choice or approval becomes chips.
+    private func syncChips() {
+        guard !chatShown, !pending, state != "STOPPED" else { ChoiceChips.shared.hide(); return }
+        if let approval {
+            let target = approval.targets.first.map { ($0 as NSString).lastPathComponent } ?? approval.target
+            Toast.shared.dismiss()
+            ChoiceChips.shared.show("\(approvalTitle(approval.operation)) · \(target)", [
+                ("승인", { [weak self] in self?.decide(true) }),
+                ("취소", { [weak self] in self?.decide(false) }),
+            ])
+        } else if !choices.isEmpty {
+            let question = messages.last(where: { $0.role == "assistant" })?.text ?? "골라 주세요"
+            Toast.shared.dismiss()
+            ChoiceChips.shared.show(question, choices.enumerated().map { index, label in
+                (label, { [weak self] in self?.submit("\(index + 1)번") })
+            })
+        } else { ChoiceChips.shared.hide() }
+    }
+
+    private func approvalTitle(_ operation: String) -> String {
+        switch operation {
+        case "delete": "파일 삭제"
+        case "move": "파일 이동"
+        case "copy": "파일 복사"
+        case "mkdir": "폴더 생성"
+        default: "파일 변경"
+        }
+    }
 
     var canSubmit: Bool {
         online && !pending && ["IDLE", "WAITING_USER_INPUT"].contains(state)
@@ -128,12 +162,12 @@ final class Backend: ObservableObject {
                 online = true
             case "tool": tool = value["name"] as? String ?? ""
             case "approval":
-                pending = false
                 approval = try? JSONDecoder().decode(Approval.self, from: line)
-            case "clarification":
                 pending = false
-                choices = value["choices"] as? [String] ?? []
+            case "clarification":
                 append("assistant", text)
+                choices = value["choices"] as? [String] ?? []
+                pending = false
             case "completed", "error":
                 pending = false
                 approval = nil
@@ -151,10 +185,7 @@ final class Backend: ObservableObject {
                             dragFile = url
                             // spoken from another app, or from the type box with the chat window closed
                             // canBecomeMain: the menu-bar item's own window is visible but is not the chat
-                            let chatShown = NSApp.windows.contains {
-                                $0.isVisible && $0.canBecomeMain && !($0 is NSPanel)
-                            }
-                            if !NSApp.isActive || !chatShown { FileBox.shared.show(url) }
+                            if !chatShown { FileBox.shared.show(url) }
                         }
                     }
                 }

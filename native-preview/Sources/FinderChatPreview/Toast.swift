@@ -1,6 +1,17 @@
 import AppKit
 import QuartzCore
 
+/// Shared look of every floating chip (listening, type box, note, file box, choices) so they line up.
+enum ChipStyle {
+    static let width: CGFloat = 360
+    static let height: CGFloat = 44
+    static let radius: CGFloat = 14
+    static let margin: CGFloat = 16
+    static let gap: CGFloat = 8
+    /// Bottom of the note/choice stack: it sits above the 44pt listening/type chip.
+    static let stackY: CGFloat = margin + height + gap
+}
+
 /// Small spinning ring (track + rotating arc) shown while the model is working.
 private final class SpinnerView: NSView {
     private let arc = CAShapeLayer()
@@ -64,7 +75,7 @@ final class Toast {
     private var panel: NSPanel?
     private let label = NSTextField(wrappingLabelWithString: "")
     private var hide: Task<Void, Never>?
-    private static let width: CGFloat = 320
+    private static let width = ChipStyle.width
 
     private let spinner = SpinnerView(frame: NSRect(x: 12, y: 0, width: 18, height: 18))
     private let wait = NSTextField(labelWithString: "")
@@ -104,6 +115,9 @@ final class Toast {
         scheduleHide(seconds: max(5, Double(shown.count) / 12))
     }
 
+    /// The choice chips carry the question themselves, so the note must not sit under them.
+    func dismiss() { hide?.cancel(); panel?.orderOut(nil) }
+
     private func scheduleHide(seconds: Double) {
         guard let panel else { return }
         hide?.cancel()
@@ -128,8 +142,8 @@ final class Toast {
         spinner.frame.origin = NSPoint(x: 12, y: 10)
         wait.frame = NSRect(x: 38, y: 9, width: Self.width - 50, height: 18)
         if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
-            // Sits above the "listening" pill (30pt tall at the same corner).
-            panel.setFrame(NSRect(x: area.minX + 16, y: area.minY + 56, width: Self.width, height: height), display: true)
+            // Sits above the "listening" chip (same width, same corner).
+            panel.setFrame(NSRect(x: area.minX + ChipStyle.margin, y: area.minY + ChipStyle.stackY, width: Self.width, height: height), display: true)
         }
         panel.orderFrontRegardless()
     }
@@ -148,7 +162,7 @@ final class Toast {
         box.state = .active
         box.autoresizingMask = [.width, .height]
         box.wantsLayer = true
-        box.layer?.cornerRadius = 10
+        box.layer?.cornerRadius = ChipStyle.radius
         box.layer?.masksToBounds = true
         label.font = .systemFont(ofSize: 12)
         label.maximumNumberOfLines = 6

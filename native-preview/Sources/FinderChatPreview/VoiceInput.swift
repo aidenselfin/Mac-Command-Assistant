@@ -20,6 +20,9 @@ final class VoiceInput: ObservableObject {
     private var started = Date()
     private var limit: Task<Void, Never>?
     private var badge: NSPanel?
+    private var badgeDelay: Task<Void, Never>?
+    /// The listening chip waits this long, so a quick double tap goes straight to the type box.
+    private static let badgeWait: Duration = .milliseconds(220)
     private var inputPanel: TypePanel?
     private var lastPress = Date.distantPast
     /// Two right-Option presses within this window open the text box instead of recording.
@@ -125,7 +128,11 @@ final class VoiceInput: ObservableObject {
         }
         started = Date()
         recording = true
-        showBadge()
+        badgeDelay?.cancel()
+        badgeDelay = Task { @MainActor in
+            try? await Task.sleep(for: Self.badgeWait)
+            if !Task.isCancelled, recording { showBadge() }
+        }
         // Safety net: a missed key-up (app switched without Input Monitoring) must not record forever.
         limit = Task { @MainActor in
             try? await Task.sleep(for: .seconds(30))
@@ -136,6 +143,7 @@ final class VoiceInput: ObservableObject {
     func discard() {
         guard recording, let current = recorder else { return }
         recording = false
+        badgeDelay?.cancel()
         badge?.orderOut(nil)
         meter?.invalidate()
         limit?.cancel()
@@ -147,6 +155,7 @@ final class VoiceInput: ObservableObject {
     fileprivate func finish() {
         guard recording, let current = recorder else { return }
         recording = false
+        badgeDelay?.cancel()
         badge?.orderOut(nil)
         meter?.invalidate()
         limit?.cancel()
@@ -165,7 +174,7 @@ final class VoiceInput: ObservableObject {
     /// Plain AppKit on purpose: an NSHostingView inside a borderless panel crashed in constraint updates.
     private func showBadge() {
         if badge == nil {
-            let size = NSSize(width: 104, height: 30)
+            let size = NSSize(width: ChipStyle.width, height: ChipStyle.height)
             let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                                 styleMask: [.borderless, .nonactivatingPanel],
                                 backing: .buffered, defer: false)
@@ -179,29 +188,29 @@ final class VoiceInput: ObservableObject {
             pill.material = .hudWindow
             pill.state = .active
             pill.wantsLayer = true
-            pill.layer?.cornerRadius = size.height / 2
+            pill.layer?.cornerRadius = ChipStyle.radius
             pill.layer?.masksToBounds = true
-            let dot = NSView(frame: NSRect(x: 12, y: 11, width: 8, height: 8))
+            let dot = NSView(frame: NSRect(x: 20, y: 18, width: 8, height: 8))
             dot.wantsLayer = true
             dot.layer?.backgroundColor = NSColor.systemRed.cgColor
             dot.layer?.cornerRadius = 4
             let label = NSTextField(labelWithString: "듣는 중")
-            label.font = .systemFont(ofSize: 13, weight: .medium)
-            label.frame = NSRect(x: 28, y: 5, width: 70, height: 20)
+            label.font = .systemFont(ofSize: 15, weight: .medium)
+            label.frame = NSRect(x: 38, y: 11, width: size.width - 58, height: 22)
             pill.addSubview(dot)
             pill.addSubview(label)
             panel.contentView = pill
             badge = panel
         }
         if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
-            badge?.setFrameOrigin(NSPoint(x: area.minX + 16, y: area.minY + 16))
+            badge?.setFrameOrigin(NSPoint(x: area.minX + ChipStyle.margin, y: area.minY + ChipStyle.margin))
         }
         badge?.orderFrontRegardless()
     }
 
     /// Second quick tap: the listening pill becomes a text box at the same spot. Return sends, Esc closes.
     private func showInput() {
-        let size = NSSize(width: 360, height: 44)
+        let size = NSSize(width: ChipStyle.width, height: ChipStyle.height)
         let panel = inputPanel ?? TypePanel(contentRect: NSRect(origin: .zero, size: size),
                                             styleMask: [.borderless, .nonactivatingPanel],
                                             backing: .buffered, defer: false)
@@ -215,7 +224,7 @@ final class VoiceInput: ObservableObject {
             pill.material = .hudWindow
             pill.state = .active
             pill.wantsLayer = true
-            pill.layer?.cornerRadius = size.height / 2
+            pill.layer?.cornerRadius = ChipStyle.radius
             pill.layer?.masksToBounds = true
             let field = NSTextField(frame: NSRect(x: 20, y: 11, width: size.width - 40, height: 22))
             field.placeholderString = "Symbio에게 입력…"
@@ -236,7 +245,7 @@ final class VoiceInput: ObservableObject {
         badge?.orderOut(nil)
         panel.field?.stringValue = ""
         if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
-            panel.setFrameOrigin(NSPoint(x: area.minX + 16, y: area.minY + 16))
+            panel.setFrameOrigin(NSPoint(x: area.minX + ChipStyle.margin, y: area.minY + ChipStyle.margin))
         }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
