@@ -50,10 +50,14 @@ final class Backend: ObservableObject {
     }
 
     /// With the chat window closed or behind another app, a pending choice or approval becomes chips.
-    private func syncChips() {
+    fileprivate func syncChips() {
         guard !chatShown, !pending, state != "STOPPED" else { ChoiceChips.shared.hide(); return }
         if let approval {
-            let target = approval.targets.first.map { ($0 as NSString).lastPathComponent } ?? approval.target
+            let first = approval.targets.first.map { ($0 as NSString).lastPathComponent } ?? approval.target
+            let more = approval.targets.count > 1 ? " 외 \(approval.targets.count - 1)개" : ""
+            let to = ["move", "copy"].contains(approval.operation)
+                ? " → " + (approval.target as NSString).lastPathComponent : ""
+            let target = first + more + to
             Toast.shared.dismiss()
             ChoiceChips.shared.show("\(approvalTitle(approval.operation)) · \(target)", [
                 ("승인", { [weak self] in self?.decide(true) }),
@@ -85,6 +89,13 @@ final class Backend: ObservableObject {
 
     func start() {
         guard process == nil else { return }
+        // Showing the chips depends on whether the chat window is up, which changes without any event.
+        for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification,
+                     NSWindow.willCloseNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                DispatchQueue.main.async { Task { @MainActor in Backend.shared.syncChips() } }
+            }
+        }
         struct Runtime: Decodable { let project: String; let python: String }
         do {
             guard let url = Bundle.main.url(forResource: "runtime", withExtension: "json") else {
@@ -162,12 +173,12 @@ final class Backend: ObservableObject {
                 online = true
             case "tool": tool = value["name"] as? String ?? ""
             case "approval":
-                approval = try? JSONDecoder().decode(Approval.self, from: line)
                 pending = false
+                approval = try? JSONDecoder().decode(Approval.self, from: line)
             case "clarification":
+                pending = false
                 append("assistant", text)
                 choices = value["choices"] as? [String] ?? []
-                pending = false
             case "completed", "error":
                 pending = false
                 approval = nil
