@@ -12,7 +12,7 @@
 | 쓰기·덮어쓰기 | ✅ | `result.txt에 저장해줘` | `planner.py` `risk_guard.py` | 쓰기(승인) | `test_risk_guard.py` `test_integration_undo.py` | `write_*` `overwrite_*` `outside_root_write` | |
 | 삭제(단일·패턴) | ✅ | `*.txt 모두 삭제해줘` | `deletion.py` | 쓰기(승인·백업) | `test_deletion.py` | `delete_*` `attach_delete` `neg_delete_too_much` | |
 | **이동·복사·폴더 생성** | ✅ | `보고서를 보관 폴더로 옮겨줘` | `file_operations.py` | 쓰기(승인·Undo) | `test_file_operations.py` | `move_*` `create_directory_undo` | 2026-10-14 파일 정리 도구 |
-| 형식 변환·문서 읽기 | ✅ | `pdf를 텍스트로 바꿔줘` | `conversion.py` | 변환=쓰기(승인), 읽기 | `test_conversion.py` `test_conversion_review.py` | `convert_*` `read_document_html` | |
+| 형식 변환·문서 읽기 | ✅ | `pdf를 텍스트로 바꿔줘`, `공문.hwpx를 pdf로` | `conversion.py` | 변환=쓰기(승인), 읽기, hwpx→pdf는 글자만 | `test_conversion.py` `test_conversion_review.py` | `convert_*` `read_document_html` | |
 | 웹 읽기·저장 | ⏸ 꺼짐(보관) | `https://… 읽고 요약` | `archive/web-macos-mcp/…/playwright_client.py` | 읽기 + 저장은 승인 | `archive/…/test_integration_playwright.py` | (없음, 로컬 HTTP fixture 통합 테스트로 검증) | |
 | 활성 앱 조회 | ⏸ 꺼짐(보관) | `현재 활성 앱` | `archive/web-macos-mcp/…/macos_client.py` | 읽기 | `archive/…/test_macos_client.py` | | |
 | Undo | ✅ | `undo` `되돌리기` | `undo.py` | | `test_undo.py` `test_integration_undo.py` | `overwrite_undo` `create_directory_undo` | |
