@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
-from voice_action import conversion, file_search
+from voice_action import conversion, file_search, finder
 from voice_action.conversion import CONVERT_TOOL, READ_DOCUMENT_TOOL
 from voice_action.deletion import DELETE_TOOL
 from voice_action.file_operations import OPERATIONS
@@ -39,6 +39,7 @@ READ_ONLY_TOOLS = frozenset(
         READ_DOCUMENT_TOOL,
         FIND_FILES_TOOL,
         LIST_FILES_TOOL,
+        finder.OPEN_FILE_TOOL,  # changes nothing; finder.open_file refuses programs
     }
 )
 WRITE_TOOLS = frozenset({"filesystem__write_file", DELETE_TOOL, CONVERT_TOOL, *OPERATIONS})
@@ -158,6 +159,8 @@ class RiskGuard:
             )
         if name == LIST_FILES_TOOL:
             return await asyncio.to_thread(file_search.list_files, arguments, self._roots)
+        if name == finder.OPEN_FILE_TOOL:
+            return await asyncio.to_thread(finder.open_file, arguments, self._roots)
         if name == FIND_FILES_TOOL:
             return await asyncio.to_thread(
                 file_search.find_files, arguments, self._roots

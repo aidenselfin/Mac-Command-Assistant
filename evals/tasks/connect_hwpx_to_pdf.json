@@ -1,0 +1,42 @@
+{
+  "id": "connect_hwpx_to_pdf",
+  "family": "file.convert",
+  "axis": "connect",
+  "level": 50,
+  "status": "active",
+  "files": {
+    "공문.hwpx": {
+      "b64": "UEsDBBQAAAAIAAWhZF2C8EFHFQAAABMAAAAIAAAAbWltZXR5cGVLLCjIyUxOLMnMz9PPKC/QrsosAABQSwMEFAAAAAgABaFkXQ92tIlzAAAAjgAAABUAAABDb250ZW50cy9zZWN0aW9uMC54bWyzySi2Kk5NVqjIzckrtsoosFXKKCkpsNLXLy8v18tIzEvOz9VLztfLLtLPKC/IzdE3MjA01C9ILEpML0osyFCC6Su2VSpWsrPJKLAqAJNFpXlgusTu7ayeN3NnKLyZ2vG6aYuNPlgMTIGV6EN06ENcYQcAUEsBAhQDFAAAAAgABaFkXYLwQUcVAAAAEwAAAAgAAAAAAAAAAAAAAIABAAAAAG1pbWV0eXBlUEsBAhQDFAAAAAgABaFkXQ92tIlzAAAAjgAAABUAAAAAAAAAAAAAAIABOwAAAENvbnRlbnRzL3NlY3Rpb24wLnhtbFBLBQYAAAAAAgACAHkAAADhAAAAAAA="
+    }
+  },
+  "request": "공문.hwpx를 pdf로 바꿔줘",
+  "user": {
+    "approve": [
+      true
+    ]
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__convert_file",
+          "args": {
+            "source": "{root}/공문.hwpx",
+            "target_format": "pdf"
+          }
+        }
+      ]
+    },
+    {
+      "text": "공문.pdf를 만들었습니다."
+    }
+  ],
+  "expect": {
+    "files": {
+      "공문.pdf": "*"
+    },
+    "must_run": [
+      "local__convert_file"
+    ]
+  }
+}

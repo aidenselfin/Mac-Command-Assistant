@@ -15,8 +15,10 @@ import stat
 import subprocess
 import sys
 import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from xml.etree import ElementTree
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
@@ -53,14 +55,17 @@ SIGNATURES = {
     "odt": (b"PK\x03\x04",),
     "doc": (b"\xd0\xcf\x11\xe0",),
     "rtf": (b"{\\rtf",),
+    "hwpx": (b"PK\x03\x04",),
 }
+# Hangul (한글) HWPX: a zip of OWPML XML. Body text is in Contents/section<N>.xml.
+HWPX_PARAGRAPH = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 
 CONVERT_DEFINITION = ToolDefinition(
     CONVERT_TOOL,
     "파일 형식 변환. 원본은 그대로 두고 같은 폴더에 새 파일을 만든다(덮어쓰지 않음). "
     "문서 txt·md·rtf·html·doc·docx·odt 사이 변환, txt·md→pdf(서식 없는 글), pdf→txt, "
     "이미지 png·jpeg(jpg)·heic·tiff·gif·bmp 사이 변환(아이폰 HEIC→JPG·PNG 포함), "
-    "csv↔json. 사용자 승인 후 실행된다.",
+    "hwpx(한글)→pdf(서식 없는 글), csv↔json. 사용자 승인 후 실행된다.",
     {
         "type": "object",
         "properties": {
@@ -255,6 +260,42 @@ def _json_to_csv(data: bytes) -> bytes:
     return out.getvalue().encode("utf-8")
 
 
+def _hwpx_text(data: bytes) -> bytes:
+    """Paragraph text of every section, in order; tables come out one cell per line."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            mimetype = archive.getinfo("mimetype")
+            if mimetype.file_size > 64 or archive.read(mimetype) != b"application/hwp+zip":
+                raise ToolRejectedError("확장자와 실제 파일 형식이 다릅니다.")
+            sections = sorted(
+                (info for info in archive.infolist()
+                 if info.filename.startswith("Contents/section")
+                 and info.filename.endswith(".xml")
+                 and info.filename[16:-4].isdigit()),
+                key=lambda info: int(info.filename[16:-4]),
+            )
+            # Bounded before inflating, so a zip bomb never reaches memory.
+            if sum(info.file_size for info in sections) > MAX_OUTPUT_BYTES:
+                raise ToolRejectedError("한글 문서 내용이 너무 큽니다.")
+            lines = []
+            for info in sections:
+                xml = archive.read(info)
+                if b"<!DOCTYPE" in xml:  # entities could inflate past the size bound
+                    raise ToolRejectedError("한글(hwpx) 파일을 읽을 수 없습니다.")
+                tree = ElementTree.fromstring(xml)
+                for paragraph in tree.iter(f"{HWPX_PARAGRAPH}p"):
+                    lines.append("".join(
+                        "".join(text.itertext())
+                        for text in paragraph.iterfind(f"{HWPX_PARAGRAPH}run/{HWPX_PARAGRAPH}t")
+                    ))
+    except (zipfile.BadZipFile, KeyError, ElementTree.ParseError) as exc:
+        raise ToolRejectedError("한글(hwpx) 파일을 읽을 수 없습니다.") from exc
+    text = "\n".join(lines).strip()
+    if not text:
+        raise ToolRejectedError("한글 문서에 글자가 없습니다.")
+    return (text + "\n").encode("utf-8")
+
+
 def supported(source_format: str, target_format: str) -> bool:
     if source_format == target_format:
         return False
@@ -266,6 +307,7 @@ def supported(source_format: str, target_format: str) -> bool:
         (source_format in TEXTUTIL_INPUT and target_format in TEXTUTIL_OUTPUT)
         or (source_format in TEXT_DOCUMENTS and target_format == "pdf")
         or (source_format == "pdf" and target_format == "txt")
+        or (source_format == "hwpx" and target_format == "pdf")
         or (source_format in IMAGES and target_format in IMAGES)
     )
 
@@ -279,7 +321,7 @@ def convert(source: Path, data: bytes, source_format: str, target_format: str) -
     with tempfile.TemporaryDirectory(prefix="voice-action-convert-") as folder:
         # Work on a private copy, so a source swapped mid-run can't change the input.
         copy = Path(folder) / f"source.{source_format}"
-        copy.write_bytes(data)
+        copy.write_bytes(_hwpx_text(data) if source_format == "hwpx" else data)
         out = Path(folder) / f"output{EXTENSION.get(target_format, '.' + target_format)}"
         if source_format == "pdf":
             output = _pdf_text(copy).encode("utf-8")
