@@ -162,7 +162,11 @@ def run(names):
             except subprocess.TimeoutExpired:
                 app.kill()
                 code = "시간 초과"
-            problems = json.loads(result.read_text())["failures"] if result.exists() else []
+            problems = (
+                json.loads(result.read_text())["failures"]
+                if result.exists()
+                else ["시나리오를 끝까지 돌지 못함"]
+            )
             if code != 0:
                 problems.append(f"앱이 정상 종료하지 못함({code})")
             failed += bool(problems)
