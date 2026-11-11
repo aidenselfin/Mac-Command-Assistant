@@ -468,3 +468,29 @@ async def test_clarification_answer_cannot_turn_a_read_request_into_deletion(con
     assert isinstance(await runtime.submit("a.txt 삭제해줘"), Completed)
     assert DELETE_TOOL not in [tool.name for tool in model.generate.await_args_list[1].args[1]]
     assert target.read_text() == "보존"
+
+
+async def test_approval_previews_text_head_and_binary_kind_without_reaching_the_model(tmp_path):
+    root, _journal, guard, _gateway = setup(tmp_path)
+    (root / "a.txt").write_text("첫 줄\n\n둘째\n셋째\n넷째\n", encoding="utf-8")
+    (root / "b.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00" + b"x" * 2048)
+    (root / "c.txt").write_bytes(b"")
+    (root / "d.txt").write_text("가" * 3000)  # 9000 bytes: a character is cut at 4096
+    prepared = await guard.prepare_write(DELETE_TOOL, {"directory": str(root), "pattern": "*"})
+    a, b, c, d = prepared.previews
+    assert a == "첫 줄\n둘째\n셋째\n…"
+    assert b == "바이너리 · image/png · 2.0 KB"
+    assert c == "(빈 파일)"
+    assert d.endswith("\n…") and len(d.splitlines()[0]) == 80
+    assert "첫 줄" not in repr(prepared) + prepared.canonical_arguments
+
+
+async def test_approval_previews_only_the_first_files(tmp_path):
+    from voice_action.deletion import PREVIEW_FILES
+
+    root, _journal, guard, _gateway = setup(tmp_path)
+    for index in range(PREVIEW_FILES + 3):
+        (root / f"{index:02}.txt").write_text(f"줄 {index}")
+    prepared = await guard.prepare_write(DELETE_TOOL, {"directory": str(root), "pattern": "*.txt"})
+    assert len(prepared.targets) == PREVIEW_FILES + 3
+    assert prepared.previews == tuple(f"줄 {index}" for index in range(PREVIEW_FILES))

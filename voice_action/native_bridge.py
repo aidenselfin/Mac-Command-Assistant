@@ -122,6 +122,7 @@ class NativeBridge:
                     "type": "approval", "approval_id": self.approval_id,
                     "operation": value.operation, "target": display_path(value.target_path),
                     "targets": [display_path(path) for path in value.targets],
+                    "previews": list(value.previews),
                     "preview": value.preview, "truncated": value.preview_truncated,
                     "characters": value.content_chars,
                 })
