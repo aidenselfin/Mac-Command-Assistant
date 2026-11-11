@@ -15,7 +15,7 @@ Symbio: 자연어 명령(글·음성)을 LLM(OpenRouter/Groq/OpenAI)이 고정�
 기능을 추가·변경하면 `docs/features.md` 표를 같은 커밋에서 고친다.
 
 # 실행 및 검증
-- 의존성 설치: `uv sync --locked && npm ci && npm run playwright:install`
+- 의존성 설치: `uv sync --locked && npm ci` (`npm run playwright:install`은 보관된 웹 기능을 다시 켤 때만)
 - 실행: 네이티브 앱 `./native-preview/run.sh` 또는 `Voice Action AI.command`(더블클릭). lesson 관리: `uv run python main.py --lessons`
 - 점검: `uv run python scripts/check.py`(린트·테스트·평가 재생·어려운 케이스, 화면 없이), `scripts/check.sh quick`(변경 영역 테스트+ruff), `scripts/check.sh full`, `scripts/check.sh <기능>`(features.md의 기능 이름)
 - 화면 반영: `python3 scripts/ui_check.py status`(설치된 앱이 최신 빌드인지), `python3 scripts/ui_check.py run`(창·칩 시나리오 재생)
@@ -60,4 +60,4 @@ Symbio: 자연어 명령(글·음성)을 LLM(OpenRouter/Groq/OpenAI)이 고정�
 - 시작할 때 `git status --short`로 기존 변경을 확인한다. 남의 변경은 되돌리거나 커밋하지 않는다.
 - 끝낼 때 관련 테스트·린트를 확인한다. 직접 확인하지 않은 UI 동작은 확인했다고 쓰지 않는다.
   `docs/status.md`는 최신 검증·미완료 작업·인수인계만 유지하고, 완료 이력은 git log와 `docs/reviews/`가 맡는다.
-- 자동 보존(60초, `refs/vibe/snapshots`)은 백그라운드로 돈다. 복구·설치는 `docs/vibe-coding.md`를 본다.
+- 자동 보존(10분, `refs/vibe/snapshots`)은 백그라운드로 돈다. 복구·설치는 `docs/vibe-coding.md`를 본다.

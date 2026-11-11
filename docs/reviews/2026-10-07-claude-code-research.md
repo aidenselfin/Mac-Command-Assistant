@@ -36,17 +36,17 @@
 
 | 영역 | 실제 구현과 코드 위치 |
 |---|---|
-| 진입점 | [main.py](/Users/juhyeon/voice-action-AI-test/main.py)의 main, run_text, _interactive_loop. 단발·대화형·Tkinter 모드. 대화형은 연결을 재사용하지만 완료된 이전 명령의 모델 대화까지 재사용하지는 않는다. |
-| 실행 상태 | [runtime.py](/Users/juhyeon/voice-action-AI-test/voice_action/runtime.py)의 RuntimeController.submit, _finish, _on_planner_event. 단일 실행, Busy 반환, 질문·승인 대기·재개·오류·완료 관리. |
-| 모델 입력 조립 | [planner.py](/Users/juhyeon/voice-action-AI-test/voice_action/planner.py)의 Planner._run_loop. system 지침·허용 root·원래 사용자 요청·질문 답변을 조립하고 _LoopState를 만든다. |
+| 진입점 | [main.py](../../main.py)의 main, run_text, _interactive_loop. 단발·대화형·Tkinter 모드. 대화형은 연결을 재사용하지만 완료된 이전 명령의 모델 대화까지 재사용하지는 않는다. |
+| 실행 상태 | [runtime.py](../../voice_action/runtime.py)의 RuntimeController.submit, _finish, _on_planner_event. 단일 실행, Busy 반환, 질문·승인 대기·재개·오류·완료 관리. |
+| 모델 입력 조립 | [planner.py](../../voice_action/planner.py)의 Planner._run_loop. system 지침·허용 root·원래 사용자 요청·질문 답변을 조립하고 _LoopState를 만든다. |
 | 모델 API | 같은 파일의 OpenAICompatibleModel.generate. OpenAI 호환 Chat Completions로 messages와 도구 이름·설명·JSON Schema를 보낸다. 일반 단계 tool_choice=auto, 웹 필수 단계의 단일 도구는 강제 선택한다. stream은 사용하지 않는다. |
 | 실행 정책 | Planner._process_pending_calls, _policy_error. 노출 도구·위험 분류·JSON·웹 순서·선택 파일·삭제 범위를 확인한다. 모델이 여러 호출을 반환할 수 있지만 실행은 순차적이다. |
-| 승인·실행 | [risk_guard.py](/Users/juhyeon/voice-action-AI-test/voice_action/risk_guard.py)의 RiskGuard.prepare_write, execute_approved. 정확한 인자·내용·대상 상태에 digest와 일회성 nonce를 결합하고 승인 후 다시 검사한다. |
-| 외부 도구 | [mcp_manager.py](/Users/juhyeon/voice-action-AI-test/voice_action/mcp_manager.py)의 MCPManager.connect, call_tool. filesystem/web/macos namespace 라우팅. manager와 각 stdio client 모두 호출 lock을 둔다. |
+| 승인·실행 | [risk_guard.py](../../voice_action/risk_guard.py)의 RiskGuard.prepare_write, execute_approved. 정확한 인자·내용·대상 상태에 digest와 일회성 nonce를 결합하고 승인 후 다시 검사한다. |
+| 외부 도구 | [mcp_manager.py](../../voice_action/mcp_manager.py)의 MCPManager.connect, call_tool. filesystem/web/macos namespace 라우팅. manager와 각 stdio client 모두 호출 lock을 둔다. |
 | 내부 도구 | local__find_files는 file_search.py, local__read_document·local__convert_file은 conversion.py, local__delete_files는 deletion.py. 외부 MCP를 통하지 않는 실행도 RiskGuard에서 관리한다. |
 | 최종 응답 | Planner._continue. 웹 절차·필수 검색·선택 파일 읽기를 검사한 뒤 도구 없는 텍스트를 Completed로 반환한다. 일반 삭제·변환의 성공 여부는 이 완료 조건에서 필수로 검사하지 않는다. |
-| 기록·학습 | [feedback.py](/Users/juhyeon/voice-action-AI-test/voice_action/feedback.py)의 RecordingModel, FeedbackLoop. 개인정보를 줄인 실행 기록, R1~R9 문제 감지, 평가, lesson 후보→사람 채택. |
-| 평가 | [evals/run_eval.py](/Users/juhyeon/voice-action-AI-test/evals/run_eval.py)의 run_trial, manifest, diff, versions. 격리된 초기 파일, scripted 승인/선택, 파일 상태 및 일부 필수 도구 검사. |
+| 기록·학습 | [feedback.py](../../voice_action/feedback.py)의 RecordingModel, FeedbackLoop. 개인정보를 줄인 실행 기록, R1~R9 문제 감지, 평가, lesson 후보→사람 채택. |
+| 평가 | [evals/run_eval.py](../../evals/run_eval.py)의 run_trial, manifest, diff, versions. 격리된 초기 파일, scripted 승인/선택, 파일 상태 및 일부 필수 도구 검사. |
 
 승인과 질문은 모델이 기억하는 텍스트만으로 관리하지 않는다. 앱의 typed 상태가 실행을 통제한다. 이것은 이미 구현된 중요한 기반이며 다시 만들 이유가 없다.
 
@@ -64,7 +64,7 @@
 
 **도구 결과·문맥·재사용**
 
-- [mcp_client.py](/Users/juhyeon/voice-action-AI-test/voice_action/mcp_client.py)의 normalize_result는 text와 structured payload의 크기를 제한하고 잘림 표식을 붙인다. 비텍스트는 placeholder가 된다. 문자 제한이며 모델 토큰 예산은 아니다.
+- [mcp_client.py](../../voice_action/mcp_client.py)의 normalize_result는 text와 structured payload의 크기를 제한하고 잘림 표식을 붙인다. 비텍스트는 placeholder가 된다. 문자 제한이며 모델 토큰 예산은 아니다.
 - RiskGuard._read_bounded는 큰 텍스트 파일의 앞부분만 읽는다. conversion.read_document는 문서를 텍스트로 변환한 뒤 앞부분을 제한한다.
 - Planner._accept_tool_result는 웹 navigation 결과를 URL·제목 중심으로 줄이고, 본문은 별도 snapshot으로 받는다. 파일·웹 본문을 콘솔에 그대로 출력하지 않는 처리도 있다.
 - 읽은 본문은 현재 명령의 messages에 남고 매 모델 호출에 다시 전달된다. 결과별 크기 제한 외에 누적 예산·오래된 결과 제거·참조화·자동 요약은 없다.
@@ -255,7 +255,7 @@ delete/convert 승인 누락과 거절·실패·재승인·비명령 사례를 �
 
 목표: 사용자가 준 “예산 승인 내용이 있는 문서”라는 추가 조건이 실제 검색에서 적용되게 한다. 상태를 기억하는 것과 검색 의미를 실행하는 것을 분리한다.
 
-근거: proposal-1~7.txt 중 3번만 “예산 승인”을 넣은 pinned 재현에서 keywords=[proposal]과 [proposal, 예산] 모두 name/narrow/7이었다. [기존 후속 리뷰](/Users/juhyeon/voice-action-AI-test/docs/reviews/2026-10-07-ui-progress-followup-review.md)의 R1과 같은 문제이며 새 발견으로 포장하지 않는다.
+근거: proposal-1~7.txt 중 3번만 “예산 승인”을 넣은 pinned 재현에서 keywords=[proposal]과 [proposal, 예산] 모두 name/narrow/7이었다. [기존 후속 리뷰](2026-10-07-ui-progress-followup-review.md)의 R1과 같은 문제이며 새 발견으로 포장하지 않는다.
 
 모듈·인터페이스: file_search.py의 FIND_FILES_DEFINITION·_search·find_files, Planner.resume의 조건 전달. RiskGuard의 기존 로컬 검색 분류와 fd 기반 읽기를 재사용한다.
 

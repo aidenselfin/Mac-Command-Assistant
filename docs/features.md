@@ -16,7 +16,7 @@
 | 형식 변환·문서 읽기 | ✅ | `pdf를 텍스트로 바꿔줘`, `공문.hwpx를 pdf로` | `conversion.py` | 변환=쓰기(승인), 읽기, hwpx→pdf는 글자만 | `test_conversion.py` `test_conversion_review.py` | `convert_*` `read_document_html` | |
 | 웹 읽기·저장 | ⏸ 꺼짐(보관) | `https://… 읽고 요약` | `archive/web-macos-mcp/…/playwright_client.py` | 읽기 + 저장은 승인 | `archive/…/test_integration_playwright.py` | (없음, 로컬 HTTP fixture 통합 테스트로 검증) | |
 | 활성 앱 조회 | ⏸ 꺼짐(보관) | `현재 활성 앱` | `archive/web-macos-mcp/…/macos_client.py` | 읽기 | `archive/…/test_macos_client.py` | | |
-| Undo | ✅ | `undo` `되돌리기` | `undo.py` | | `test_undo.py` `test_integration_undo.py` | `overwrite_undo` `create_directory_undo` | |
+| Undo | ✅ | `…` 메뉴 `최근 작업 되돌리기` | `undo.py` | | `test_undo.py` `test_integration_undo.py` | `overwrite_undo` `create_directory_undo` | |
 | 직전 대화 기억·후속 질문 | ✅ | `그 요약을 파일로 저장해줘` | `planner.py`(Exchange) | | `test_followup.py` `test_free_text.py` | `follow_up_*` | |
 | 자가 피드백(`/feedback` 의견·lesson) | ✅ 피드백 on | `/feedback 검색 결과가 너무 많아` | `feedback.py` `runtime.py` `native_bridge.py` | 일반 명령으로 실행하지 않음, 질문 대기 중엔 거부 | `test_feedback*.py` `test_native_bridge.py` `test_lesson_candidates.py` | `evals/run_eval.py --lesson` | 2026-10-04 lesson |
 | **자율 개선(lesson 자동 채택·코드 자동 수정)** | ✅ `VOICE_ACTION_FEEDBACK_AUTONOMY=on` | (실패 반복 시 자동) | `autonomy.py` `feedback.py` | 보호 파일 목록 | `test_autonomy.py` | `evals/run_eval.py` | 2026-10-27 피드백 자율 개선 |
@@ -31,7 +31,7 @@
 | **대기 중 백엔드 쉬기** | ✅ 네이티브 앱 | 10분간 안 쓰면 Python·Node(약 160MB)를 끄고, 옵션 키·입력 칩·창 열기로 다시 켬. 말하는 동안 켜져 녹음은 대기열로 전송 | `Backend.swift`(`wake`·`scheduleSleep`) `VoiceInput.swift` | 쉬고 나면 이전 대화의 이어 묻기 기억은 사라짐(화면 글은 남음) | 없음(Swift) | 실제 앱에서 잠든 뒤 음성 명령은 사람 확인 전 | 2026-11-11 |
 | 창이 닫혀 있을 때 선택·승인 칩(칩 크기 통일, 두 번 누르면 녹음 칩 없이 입력창) | ✅ 네이티브 앱 | | `ChoiceChips.swift` `Toast.swift` `VoiceInput.swift` `Backend.swift` | 화면 확인은 병합 후 | | | 2026-11-04 |
 | 능력 점수 벤치마크 | ✅ live 결과로만 | `python evals/benchmark.py` | `evals/benchmark.py` `evals/benchmark.json` | | `test_benchmark.py` `test_eval_runner.py` | 모든 과제의 `axis`·`level`·`status` | 2026-10-28 능력 점수 |
-| 화면 반영 검사(옛 빌드 경고, 창·칩 시나리오 재생) | ✅ | `python3 scripts/ui_check.py status` / `run` | `scripts/ui_check.py` `scripts/ui_scenarios/` `UITest.swift` | 재생 중 몇 초간 창이 뜬다 | `test_native_bridge.py` | 시나리오 3개 | 2026-11-04 |
+| 화면 반영 검사(옛 빌드 경고, 창·칩 시나리오 재생) | ✅ | `python3 scripts/ui_check.py status` / `run` | `scripts/ui_check.py` `scripts/ui_scenarios/` `UITest.swift` | 재생 중 몇 초간 창이 뜬다 | `test_native_bridge.py` | 시나리오 4개 | 2026-11-04 |
 | 수정 세션·worktree 도구 | ✅ | | `scripts/vibe.py` | | `test_vibe.py` | | 2026-10-14 병렬 수정 세션 |
 
 과제 이름은 `evals/tasks/*.json` 파일명이다. `status: "target"` 과제(`target_*`)는 아직 없는 능력의 목표이며 `--include-targets` 없이는 실행하지 않는다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.
@@ -39,5 +39,5 @@
 ## 기능 사이의 약속 (깨면 안 되는 것)
 
 - 새 쓰기 도구는 `risk_guard.classify_tool`과 `WRITE_TOOLS`에 넣고, 승인 화면을 SwiftUI에 표시하게 한다.
-- 파일 내용·벡터는 채팅 모델에 주지 않는다. 검색 결과는 후보로만 내고 확정은 사용자(또는 정확히 1개인 이름 일치)가 한다.
+- 검색 단계의 파일 내용은 채팅 모델에 주지 않는다. 검색 결과는 후보로만 내고 확정은 사용자(또는 정확히 1개인 이름 일치)가 한다.
 - 승인된 작업이 없으면 "이동/삭제했다"고 답하지 않는다(`file_operations`의 회귀 테스트 참고).
