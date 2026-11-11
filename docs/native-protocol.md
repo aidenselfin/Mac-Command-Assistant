@@ -14,7 +14,7 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 | `tool` | `name` | 지금 실행 중인 도구 |
 | `approval` | `approval_id` `operation` `target` `targets` `previews` `preview` `truncated` `characters` | 승인 요청. `operation`: `create` `overwrite` `delete` `move` `copy` `mkdir` `convert` … <br>이동·복사는 `targets[0]`=원본, `target`=목적지. 폴더 생성은 `target`만 <br>삭제는 `previews[i]`=`targets[i]` 내용 요약(글은 앞 3줄·줄당 80자, 바이너리는 종류·크기, 앞 20개만). 화면에만 쓰고 모델엔 보내지 않는다 |
 | `clarification` | `text` `kind` `choices` | 질문 또는 후보 선택 |
-| `completed` | `text` `changed_paths` `found_paths` `offer_file` `offer_paths` | 완료. `found_paths`는 검색이 한 파일로 정한 경로(드래그 칩용), `offer_file`은 "파일 줘"처럼 파일 자체를 달라는 명령인지, `offer_paths`는 드래그 칩으로 줄 파일(만들거나 고친 파일, 없으면 "파일 줘"로 찾은 파일, 5개 이하) |
+| `completed` | `text` `changed_paths` `found_paths` `offer_file` `offer_paths` (선택 `show_box`) | 완료. `found_paths`는 검색이 한 파일로 정한 경로(드래그 칩용), `offer_file`은 "파일 줘"처럼 파일 자체를 달라는 명령인지, `offer_paths`는 드래그 칩으로 줄 파일(만들거나 고친 파일, 없으면 "파일 줘"로 찾은 파일, 5개 이하). `show_box`면 대화창이 보여도 오른쪽 칩 상자를 띄운다 |
 | `error` | `text` | 오류·바쁨 |
 | `attachment` | `path` `text` | 첨부 결과(`path`가 null이면 해제) |
 | `rejected` | `text` | 현재 상태에서 처리할 수 없는 명령 |
@@ -24,7 +24,7 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 
 ## Swift → Python 명령 (`action`)
 
-`submit`(`text`) · `approve`/`reject`(`approval_id`) · `cancel` · `undo` · `reset`(후속 질문 기억 삭제, IDLE에서만) · `attach`(`path`) · `detach` ·
+`submit`(`text`) · `approve`/`reject`(`approval_id`) · `cancel` · `undo` · `reset`(후속 질문 기억 삭제, IDLE에서만) · `quick_list`(`sort`: `modified`·`size`, 모델 없이 최근·큰 파일 5개를 `completed`의 `offer_paths`와 `show_box: true`로 보내 오른쪽 드래그 칩으로 띄움, IDLE에서만) · `attach`(`path`) · `detach` ·
 `voice`(`path`: 임시 폴더의 `voice-action-voice-*.m4a`, 변환 뒤 지운다) · `shutdown`. 상태와 맞지 않거나 `approval_id`가 다르면 `rejected`.
 `submit`의 `text`가 `/feedback 내용`이면 명령이 아니라 직전 답변에 대한 의견으로 피드백 루프(U1)에 들어가고 `completed`로 접수를 알린다. 질문 대기 중에는 `rejected`.
 
