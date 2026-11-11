@@ -252,3 +252,49 @@ async def test_recovery_state_survives_an_approval(config):
 
     assert isinstance(outcome, Completed)
     assert outcome.text == "저장했습니다"
+
+
+async def test_slow_model_call_is_cut_at_the_time_limit(config):
+    import asyncio
+
+    config = replace(config, max_run_seconds=0.05)
+    model = AsyncMock()
+
+    async def slow(*_args, **_kwargs):
+        await asyncio.sleep(5)
+
+    model.generate.side_effect = slow
+
+    outcome = await make(config, gateway(), model).run("인사해줘")
+
+    assert isinstance(outcome, Error)
+    assert "시간 한도" in outcome.message
+
+
+async def test_time_before_an_approval_still_counts_after_it(config):
+    root = config.allowed_directories[0]
+    config = replace(config, max_run_seconds=90)
+    model = AsyncMock()
+    model.generate.side_effect = [
+        ModelTurn(None, [ToolCall(
+            "w", "filesystem__write_file",
+            json.dumps({"path": str(root / "a.txt"), "content": "x"}),
+        )]),
+        ModelTurn("저장했습니다", []),
+    ]
+    gw = gateway()
+    gw.list_tools.return_value.append(
+        ToolDefinition("filesystem__write_file", "w", {"type": "object"})
+    )
+    gw.call_tool.return_value = ToolResult(True, "ok")
+    planner = make(config, gw, model)
+    # 80 s before the approval; the user then waits 1000 s; 20 s more after it is over 90.
+    ticks = iter([0, 0, 80, 1080, 1100])
+    planner._clock = lambda: next(ticks)
+
+    pending = await planner.run("a.txt에 x 저장해줘")
+    outcome = await planner.approve(pending.context)
+
+    assert isinstance(outcome, Error)
+    assert "시간 한도" in outcome.message
+    assert "승인된 파일 변경은 완료" in outcome.message

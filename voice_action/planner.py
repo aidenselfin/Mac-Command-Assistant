@@ -259,6 +259,7 @@ class ApprovalContext:
     call_counts: tuple[tuple[str, int], ...] = ()
     recoveries: int = 0
     escalated: bool = False
+    run_seconds: float = 0.0  # loop time spent before this approval
 
     @property
     def digest(self) -> str:
@@ -1221,7 +1222,7 @@ class _LoopState:
     recoveries: int = 0
     escalated: bool = False
     format_errors: int = 0
-    started: float = 0.0  # this stretch of the loop; an approval wait does not count
+    started: float = 0.0  # loop start (clock), moved forward past approval waits
 
 
 class Planner:
@@ -1565,6 +1566,7 @@ class Planner:
             last_search=last_search,
             attachment=attachment,
             known_target=bool(attachment or (previous is not None and previous.files)),
+            started=self._clock(),
         )
         return await self._continue(state)
 
@@ -1623,7 +1625,6 @@ class Planner:
         return Completed(f"파일 {action} 거절했습니다. 파일은 변경하지 않았습니다.")
 
     async def _continue(self, state: _LoopState) -> PlannerOutcome:
-        state.started = self._clock()
         while True:
             if state.tool_calls:
                 outcome = await self._process_pending_calls(state)
@@ -1644,14 +1645,9 @@ class Planner:
                     f"모델 호출 한도 초과 ({self.config.max_tool_rounds}회); "
                     f"추가 모델 호출 없이 종료했습니다.{completion}"
                 )
-            if self._clock() - state.started > self.config.max_run_seconds:
-                completion = (
-                    " 승인된 파일 변경은 완료되었습니다." if state.write_completed else ""
-                )
-                return Error(
-                    f"시간 한도 초과 ({self.config.max_run_seconds:g}초); "
-                    f"추가 모델 호출 없이 종료했습니다.{completion}"
-                )
+            remaining = self.config.max_run_seconds - (self._clock() - state.started)
+            if remaining <= 0:
+                return self._time_limit_error(state)
 
             self._notify(PlannerEvent(PlannerEventType.PLANNING_STARTED, state.iteration))
             self.emit(
@@ -1706,14 +1702,17 @@ class Planner:
             state.model_calls += 1
             state.exposed_tool_names = frozenset(tool.name for tool in exposed_tools)
             try:
-                turn = await self._active_model(state).generate(
-                    list(state.messages),
-                    exposed_tools,
-                    allow_tools=True,
-                    allow_clarification=not (
-                        snapshot_pending or web_save_pending or web_content_pending
-                    ),
-                )
+                async with asyncio.timeout(remaining):
+                    turn = await self._active_model(state).generate(
+                        list(state.messages),
+                        exposed_tools,
+                        allow_tools=True,
+                        allow_clarification=not (
+                            snapshot_pending or web_save_pending or web_content_pending
+                        ),
+                    )
+            except TimeoutError:
+                return self._time_limit_error(state)
             except ModelFormatError as exc:
                 # A broken reply is told what to fix, once per round, instead of ending.
                 state.format_errors += 1
@@ -1926,6 +1925,13 @@ class Planner:
             )
             state.tool_calls = tuple(turn.tool_calls)
             state.next_call_index = 0
+
+    def _time_limit_error(self, state: _LoopState) -> Error:
+        completion = " 승인된 파일 변경은 완료되었습니다." if state.write_completed else ""
+        return Error(
+            f"시간 한도 초과 ({self.config.max_run_seconds:g}초); "
+            f"추가 모델 호출 없이 종료했습니다.{completion}"
+        )
 
     def _active_model(self, state: _LoopState) -> ModelClient:
         return self._escalation if state.escalated and self._escalation else self.model
@@ -2570,6 +2576,7 @@ class Planner:
             call_counts=tuple(state.call_counts.items()),
             recoveries=state.recoveries,
             escalated=state.escalated,
+            run_seconds=self._clock() - state.started,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -2583,8 +2590,7 @@ class Planner:
             prepared.previews,
         )
 
-    @staticmethod
-    def _restore_state(context: ApprovalContext) -> _LoopState:
+    def _restore_state(self, context: ApprovalContext) -> _LoopState:
         return _LoopState(
             user_text=context.original_request,
             messages=list(deepcopy(context.messages)),
@@ -2623,6 +2629,7 @@ class Planner:
             call_counts=dict(context.call_counts),
             recoveries=context.recoveries,
             escalated=context.escalated,
+            started=self._clock() - context.run_seconds,  # the approval wait does not count
         )
 
     def _append_tool_error(
