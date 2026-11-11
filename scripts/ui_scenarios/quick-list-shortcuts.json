@@ -1,0 +1,11 @@
+{
+ "about": "⌘⇧R·⌘⇧L이 최근·큰 파일 목록을 요청하고, 창이 열려 있어도 오른쪽 파일 칩으로 띄운다",
+ "steps": [
+  {"do": "key", "key": "cmd+shift+r", "expect": {"sent": ["quick_list"], "messages": ["user: 최근 파일"]}},
+  {"touch": ["new.txt"],
+   "emit": {"type": "completed", "text": "최근 수정한 파일 1개", "offer_paths": ["{dir}/new.txt"],
+            "changed_paths": [], "found_paths": ["{dir}/new.txt"], "show_box": true},
+   "expect": {"drag_files": ["new.txt"], "file_box": ["new.txt"]}},
+  {"do": "key", "key": "cmd+shift+l", "expect": {"sent": ["quick_list"]}}
+ ]
+}

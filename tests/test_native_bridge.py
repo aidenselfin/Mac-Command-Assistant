@@ -287,3 +287,30 @@ def test_stale_app_notice_compares_the_built_tree_with_the_checkout(tmp_path):
     assert stale_app_notice(None, tmp_path) == STALE_APP  # built before the version was recorded
     assert stale_app_notice(tree + "-dirty", tmp_path) == STALE_APP
     assert stale_app_notice(tree, tmp_path / "not-a-repo") is None  # no git: stay quiet
+
+
+def test_quick_list_shows_recent_and_large_files_without_the_model(tmp_path):
+    import os
+    for name, size, age in (("old.bin", 900, 300), ("new.txt", 10, 0)):
+        path = tmp_path / name
+        path.write_bytes(b"x" * size)
+        os.utime(path, (path.stat().st_mtime - age, path.stat().st_mtime - age))
+    worker = Mock()
+    events = []
+    transport = NativeBridge(worker, events.append, roots=(tmp_path,))
+    transport.message(UIMessage(UIMessageType.STATE, RuntimeState.IDLE))
+
+    transport.command({"action": "quick_list", "sort": "modified"})
+    transport.command({"action": "quick_list", "sort": "size"})
+    recent, large = events[-2:]
+    assert recent["type"] == large["type"] == "completed"
+    assert [os.path.basename(p) for p in recent["found_paths"]] == ["new.txt", "old.bin"]
+    assert [os.path.basename(p) for p in large["found_paths"]] == ["old.bin", "new.txt"]
+    assert "용량 큰 파일 2개" in large["text"] and not worker.submit.called
+    assert large["offer_paths"] == large["found_paths"] and large["show_box"] is True
+
+    transport.command({"action": "quick_list", "sort": "name"})
+    assert events[-1]["type"] == "rejected"
+    transport.message(UIMessage(UIMessageType.STATE, RuntimeState.PLANNING))
+    transport.command({"action": "quick_list", "sort": "size"})
+    assert events[-1]["type"] == "rejected"
