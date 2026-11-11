@@ -41,6 +41,7 @@ from voice_action.planner import (  # noqa: E402
     Clarification,
     ClarificationRequest,
     Completed,
+    ModelFormatError,
     ModelTurn,
     Planner,
     PlannerEventType,  # noqa: E402
@@ -80,6 +81,8 @@ class Scripted:
         if not self.turns:
             raise LookupError("scripted turns exhausted")
         turn = self.turns.pop(0)
+        if "format_error" in turn:  # a reply the provider adapter could not use
+            raise ModelFormatError(turn["format_error"])
         calls = [
             ToolCall(f"c{self.calls}_{i}", c["name"], json.dumps(c["args"]))
             for i, c in enumerate(turn.get("calls", []))

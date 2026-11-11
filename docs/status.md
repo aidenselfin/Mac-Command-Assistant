@@ -24,6 +24,8 @@
 - 개발: 화면 반영 검사(`scripts/ui_check.py`), 지침을 `CLAUDE.md`·`AGENTS.md`·스킬로 나눔.
 
 # 미완료·다음 작업
+0. 실행 중 복구 루프(브랜치 `claude/recovery-loop`, 병합 전): 재생·테스트만 확인. 실제 모델로 R2·R3가 줄었는지,
+   `escalation_model`을 켠 비용은 live 평가로 아직 재지 않았다. 끝부분 정책 오류(후보 미확인 등)는 여전히 바로 끝난다.
 1. 읽기 축: `read_whole_file`(5단계) 같은 긴 읽기가 약하다. 파인더 축은 파일 열기 도구 추가 뒤 다시 재야 한다.
 2. 이동 과제 되묻기: "…를 보관 폴더로 옮겨줘"에서 모델이 폴더 절대 경로를 되물어 `move_*`·`create_directory_undo`가 INVALID.
 3. 후보 여럿 되묻기: `find_files` 후보가 여럿이면 앱이 고르라고 되물어

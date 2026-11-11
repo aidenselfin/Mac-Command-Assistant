@@ -1,0 +1,46 @@
+{
+  "id": "recover_nfd_missing_name",
+  "family": "file.read.recover",
+  "axis": "see",
+  "level": 35,
+  "status": "active",
+  "note": "운영 실패 69·70: NFD 한글 이름을 옮겨 적다 깨짐. 오류에 실제 경로가 와서 두 번째에 읽는다.",
+  "files": {
+    "회의록 정리.txt": "결정: 출시는 12월 3일"
+  },
+  "request": "회의록 정리 파일에서 출시일 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__read_document",
+          "args": {
+            "path": "{root}/회의록 졍리.txt"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/회의록 정리.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "출시일은 12월 3일입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "filesystem__read_text_file"
+    ],
+    "reply_contains": [
+      "12월 3일"
+    ]
+  }
+}
