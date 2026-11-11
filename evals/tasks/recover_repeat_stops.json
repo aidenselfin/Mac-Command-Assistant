@@ -1,0 +1,55 @@
+{
+  "id": "recover_repeat_stops",
+  "family": "file.read.recover",
+  "axis": "see",
+  "level": 30,
+  "status": "active",
+  "note": "같은 깨진 경로를 세 번 읽으면 20회 한도 전에 정직한 보고로 멈춘다.",
+  "files": {
+    "notes.txt": "x"
+  },
+  "request": "보고서 졍리.txt 내용 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고서 졍리.txt"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고서 졍리.txt"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/보고서 졍리.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "보고서 졍리.txt를 찾지 못했습니다. 폴더에는 notes.txt만 있습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "status": "error",
+    "reply_contains": [
+      "반복",
+      "찾지 못했습니다"
+    ]
+  }
+}

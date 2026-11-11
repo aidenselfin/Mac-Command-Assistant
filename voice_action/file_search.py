@@ -579,6 +579,107 @@ def list_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
     )
 
 
+GROUP_FILES_TOOL = "local__group_files"
+GROUP_SHOW = 20  # paths per group handed to the model; the count says how many there are
+MAX_GROUPS = 8
+KINDS = {
+    "이미지": {"jpg", "jpeg", "png", "gif", "heic", "webp", "bmp", "tiff", "svg"},
+    "문서": {"pdf", "doc", "docx", "hwp", "hwpx", "txt", "md", "rtf", "odt", "pages",
+             "ppt", "pptx", "key"},
+    "표": {"xls", "xlsx", "csv", "tsv", "numbers"},
+    "압축": {"zip", "rar", "7z", "tar", "gz", "dmg"},
+    "동영상": {"mp4", "mov", "avi", "mkv"},
+    "음악": {"mp3", "wav", "m4a", "aac", "flac"},
+}
+GROUP_DEFINITION = ToolDefinition(
+    GROUP_FILES_TOOL,
+    "허용된 폴더 안 파일을 비슷한 것끼리 묶어 보여준다(읽기 전용, 파일 내용은 보지 않음). "
+    "keywords를 주면 이름에 그 말이 들어간 파일을 말마다 한 묶음으로, 없으면 by에 따라 "
+    "name(이름 앞부분이 같은 파일)·kind(이미지·문서·표 등 종류) 묶음을 준다(기본 둘 다). "
+    "extensions·folder_hint는 사용자가 형식·폴더를 말했을 때만 쓴다. 이미 같은 이름 폴더에 "
+    "든 파일은 빠진다. 결과의 folder는 옮길 폴더 이름 제안이다. 결과는 사용자에게 "
+    "보이지 않으니 묶음 이름과 파일 수·예시 파일을 답에 적는다. 사용자가 옮기라고 "
+    "했을 때만 local__create_directory 후 파일마다 local__move_file로 옮기고, 옮기라는 "
+    "말이 없으면 묶음만 알리고 옮길지 물어본다. 직전에 보여준 묶음을 옮기라는 요청이면 "
+    "같은 인자로 다시 불러 경로를 얻는다.",
+    {
+        "type": "object",
+        "properties": {
+            "keywords": {"type": ["array", "null"], "items": {"type": "string"}},
+            "by": {"type": ["string", "null"], "enum": ["name", "kind", None]},
+            "extensions": {"type": ["array", "null"], "items": {"type": "string"}},
+            "folder_hint": {"type": ["string", "null"]},
+        },
+    },
+)
+
+
+def _name_key(entry: Entry) -> str | None:
+    """First word of the name that is not a number: IMG_0001 -> img, 보고서_최종 -> 보고서.
+
+    ponytail: first-word heuristic; 'final report' and 'final draft' land together.
+    """
+    for word in _fold(entry.path.stem).split():
+        word = DIGITS.sub("", word)
+        if len(word) >= 2:
+            return word
+    return None
+
+
+def group_files(arguments: dict, roots: tuple[Path, ...]) -> ToolResult:
+    try:
+        Draft202012Validator(GROUP_DEFINITION.schema).validate(arguments)
+    except ValidationError as exc:
+        raise ToolRejectedError(f"잘못된 {GROUP_FILES_TOOL} 인자입니다.") from exc
+    entries, truncated = _walk(roots)
+    entries = _filter(entries, arguments, roots)
+    keywords = list(dict.fromkeys(
+        word for word in (_fold(item[:100]) for item in (arguments.get("keywords") or []))
+        if word
+    ))[:MAX_KEYWORDS]
+    groups: list[tuple[str, dict[str, list[Entry]]]] = []
+    if keywords:
+        patterns = [(word, _keyword_pattern(word)) for word in keywords]
+        groups.append(("keyword", {
+            word: [entry for entry in entries if pattern.search(_fold(entry.name))]
+            for word, pattern in patterns
+        }))
+    else:
+        by = arguments.get("by")
+        if by in (None, "name"):
+            named: dict[str, list[Entry]] = {}
+            for entry in entries:
+                if key := _name_key(entry):
+                    named.setdefault(key, []).append(entry)
+            groups.append(("name", {k: v for k, v in named.items() if len(v) >= 2}))
+        if by in (None, "kind"):
+            kinds: dict[str, list[Entry]] = {}
+            for entry in entries:
+                for kind, extensions in KINDS.items():
+                    if entry.extension in extensions:
+                        kinds.setdefault(kind, []).append(entry)
+            groups.append(("kind", kinds))
+    found = []
+    for by, members in groups:
+        for label, files in members.items():
+            # A file already in a folder of the group's name is organized already.
+            files = sorted(
+                (entry for entry in files if not entry.folder or _fold(entry.folder[-1]) != label),
+                key=lambda entry: (_folder_label(entry), entry.name),
+            )
+            if files:
+                found.append({
+                    "by": by, "label": label, "folder": label, "count": len(files),
+                    "files": [str(entry.path) for entry in files[:GROUP_SHOW]],
+                })
+    found.sort(key=lambda item: -item["count"])
+    response = {"groups": found[:MAX_GROUPS], "more_groups": max(0, len(found) - MAX_GROUPS),
+                "truncated": truncated}
+    return ToolResult(
+        True, json.dumps(response, ensure_ascii=False), structured=response, truncated=truncated
+    )
+
+
 def clarification_spec(response: dict) -> tuple[str, str, tuple[str, ...], tuple[str, ...]] | None:
     """(question, kind, options, labels) when the user must pick or narrow; else None."""
     decision = response.get("decision")

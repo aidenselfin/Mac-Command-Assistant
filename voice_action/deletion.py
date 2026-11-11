@@ -1,6 +1,8 @@
 """Local, approved file batches with durable backups in the existing journal."""
 
+import codecs
 import hashlib
+import mimetypes
 import os
 import stat
 import tempfile
@@ -17,6 +19,7 @@ from voice_action.undo import UndoJournalError, _fsync_directory
 DELETE_TOOL = "local__delete_files"
 MAX_DELETE_FILES = 100
 MAX_DELETE_BYTES = 50 * 1024 * 1024
+PREVIEW_LINES, PREVIEW_LINE_CHARS, PREVIEW_FILES = 3, 80, 20
 _STRICT_DELETE = ToolDefinition(
     DELETE_TOOL,
     "사용자가 명시적으로 요청한 파일 삭제. paths로 단일/여러 절대경로를 지정하거나 "
@@ -62,6 +65,31 @@ DELETE_DEFINITION = ToolDefinition(
         },
     },
 )
+
+
+def _size(size):
+    for unit in ("B", "KB", "MB"):
+        if size < 1024 or unit == "MB":
+            return f"{size} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
+def file_preview(path, data):
+    """Head lines for text, kind and size for binary. For the user's screen, never the model."""
+    head = data[:4096]
+    try:
+        # final=False: a multibyte character cut at 4096 bytes is not an error.
+        text = codecs.getincrementaldecoder("utf-8")().decode(head)
+        if "\0" in text:
+            raise UnicodeDecodeError("utf-8", head, 0, 1, "NUL byte")
+    except UnicodeDecodeError:
+        kind = mimetypes.guess_type(path)[0] or "알 수 없는 형식"
+        return f"바이너리 · {kind} · {_size(len(data))}"
+    lines = [line.strip()[:PREVIEW_LINE_CHARS] for line in text.splitlines() if line.strip()]
+    if not lines:
+        return "(빈 파일)" if not data else "(공백만 있음)"
+    more = len(lines) > PREVIEW_LINES or len(data) > len(head)
+    return "\n".join(lines[:PREVIEW_LINES]) + ("\n…" if more else "")
 
 
 class DeletionJournal:
@@ -162,14 +190,16 @@ class DeletionJournal:
                     raise ToolRejectedError("한 번에 최대 100개 파일을 삭제할 수 있습니다.")
         if not paths:
             raise ToolRejectedError("삭제 조건에 맞는 파일이 없습니다.")
-        snapshots, total = [], 0
+        snapshots, previews, total = [], [], 0
         for path in sorted(paths):
             data, snapshot = self._read(path)
             total += len(data)
             if total > MAX_DELETE_BYTES:
                 raise ToolRejectedError("삭제 파일의 전체 백업 크기는 최대 50 MiB입니다.")
             snapshots.append(snapshot)
-        return {"paths": [item[0] for item in snapshots]}, tuple(snapshots)
+            if len(previews) < PREVIEW_FILES:
+                previews.append(file_preview(snapshot[0], data))
+        return {"paths": [item[0] for item in snapshots]}, tuple(snapshots), tuple(previews)
 
     def execute(self, snapshots):
         backups = []

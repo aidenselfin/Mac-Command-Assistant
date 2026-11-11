@@ -1,8 +1,9 @@
-# 자동 평가·자가 개선 실행 지침서 (voice-action-AI-test 적용판)
+# 자동 평가·자가 개선 실행 지침서
 
 - 작성일: 2026-10-04
 - 원문: `~/Downloads/voice_action_self_improvement_guide.md` (설계 지침 v1.0, 1308행)
 - 이 문서: 원문을 실제 코드와 대조해 검토하고, 이 저장소에서 바로 실행할 수 있게 줄인 판
+- 1~5절의 판정·수치는 작성 당시(2026-10-04) 기준이다. 지금 과제 수·기준선은 [status.md](status.md)를 본다.
 - 1단계(EvalRunner)·2단계(과제 22개)·3단계(lesson 후보→채택) 코드는 구현·검증되어 있다.
   2단계의 실제 모델 기준선은 42/48 통과·INVALID 0으로 측정 완료했다.
   [기준선 보고서](evaluations/2026-10-04-groq-baseline.md)를 참고한다. 3단계의 실제 후보 비교는 남아 있다.
@@ -23,7 +24,7 @@
 | negative control (9.3) | **적용** | 일부러 틀린 실행을 grader가 떨어뜨리는지 과제로 고정 |
 | lesson을 후보로 두고 비교 후 채택 (2.2, 14) | **적용 (3단계)** | 분석 결과는 후보로 저장하며, 평가 비교 후 사람이 채택해야 활성화된다 |
 | YAML 과제 DSL (7.2) | **수정 → JSON** | PyYAML 미설치. 새 의존성 없이 stdlib `json` 사용 |
-| 파일 이동 예시 (7.2, 9.3) | **수정** | **이 앱에는 이동 도구가 없다.** 지원 쓰기: `write_file`(생성·덮어쓰기), `local__delete_files`, `local__convert_file`. 예시를 이것들로 바꿨다 |
+| 파일 이동 예시 (7.2, 9.3) | **수정** | 작성 당시 이동 도구가 없었다(2026-10-14 `local__move_file` 추가). 당시 지원 쓰기: `write_file`(생성·덮어쓰기), `local__delete_files`, `local__convert_file`. 예시를 이것들로 바꿨다 |
 | 취소 (cancel) | **수정** | 별도 동작이 아니다. 질문 단계의 "취소" 입력 또는 승인 단계의 거절(`reject_pending`)이다 |
 | clarification `intent_slot` 매칭 (7.2) | **수정** | 질문이 어떤 slot인지 코드가 알 수 없다. 답을 순서대로 주고, 대본에 없는 질문이 오면 `simulator_failure`로 기록 |
 | 작업 큐·lease·예산 예약 (17) | 보류 | 실험은 사람이 한 번씩 실행한다. 처리량 문제가 생기면 도입 |
@@ -31,7 +32,7 @@
 | heldout·family split·bootstrap (11.4, 12) | 보류 | 과제 수가 수십 개를 넘기 전에는 의미 없음. 그때 `split` 필드 추가 |
 | LLM 사용자·LLM judge (10.2, 11.1) | 보류 | 결정적으로 채점 가능한 파일 작업부터. 요약 품질 평가가 필요해질 때 도입 |
 | mutation testing (9.4) | 보류 | negative control로 grader 최소 검증은 됨 |
-| 컨테이너 격리, 자동 코드 수정, FeatureWorker (15, 16) | 보류 | 자동 코드 변경 자체를 아직 하지 않으므로 불필요 |
+| 컨테이너 격리, FeatureWorker (15, 16) | 보류 | 자동 코드 수정은 2026-10-27 별도 worktree 방식으로 도입(7절) |
 
 ## 2. 원문 가정과 실제 코드의 대응
 
@@ -59,7 +60,6 @@
 ### 3.1 실행
 
 ```bash
-cd ~/voice-action-AI-test
 uv run python evals/run_eval.py                    # 재생 모드: API 호출 없음, 하네스 자체 검증
 uv run python evals/run_eval.py --live             # 설정된 LLM으로 전체 과제 (과금)
 uv run python evals/run_eval.py --live --task write_reject --repeat 3
@@ -212,22 +212,6 @@ lesson이 겨냥한 실패를 재현하는 과제가 없으면 **먼저 그 과�
 | 자동 코드 수정 (원문 15, 19.6) | **2026-10-27 도입됨**(`autonomy.py`). 별도 브랜치·보호 파일·검증 게이트를 거쳐 사람 리뷰 없이 main에 합친다 |
 | 새 기능 자동 개발 (원문 16) | 보류. 새 기능(예: 파일 이동)은 사람이 정하고, 먼저 `evals/tasks`에 실패 과제를 넣은 뒤 구현 |
 | 비용 | `--live` 1회 = 과제 수 × 반복 × 평균 2~3회 모델 호출. 25과제×3회면 약 150~225회 |
-
-## 8. Claude Code / Codex에게 넘길 지시문 (2·3단계)
-
-```text
-docs/self-improvement-guide.md를 읽고 4절(2단계)과 5절(3단계)만 구현하라.
-AGENTS.md 규칙을 따르고 이 폴더에서 직접 작업·커밋한다.
-
-1. evals/tasks에 4절 1~2번 과제를 추가한다. 각 과제는 재생 모드 정답 script와
-   negative script로 검증한다. `uv run python evals/run_eval.py`가 모두 통과해야 한다.
-   --live 실행은 사용자 확인 후에만 한다 (API 과금).
-2. 5.1의 feedback.py / main.py / tests 변경을 한다. evals/run_eval.py의 채점 로직과
-   risk_guard.py는 수정하지 않는다.
-3. 검증: uv run --locked pytest -q, uv run --locked ruff check .,
-   uv run python evals/run_eval.py
-4. 바뀐 파일, 검증 결과, 남은 문제를 보고하고 docs/status.md를 갱신한다.
-```
 
 ## 능력 점수
 

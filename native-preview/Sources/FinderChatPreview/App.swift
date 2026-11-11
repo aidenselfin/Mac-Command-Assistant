@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 
+final class Draft: ObservableObject { @Published var text = "" }
+
 @main
 struct FinderChatPreviewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -14,6 +16,10 @@ struct FinderChatPreviewApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("새 대화") { Backend.shared.newConversation() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("최근 파일") { Backend.shared.quickList("modified", "최근 파일") }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                Button("용량 큰 파일") { Backend.shared.quickList("size", "용량 큰 파일") }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
             }
         }
     }
@@ -22,7 +28,7 @@ struct FinderChatPreviewApp: App {
 private struct ChatPanel: View {
     @StateObject private var backend = Backend.shared
     @StateObject private var voice = VoiceInput.shared
-    @State private var input = ""
+    @StateObject private var draft = Draft()  // @State 매크로는 Xcode 없이 빌드 불가
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,9 +64,8 @@ private struct ChatPanel: View {
                             }
                             .buttonStyle(.plain).disabled(!backend.canSubmit)
                         }
-                        if let file = backend.dragFile { dragChip(file) }
+                        ForEach(backend.dragFiles, id: \.self) { dragChip($0) }
                         if let approval = backend.approval { approvalView(approval) }
-                        if backend.ratable { rating }
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -117,6 +122,7 @@ private struct ChatPanel: View {
         case "WAITING_USER_INPUT": return "답변이 필요해요"
         case "PLANNING", "RESUMING_PLAN": return "요청을 처리하고 있어요"
         case "STOPPED": return "연결 종료 · 메뉴에서 다시 시작하세요"
+        case "SLEEPING": return "쉬는 중 · 쓰면 바로 깨어나요"
         default: return "연결 준비 중"
         }
     }
@@ -171,6 +177,10 @@ private struct ChatPanel: View {
                     Text("대상 \(approval.targets.count)개").font(.callout.weight(.medium))
                     ForEach(Array(approval.targets.enumerated()), id: \.offset) { index, path in
                         Text("\(index + 1). \(path)").font(.caption).textSelection(.enabled)
+                        if let previews = approval.previews, index < previews.count {
+                            Text(previews[index]).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .lineLimit(4).padding(.leading, 12).textSelection(.enabled)
+                        }
                     }
                 }
                 if !approval.preview.isEmpty {
@@ -201,29 +211,6 @@ private struct ChatPanel: View {
         .help("끌어서 원하는 곳에 놓으세요")
     }
 
-    private var rating: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("답변 평가").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                ForEach(1...5, id: \.self) { score in
-                    Button(String(score)) { _ = backend.send("rate", fields: ["score": score]) }
-                        .buttonStyle(.bordered).controlSize(.mini)
-                }
-            }
-            if let score = backend.lowScore {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
-                    ForEach([("wrong_file", "엉뚱한 파일"), ("missing_content", "내용 부족"),
-                             ("wrong_content", "틀린 내용"), ("too_long", "너무 김"),
-                             ("too_slow", "너무 느림"), ("other", "기타")], id: \.0) { tag, title in
-                        Button(title) { _ = backend.send("rate", fields: ["score": score, "tags": [tag]]) }
-                            .controlSize(.small)
-                    }
-                }
-            }
-        }.disabled(!backend.idle)
-    }
-
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let path = backend.attachment {
@@ -239,11 +226,11 @@ private struct ChatPanel: View {
                 Button(action: attach) { Image(systemName: "paperclip") }
                     .buttonStyle(.borderless).disabled(!backend.idle).help("파일 첨부")
                 TextField(backend.state == "WAITING_USER_INPUT" ? "답변을 입력하세요" : "명령을 입력하세요",
-                          text: $input, axis: .vertical)
+                          text: $draft.text, axis: .vertical)
                     .textFieldStyle(.plain).lineLimit(1...3).onSubmit(submit)
                 Button(action: submit) { Image(systemName: "arrow.up") }
                     .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
-                    .disabled(!backend.canSubmit || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!backend.canSubmit || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(10)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
@@ -254,8 +241,8 @@ private struct ChatPanel: View {
 
     private func submit() {
         guard backend.canSubmit else { return }
-        backend.submit(input)
-        input = ""
+        backend.submit(draft.text)
+        draft.text = ""
     }
 
     private func attach() {

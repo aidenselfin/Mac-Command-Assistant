@@ -1,10 +1,14 @@
 """Single-model planner with a bounded namespaced MCP tool loop."""
 
 import asyncio
+import difflib
+import hashlib
 import ipaddress
 import json
+import os
 import re
 import time
+import unicodedata
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -28,10 +32,13 @@ from voice_action.file_operations import COPY_TOOL, DEFINITIONS, MKDIR_TOOL, MOV
 from voice_action.file_search import (
     FIND_FILES_DEFINITION,
     FIND_FILES_TOOL,
+    GROUP_DEFINITION,
+    GROUP_FILES_TOOL,
     LIST_DEFINITION,
     LIST_FILES_TOOL,
     clarification_spec,
 )
+from voice_action.finder import OPEN_DEFINITION, OPEN_FILE_TOOL
 from voice_action.mcp_client import (
     TRUNCATION_MARKER,
     MCPError,
@@ -54,6 +61,10 @@ from voice_action.undo import UndoJournal, UndoJournalError, UndoKind
 
 class PlannerError(RuntimeError):
     pass
+
+
+class ModelFormatError(PlannerError):
+    """The model's reply broke the call format; the loop tells it what to fix instead of ending."""
 
 
 class ToolGateway(Protocol):
@@ -114,7 +125,16 @@ MOVE_PATTERN = re.compile(
     r"(?<![\w./-])(?:move|rename)(?![\w./-])", re.IGNORECASE
 )
 COPY_PATTERN = re.compile(r"복사(?=$|\s|해|하|할|를|줘)|(?<![\w./-])copy(?![\w./-])", re.IGNORECASE)
+# "열어줘", "기본 앱으로 열기", "open a.txt"; "열어서 요약해줘" only wants the content.
+OPEN_PATTERN = re.compile(
+    r"열어\s*(?:줘|주|봐|달)|열기|띄워|(?<![\w./-])open(?![\w./-])", re.IGNORECASE
+)
 MKDIR_PATTERN = re.compile(r"(?:폴더|디렉터리).*?(?:만들|생성)|\bmkdir\b", re.IGNORECASE)
+# "비슷한 파일 묶어줘", "다운로드 폴더 정리해줘": offer the read-only grouping tool.
+GROUP_PATTERN = re.compile(
+    r"묶|정리|분류|모아|비슷한|끼리|(?<![\w./-])(?:group|organi[sz]e|sort\s+out)(?![\w./-])",
+    re.IGNORECASE,
+)
 
 
 def _operation_requested(tool: str, text: str) -> bool:
@@ -124,6 +144,14 @@ def _operation_requested(tool: str, text: str) -> bool:
                  r"(?:do\s+not|don't|never)\s+(?:move|rename|copy|mkdir)", plain, re.IGNORECASE):
         return False
     return pattern.search(plain) is not None
+
+
+def _open_requested(text: str) -> bool:
+    plain = _without_quoted_text(text, action_pattern=OPEN_PATTERN)
+    if re.search(r"열지|열어\s*주지|띄우지|띄워\s*주지|(?:열기|열어|띄워)\s*(?:취소|말)|"
+                 r"(?:do\s+not|don't|never)\s+open", plain, re.IGNORECASE):
+        return False
+    return OPEN_PATTERN.search(plain) is not None
 
 
 class ToolLoopLimitError(PlannerError):
@@ -227,6 +255,11 @@ class ApprovalContext:
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
     found_paths: tuple[str, ...] = ()
+    group_paths: tuple[str, ...] = ()
+    call_counts: tuple[tuple[str, int], ...] = ()
+    recoveries: int = 0
+    escalated: bool = False
+    run_seconds: float = 0.0  # loop time spent before this approval
 
     @property
     def digest(self) -> str:
@@ -247,6 +280,7 @@ class ApprovalRequired:
     preview_truncated: bool
     context: ApprovalContext = field(repr=False)
     targets: tuple[str, ...] = ()
+    previews: tuple[str, ...] = field(default=(), repr=False)  # user screen only
 
 
 @dataclass(frozen=True)
@@ -296,6 +330,7 @@ class PlannerEventType(Enum):
     PLANNING_STARTED = auto()
     TOOL_STARTED = auto()
     TOOL_FINISHED = auto()
+    RECOVERING = auto()  # tool_name carries the status label shown while it tries again
 
 
 @dataclass(frozen=True)
@@ -523,21 +558,21 @@ class OpenAICompatibleModel:
                 f"LLM API 요청 실패 (HTTP {status}{detail})" if status else "LLM API 요청 실패"
             ) from exc
         if not response.choices:
-            raise PlannerError("LLM 응답이 비어 있습니다.")
+            raise ModelFormatError("LLM 응답이 비어 있습니다.")
         message = response.choices[0].message
         calls = []
         clarification = None
         for call in message.tool_calls or []:
             if call.type != "function":
-                raise PlannerError("지원하지 않는 LLM 도구 호출 형식입니다.")
+                raise ModelFormatError("지원하지 않는 LLM 도구 호출 형식입니다.")
             if call.function.name == CLARIFICATION_TOOL_NAME:
                 if clarification is not None:
-                    raise PlannerError("clarification 요청이 중복되었습니다.")
+                    raise ModelFormatError("clarification 요청이 중복되었습니다.")
                 clarification = self._parse_clarification(call.id, call.function.arguments)
             else:
                 calls.append(ToolCall(call.id, call.function.name, call.function.arguments))
         if clarification is not None and calls:
-            raise PlannerError("clarification과 MCP 도구를 동시에 요청할 수 없습니다.")
+            raise ModelFormatError("clarification과 MCP 도구를 동시에 요청할 수 없습니다.")
         return ModelTurn(message.content, calls, clarification)
 
     @staticmethod
@@ -545,9 +580,9 @@ class OpenAICompatibleModel:
         try:
             value = json.loads(arguments)
         except (TypeError, ValueError) as exc:
-            raise PlannerError("잘못된 clarification 인자입니다.") from exc
+            raise ModelFormatError("잘못된 clarification 인자입니다.") from exc
         if not isinstance(value, dict):
-            raise PlannerError("잘못된 clarification 인자입니다.")
+            raise ModelFormatError("잘못된 clarification 인자입니다.")
         # The provider no longer insists on every field, so a missing or null one is "none given".
         question = value.get("question")
         options = value.get("options") or []
@@ -559,7 +594,7 @@ class OpenAICompatibleModel:
             or any(not isinstance(item, str) or not item.strip() for item in options)
             or kind not in {"file_candidate", "edit_criteria", "free_text"}
         ):
-            raise PlannerError("잘못된 clarification 인자입니다.")
+            raise ModelFormatError("잘못된 clarification 인자입니다.")
         # A question with nothing to pick from is a typed answer, whatever kind it claimed.
         if not options or kind == "free_text":
             return ClarificationRequest(question.strip(), (), "free_text", call_id)
@@ -590,6 +625,96 @@ CONFIRM_NUDGE = (
     "local__move_file, local__copy_file, local__create_directory)를 바로 호출하세요."
 )
 EMPTY_NUDGE = "도구 결과를 바탕으로 사용자에게 한국어로 짧게 최종 응답을 작성하세요."
+RECOVERING_LABEL = "다른 방법으로 다시 시도 중"
+MAX_FORMAT_ERRORS = 3  # a provider that always breaks the format still ends the command
+REPEAT_NUDGE = (
+    "같은 시도가 같은 결과를 냈습니다. 같은 호출을 되풀이하지 말고 다른 방법을 쓰세요"
+    "(다른 경로·다른 도구·local__find_files로 실제 경로 찾기). 결과에 나온 경로는 그대로 "
+    "복사해 쓰세요."
+)
+HONEST_STOP = (
+    "같은 시도가 같은 결과를 세 번 냈으므로 더 시도하지 않습니다. 도구를 호출하지 말고, "
+    "지금까지 알아낸 것과 하지 못한 것을 사용자에게 한국어로 짧고 정직하게 보고하세요."
+)
+FORMAT_NUDGE = (
+    "format_error: 직전 응답을 처리할 수 없습니다: {}. 형식을 고쳐 다시 응답하세요. "
+    "되묻기(request_clarification)와 도구 호출은 한 응답에 함께 하지 말고 하나만 하세요."
+)
+# Tools whose path names a file that must already exist: a miss gets real names back.
+HINT_SOURCE_TOOLS = frozenset({CONVERT_TOOL, MOVE_TOOL, COPY_TOOL})
+HINT_TOOLS = CONTENT_READ_TOOLS | {OPEN_FILE_TOOL} | HINT_SOURCE_TOOLS
+
+
+def _nfc(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
+
+
+def _safe_dir(directory: Path, roots: tuple[Path, ...]) -> bool:
+    """A real directory inside an allowed root, reached without symlinks or `..`."""
+    try:
+        return directory.resolve(strict=True) == directory and directory.is_dir() and any(
+            directory.is_relative_to(root) for root in roots
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _on_disk_path(raw: object, roots: tuple[Path, ...]) -> object:
+    """The same path spelled as on disk: macOS keeps Korean names decomposed (NFD)."""
+    if not isinstance(raw, str) or not raw.startswith("/"):
+        return raw
+    path = Path(raw)
+    if not _safe_dir(path.parent, roots):
+        return raw
+    wanted = _nfc(path.name)
+    try:
+        names = os.listdir(path.parent)
+    except OSError:
+        return raw
+    if path.name in names:
+        return raw
+    match = next((name for name in names if _nfc(name) == wanted), None)
+    return str(path.parent / match) if match else raw
+
+
+def _missing_path_hint(call: "ToolCall", roots: tuple[Path, ...]) -> str:
+    """What to try next when a tool was given a path that does not exist."""
+    if call.name not in HINT_TOOLS:
+        return ""
+    try:
+        arguments = json.loads(call.arguments)
+        raw = arguments.get("source" if call.name in HINT_SOURCE_TOOLS else "path")
+        path = Path(raw)
+        if not path.is_absolute() or path.exists():
+            return ""
+    except (TypeError, ValueError, AttributeError, OSError):
+        return ""
+    folder = path.parent
+    while not folder.exists() and folder != folder.parent:
+        folder = folder.parent
+    if not _safe_dir(folder, roots):
+        return ""  # never list a folder outside the allowed roots
+    try:
+        names = [_nfc(name) for name in os.listdir(folder) if not name.startswith(".")]
+    except OSError:
+        return ""
+    close = difflib.get_close_matches(_nfc(path.name), names, n=3, cutoff=0.4)
+    if close:
+        listed = ", ".join(str(folder / name) for name in close)
+        return (f" 그 경로에 파일이 없습니다. 같은 폴더의 비슷한 실제 경로: {listed}. "
+                "맞는 경로를 그대로 복사해 다시 호출하세요.")
+    return (" 그 경로에 파일이 없습니다. local__find_files로 실제 경로를 찾고 결과의 경로를 "
+            "그대로 복사해 쓰세요.")
+
+
+def _call_key(call: "ToolCall", content: object) -> str:
+    """(tool, arguments with spelling noise removed, result) as one comparable string."""
+    try:
+        arguments = json.dumps(json.loads(call.arguments), sort_keys=True, ensure_ascii=False)
+    except (TypeError, ValueError):
+        arguments = str(call.arguments).strip()
+    digest = hashlib.sha256(str(content).encode()).hexdigest()
+    return f"{call.name}\0{_nfc(arguments)}\0{digest}"
 CREATE_PATTERN = re.compile(r"만들|생성|새로|작성|저장")
 LOOKUP_PATTERN = re.compile(r"읽|요약|찾|내용|보여|열어|번역|분석|설명|삭제|변환")
 
@@ -770,9 +895,10 @@ def _wants_content(text: str) -> bool:
 
 
 def _acts_without_reading(text: str) -> bool:
-    """Delete and conversion name their own target, so a chosen file need not be read first."""
+    """Delete, conversion and opening name their own target: a chosen file need not be read."""
     return bool(_destructive_request(text) or CONVERSION_REQUEST_PATTERN.search(text)
-                or _operation_requested(MOVE_TOOL, text) or _operation_requested(COPY_TOOL, text))
+                or _operation_requested(MOVE_TOOL, text) or _operation_requested(COPY_TOOL, text)
+                or _open_requested(text))
 
 
 RANKED_PICK_PATTERN = re.compile(
@@ -1081,6 +1207,7 @@ class _LoopState:
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
     found_paths: tuple[str, ...] = ()
+    group_paths: tuple[str, ...] = ()  # files local__group_files listed: grounded move sources
     seen_paths: tuple[str, ...] = ()
     empty_retries: int = 0  # times an empty final reply was sent back for a real answer
     confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
@@ -1089,6 +1216,13 @@ class _LoopState:
     find_override: str | None = None  # what the model is told about the last search instead
     ranked_candidates: tuple[str, ...] = ()  # one of these must be read before answering
     known_target: bool = False  # an attached file or the previous command's files
+    # Recovery: how often each (tool, arguments, result) came back, fixes that failed, and
+    # whether the stronger model has taken over. Kept across an approval.
+    call_counts: dict[str, int] = field(default_factory=dict)
+    recoveries: int = 0
+    escalated: bool = False
+    format_errors: int = 0
+    started: float = 0.0  # loop start (clock), moved forward past approval waits
 
 
 class Planner:
@@ -1103,8 +1237,11 @@ class Planner:
         event_observer: PlannerEventObserver | None = None,
         allow_local_web: bool = False,
         undo_journal: UndoJournal | None = None,
+        escalation_model: ModelClient | None = None,
     ):
         self.config, self._gateway, self.model, self.emit = config, gateway, model, emit
+        self._escalation = escalation_model  # takes over after two failed recoveries
+        self._clock = time.monotonic
         self._undo_journal = undo_journal
         self._risk_guard = RiskGuard(
             gateway,
@@ -1271,11 +1408,16 @@ class Planner:
             if self.config.allowed_directories:
                 tools.append(FIND_FILES_DEFINITION)
                 tools.append(LIST_DEFINITION)
+                # A move may act on groups shown last turn, so it can group again for the paths.
+                if GROUP_PATTERN.search(user_text) or _operation_requested(MOVE_TOOL, user_text):
+                    tools.append(GROUP_DEFINITION)
                 # The raw search lists every match to the model, which then reads them all
                 # instead of asking; every file lookup goes through find_files.
                 tools = [tool for tool in tools if tool.name != FILESYSTEM_SEARCH_TOOL]
             if CONVERSION_REQUEST_PATTERN.search(user_text):
                 tools.append(CONVERT_DEFINITION)
+            if self.config.allowed_directories and _open_requested(user_text):
+                tools.append(OPEN_DEFINITION)
         roots = "\n".join(f"- {path.name}: {path}" for path in self.config.allowed_directories)
         resolution_rule = f"\n확정된 사용자 답변: {resolution}" if resolution else ""
         memory_rule = _memory_block(previous) if previous is not None else ""
@@ -1289,6 +1431,8 @@ class Planner:
                     "도구는 요청별로 제공되므로 이번 목록에 없다고 앱 전체에 기능이 없다고 "
                     "말하지 마세요. 이동은 local__move_file, 복사는 local__copy_file, "
                     "폴더 생성은 local__create_directory를 사용하세요. "
+                    "파일을 열어 달라고 하면 찾은 파일을 local__open_file로 기본 앱에서 "
+                    "여세요. "
                     "폴더 이름이 요청에 있고 허용 루트가 하나뿐이면 위치를 묻지 말고 "
                     "그 루트 안에 바로 만드세요. 승인은 앱이 받으니 '만들까요' 같은 "
                     "확인 질문은 하지 마세요. "
@@ -1319,6 +1463,8 @@ class Planner:
                     "오면 사용자에게 그대로 알리세요. "
                     "pdf·docx·doc·rtf·odt·html 문서 내용을 읽을 때는 local__read_document를, "
                     "txt·md·csv 같은 텍스트 파일은 filesystem__read_text_file을 쓰세요. "
+                    "읽거나 찾은 결과를 사용자에게 보여 달라는 요청에는 '읽었습니다' 같은 "
+                    "말로 끝내지 말고, 읽은 내용·찾은 파일 이름을 답변에 직접 쓰세요. "
                     "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 "
                     "request_clarification contract를 사용하세요. "
                     "복잡하다는 이유로 질문하지 마세요. "
@@ -1336,6 +1482,9 @@ class Planner:
                     "결과 순서대로 크기·날짜와 함께 직접 적으세요. '가장 최근 계약서'처럼 "
                     "크기·날짜로 하나를 고르는 요청은 사용자에게 묻지 말고 local__list_files "
                     "결과에서 골라 진행하세요. "
+                    "'~만 찾아줘·모두 알려줘·어느 폴더들에 있는지'처럼 해당 파일 전부를 "
+                    "보여 달라는 요청은 하나를 고르는 local__find_files 대신 "
+                    "local__list_files(extensions·name_contains)로 답하세요. "
                     "폴더 목록·파일 내용 같은 조회 결과도 사용자에게 따로 보이지 않으니 "
                     "'완료했습니다'로 끝내지 말고 항목 이름이나 내용 핵심을 답에 직접 "
                     "적으세요. "
@@ -1417,6 +1566,7 @@ class Planner:
             last_search=last_search,
             attachment=attachment,
             known_target=bool(attachment or (previous is not None and previous.files)),
+            started=self._clock(),
         )
         return await self._continue(state)
 
@@ -1478,6 +1628,8 @@ class Planner:
         while True:
             if state.tool_calls:
                 outcome = await self._process_pending_calls(state)
+                if outcome is None:
+                    outcome = await self._check_progress(state)
                 if outcome is not None:
                     return outcome
                 state.tool_calls = ()
@@ -1493,6 +1645,9 @@ class Planner:
                     f"모델 호출 한도 초과 ({self.config.max_tool_rounds}회); "
                     f"추가 모델 호출 없이 종료했습니다.{completion}"
                 )
+            remaining = self.config.max_run_seconds - (self._clock() - state.started)
+            if remaining <= 0:
+                return self._time_limit_error(state)
 
             self._notify(PlannerEvent(PlannerEventType.PLANNING_STARTED, state.iteration))
             self.emit(
@@ -1547,14 +1702,26 @@ class Planner:
             state.model_calls += 1
             state.exposed_tool_names = frozenset(tool.name for tool in exposed_tools)
             try:
-                turn = await self.model.generate(
-                    list(state.messages),
-                    exposed_tools,
-                    allow_tools=True,
-                    allow_clarification=not (
-                        snapshot_pending or web_save_pending or web_content_pending
-                    ),
-                )
+                async with asyncio.timeout(remaining):
+                    turn = await self._active_model(state).generate(
+                        list(state.messages),
+                        exposed_tools,
+                        allow_tools=True,
+                        allow_clarification=not (
+                            snapshot_pending or web_save_pending or web_content_pending
+                        ),
+                    )
+            except TimeoutError:
+                return self._time_limit_error(state)
+            except ModelFormatError as exc:
+                # A broken reply is told what to fix, once per round, instead of ending.
+                state.format_errors += 1
+                if state.format_errors > MAX_FORMAT_ERRORS:
+                    return Error(f"모델 응답 형식 오류가 반복되어 멈췄습니다: {exc}")
+                state.messages.append({"role": "system", "content": FORMAT_NUDGE.format(exc)})
+                self._recovery_failed(state, "응답 형식 오류")
+                state.iteration += 1
+                continue
             finally:
                 self.timing.llm_round_ms.append(
                     (time.perf_counter_ns() - llm_started) / 1_000_000
@@ -1722,9 +1889,12 @@ class Planner:
                     return Error("요청한 파일 작업을 실행하지 못했습니다. 원본·목적지·허용 경로를 "
                                  "확인해 주세요.")
                 if not turn.text or not turn.text.strip():
-                    if state.empty_retries == 0 and state.model_calls < self.config.max_tool_rounds:
-                        # After tool results a model sometimes answers with nothing. Once, it
-                        # is told to write the answer instead of failing the command.
+                    escalated = self._recovery_failed(state, "빈 최종 응답")
+                    if (state.empty_retries == 0 or escalated) and (
+                        state.model_calls < self.config.max_tool_rounds
+                    ):
+                        # After tool results a model sometimes answers with nothing. It is told
+                        # to write the answer once, and once more if a stronger model took over.
                         state.empty_retries += 1
                         state.messages.append({"role": "system", "content": EMPTY_NUDGE})
                         state.iteration += 1
@@ -1755,6 +1925,78 @@ class Planner:
             )
             state.tool_calls = tuple(turn.tool_calls)
             state.next_call_index = 0
+
+    def _time_limit_error(self, state: _LoopState) -> Error:
+        completion = " 승인된 파일 변경은 완료되었습니다." if state.write_completed else ""
+        return Error(
+            f"시간 한도 초과 ({self.config.max_run_seconds:g}초); "
+            f"추가 모델 호출 없이 종료했습니다.{completion}"
+        )
+
+    def _active_model(self, state: _LoopState) -> ModelClient:
+        return self._escalation if state.escalated and self._escalation else self.model
+
+    def _recovery_failed(self, state: _LoopState, reason: str) -> bool:
+        """Count a failed fix; True when this one hands the conversation to the stronger model."""
+        state.recoveries += 1
+        self.emit(f"[RECOVER] {reason} (count={state.recoveries})")
+        self._notify(PlannerEvent(PlannerEventType.RECOVERING, state.iteration, RECOVERING_LABEL))
+        if state.recoveries >= 2 and self._escalation is not None and not state.escalated:
+            state.escalated = True
+            self.emit("[RECOVER] stronger model takes over")
+            return True
+        return False
+
+    async def _check_progress(self, state: _LoopState) -> PlannerOutcome | None:
+        """After a round of tool calls: a repeat gets a warning, a third one ends the command."""
+        start = max(
+            (i for i, message in enumerate(state.messages)
+             if message.get("role") == "assistant" and message.get("tool_calls")),
+            default=-1,
+        )
+        results = {
+            message["tool_call_id"]: message["content"]
+            for message in state.messages[start + 1:] if message.get("role") == "tool"
+        }
+        worst = errors = 0
+        for call in state.tool_calls:
+            if call.id not in results:
+                continue
+            key = _call_key(call, results[call.id])
+            state.call_counts[key] = state.call_counts.get(key, 0) + 1
+            worst = max(worst, state.call_counts[key])
+            errors += str(results[call.id]).startswith("tool_error")
+        if worst >= 3:
+            return await self._honest_stop(state)
+        if worst == 2:
+            self.emit("[PLAN] 같은 시도가 같은 결과를 냄")
+            state.messages.append({"role": "system", "content": REPEAT_NUDGE})
+            self._recovery_failed(state, "같은 시도 반복")
+        elif results and errors == len(results):
+            self._recovery_failed(state, "도구 오류")
+        return None
+
+    async def _honest_stop(self, state: _LoopState) -> Error:
+        """Stop a loop that makes no progress, with the model's own account of what it found."""
+        note = "같은 시도가 같은 결과를 세 번 내서 반복을 멈췄습니다."
+        if state.write_completed:
+            note += " 승인된 파일 변경은 완료되었습니다."
+        report = ""
+        if state.model_calls < self.config.max_tool_rounds:
+            state.messages.append({"role": "system", "content": HONEST_STOP})
+            state.model_calls += 1
+            started = time.perf_counter_ns()
+            try:
+                turn = await self._active_model(state).generate(
+                    list(state.messages), list(state.tools), allow_tools=False,
+                    allow_clarification=False,
+                )
+                report = (turn.text or "").strip()
+            except PlannerError:
+                pass
+            finally:
+                self.timing.llm_round_ms.append((time.perf_counter_ns() - started) / 1_000_000)
+        return Error(f"{note} {report}".strip())
 
     async def _process_pending_calls(
         self, state: _LoopState
@@ -1795,6 +2037,9 @@ class Planner:
             # null means "not given". Dropping it here keeps every policy and schema below
             # looking at the arguments the model actually meant.
             arguments = {key: value for key, value in arguments.items() if value is not None}
+            for key in ("path", "source"):
+                if key in arguments:
+                    arguments[key] = _on_disk_path(arguments[key], self.config.allowed_directories)
 
             if call.name == MACOS_ACTIVE_APP_TOOL and state.active_app_name is not None:
                 state.messages.append(
@@ -1881,6 +2126,8 @@ class Planner:
             if call.name != MKDIR_TOOL:
                 source = arguments.get("source")
                 chosen = state.attachment or state.single_search_candidate
+                if chosen is None and source in state.group_paths:
+                    chosen = source  # listed by the app itself, not named by the model
                 if chosen is not None and source != chosen:
                     return "첨부하거나 선택한 파일만 이동·복사할 수 있습니다."
                 if chosen is None and not _write_target_is_explicit(source, text, ()):
@@ -2008,13 +2255,16 @@ class Planner:
         ):
             # Checked before approval, so a resumed approval needs no copy of this state.
             return "고른 후보 파일을 읽기 전에는 파일을 바꿀 수 없습니다."
-        if call.name in CONTENT_READ_TOOLS and state.single_search_candidate is not None:
+        if (
+            call.name in CONTENT_READ_TOOLS | {OPEN_FILE_TOOL}
+            and state.single_search_candidate is not None
+        ):
             try:
                 requested = await self._gateway.validate_result_path(arguments.get("path"))
             except (MCPError, OSError):
                 requested = None
             if requested is None or requested != Path(state.single_search_candidate):
-                return "검증된 단일 후보 파일만 읽을 수 있습니다."
+                return "검증된 단일 후보 파일만 읽거나 열 수 있습니다."
         return None
 
     async def _execute_read_only(
@@ -2132,6 +2382,11 @@ class Planner:
                 return outcome
             if state.find_override is not None:
                 result_text, state.find_override = state.find_override, None
+        elif call.name == GROUP_FILES_TOOL and result.structured is not None:
+            state.group_paths = tuple(dict.fromkeys(
+                (*state.group_paths,
+                 *(path for group in result.structured["groups"] for path in group["files"]))
+            ))
         elif call.name == LIST_FILES_TOOL and result.structured is not None:
             files = result.structured.get("files") or []
             if len(files) == 1:  # "가장 최근 파일 줘": one pick is a draggable file too
@@ -2317,6 +2572,11 @@ class Planner:
             attachment=state.attachment,
             read_paths=state.read_paths,
             found_paths=state.found_paths,
+            group_paths=state.group_paths,
+            call_counts=tuple(state.call_counts.items()),
+            recoveries=state.recoveries,
+            escalated=state.escalated,
+            run_seconds=self._clock() - state.started,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -2327,10 +2587,10 @@ class Planner:
             prepared.preview_truncated,
             context,
             prepared.targets,
+            prepared.previews,
         )
 
-    @staticmethod
-    def _restore_state(context: ApprovalContext) -> _LoopState:
+    def _restore_state(self, context: ApprovalContext) -> _LoopState:
         return _LoopState(
             user_text=context.original_request,
             messages=list(deepcopy(context.messages)),
@@ -2365,6 +2625,11 @@ class Planner:
             attachment=context.attachment,
             read_paths=context.read_paths,
             found_paths=context.found_paths,
+            group_paths=context.group_paths,
+            call_counts=dict(context.call_counts),
+            recoveries=context.recoveries,
+            escalated=context.escalated,
+            started=self._clock() - context.run_seconds,  # the approval wait does not count
         )
 
     def _append_tool_error(
@@ -2375,4 +2640,5 @@ class Planner:
         error_text: str,
     ) -> None:
         self.emit(f"[TOOL-ERROR] iteration={iteration} name={call.name}")
+        error_text += _missing_path_hint(call, self.config.allowed_directories)
         messages.append({"role": "tool", "tool_call_id": call.id, "content": error_text})

@@ -14,12 +14,12 @@ https://claude.ai/code/artifact/a22182b1-8532-4966-ad89-087119b17a7b)
   `finder.reveal`을 실제 파일 하나로 호출해 True 확인. 사람이 Finder에서 직접 드래그해 보지는 않았다(드롭 이벤트는 코드로 시뮬레이션).
 - 2026-10-07 GUI 진행 보고서 후속 리뷰 (`0754d99` 기준): 관련 테스트 117 passed·6 skipped,
   ruff·diff check 통과. 내용 단서 추가에도 후보 불변, 불완전 none 안내 누락, 표식 포함 문자 수를 로컬 재현.
-  [수정 필요성·최소 대안·후속 검증](reviews/2026-10-07-ui-progress-followup-review.md).
+  [수정 필요성·최소 대안·후속 검증](2026-10-07-ui-progress-followup-review.md).
   운영 코드 수정 없음. 새 GUI 조작·HTTP 400 공급자 재현·R7 live 분석은 실행하지 않았다.
 - 2026-10-07 Codex 코드 리뷰 (`9070351` 기준): 재현 결함 F1~F7 확인.
   관련 테스트 125 passed·6 skipped, 비통합 전체 450 passed·7 skipped·35 deselected·2 failed.
   실패한 HEIC 변환 2건은 샌드박스 밖 재실행에서 2 passed. ruff 통과.
-  [리뷰·Claude Code 전달 지시](reviews/2026-10-07-search-rating-review.md).
+  [리뷰·Claude Code 전달 지시](2026-10-07-search-rating-review.md).
   운영 코드 변경 없음, 통합 전체·live·사람 GUI QA 미실행.
 - 2026-10-07, `162707b` 기준 실제 모델 Groq `openai/gpt-oss-120b`, 호출 한도 10회, 리뷰 수정 반영 후 새 기준선:
   `uv run --locked python evals/run_eval.py --live --repeat 3 2>/dev/null`.

@@ -1,0 +1,24 @@
+{
+  "id": "neg_group_without_tool",
+  "family": "control",
+  "negative": true,
+  "files": {
+    "보고서_초안.txt": "a",
+    "보고서_최종.txt": "b"
+  },
+  "request": "비슷한 파일끼리 묶어서 보여줘",
+  "script": [
+    {
+      "text": "보고서 묶음이 있어요."
+    }
+  ],
+  "expect": {
+    "files": {
+      "보고서_초안.txt": "a",
+      "보고서_최종.txt": "b"
+    },
+    "must_run": [
+      "local__group_files"
+    ]
+  }
+}

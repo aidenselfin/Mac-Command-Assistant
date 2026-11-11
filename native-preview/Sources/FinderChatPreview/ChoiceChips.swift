@@ -7,12 +7,15 @@ final class ChoiceChips {
     static let shared = ChoiceChips()
     private var panel: NSPanel?
     private var actions: [() -> Void] = []
+    /// Chip labels while the panel is on screen (UI test snapshot).
+    private(set) var shownLabels: [String]?
     private static let row: CGFloat = 32
 
     /// options: chip label + what a click does. The panel stays until `hide()`.
     func show(_ question: String, _ options: [(label: String, action: () -> Void)]) {
         let panel = panel ?? makePanel()
         actions = options.map(\.action)
+        shownLabels = options.map(\.label)
         let box = NSVisualEffectView(frame: NSRect(origin: .zero, size: panel.frame.size))
         box.material = .hudWindow
         box.state = .active
@@ -50,7 +53,7 @@ final class ChoiceChips {
         panel.orderFrontRegardless()
     }
 
-    func hide() { panel?.orderOut(nil); actions = [] }
+    func hide() { panel?.orderOut(nil); actions = []; shownLabels = nil }
 
     @objc private func clicked(_ sender: NSButton) {
         guard actions.indices.contains(sender.tag) else { return }

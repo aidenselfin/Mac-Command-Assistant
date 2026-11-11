@@ -1,8 +1,8 @@
-# Voice Action AI
+# Symbio
 
-Voice Action AI는 자연어 명령을 제한된 MCP(Model Context Protocol) 도구 호출로 변환하는 안전 중심의 Python 애플리케이션입니다. 현재 구현은 이름과 달리 **음성 비서가 아니라 텍스트 명령 기반의 Multi-MCP 실행기**입니다. 터미널 단발 실행, 대화형 터미널, macOS Tkinter UI를 제공하며 다음 세 영역을 하나의 플래너에서 다룹니다.
+Symbio는 자연어 명령(글·음성)을 제한된 도구 호출로 바꾸고 코드가 다시 검증해 실행하는 안전 중심의 맥용 파일 비서입니다(저장소 폴더 이름은 voice-action-AI). 화면은 SwiftUI 네이티브 앱 하나이고, 오른쪽 ⌥를 누르고 말하면 Groq Whisper가 글로 바꿔 명령으로 보냅니다. 터미널 대화형·Tkinter 화면·`--text`는 제거했습니다.
 
-- 허용된 디렉터리 안의 파일 검색·목록 조회·텍스트 읽기·승인 기반 쓰기/일괄 삭제
+- 허용된 디렉터리 안의 파일 찾기·목록·읽기·요약, 승인 기반 쓰기·삭제·이동·복사·폴더 생성·형식 변환, 기본 앱으로 열기
 
 LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케이션이 노출하는 도구를 고정하고, 모든 파일 경로와 웹 작업을 코드에서 다시 검증하며, 파일 쓰기는 사용자 승인과 Undo journal이 모두 준비된 경우에만 실행합니다.
 
@@ -17,21 +17,14 @@ LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케
 
 ## 현재 구현 상태
 
-2026-10-07 기준 검증 결과 (`uv run --locked pytest -q`, UI 테스트 포함):
+최신 검증 수치와 미완료 작업은 [`docs/status.md`](docs/status.md)에 있습니다(2026-11-11: pytest 773 passed, 평가 재생 94/94).
 
-```text
-pytest: 494 passed
-ruff:   All checks passed!
-```
-
-전체 테스트는 실제 Filesystem MCP 서버와 실제 Playwright MCP/Chromium subprocess를 포함합니다. 웹 통합 테스트는 외부 인터넷 대신 로컬 HTTP fixture를 사용하며, LLM 응답은 재현 가능한 scripted/mock model을 사용합니다. 따라서 다음은 검증되었습니다.
+전체 테스트는 실제 Filesystem MCP 서버를 포함하며, LLM 응답은 재현 가능한 scripted/mock model을 사용합니다. 따라서 다음은 검증되었습니다.
 
 - 실제 MCP 프로세스 시작, 도구 발견, 호출, 종료 및 누수 방지
 - 실제 파일 목록 조회, 검색, 읽기, 새 파일 쓰기와 overwrite
 - 허용 경로 밖 접근과 symlink 탈출 차단
-- 실제 Chromium으로 navigation 후 snapshot 읽기
-- 웹 페이지 읽기 → 요약 생성 → 사용자 승인 → 파일 쓰기 → Undo 전체 흐름
-- CLI와 UI worker의 정상 종료, 오류 종료, 취소 처리
+- 네이티브 브리지 worker의 정상 종료, 오류 종료, 취소 처리
 - 승인 전 쓰기 차단, 승인 거절, 1회성 승인, 변경된 대상의 재승인
 - SQLite WAL journal을 이용한 create/overwrite Undo와 충돌 감지
 - 도구 결과 크기 제한, 예외·비밀정보 노출 방지
@@ -45,7 +38,10 @@ ruff:   All checks passed!
 | 작업 | 예시 | 동작과 조건 |
 |---|---|---|
 | 디렉터리 목록 | `voice-action-test 폴더 파일 목록 보여줘` | 허용된 root 안에서 자동 실행 |
-| 파일 검색 | `회의록 파일을 찾아줘` | `search_files`를 사용하고 결과 경로를 다시 검증 |
+| 크기·날짜 목록 | `가장 용량이 큰 파일이 뭐야?` | `local__list_files`, 읽기 전용 |
+| 비슷한 파일 묶기 | `비슷한 파일끼리 묶어서 보여줘` | `local__group_files`, 읽기 전용 |
+| 파일 검색 | `회의록 파일을 찾아줘` | `local__find_files`(이름→폴더→내용 단계)로 찾고 결과 경로를 다시 검증 |
+| 기본 앱으로 열기 | `a.txt 열어줘` | `local__open_file`, 프로그램·스크립트·앱은 거부 |
 | 텍스트 파일 읽기 | `test1.md 내용을 읽어줘` | 허용 root 안의 기존 파일만 가능 |
 | 파일 내용 요약 | `test1.md를 요약해줘` | 파일을 읽은 뒤 같은 LLM이 최종 답변 생성 |
 | 모호한 회의록 선택 | `회의록 요약해줘` | 후보 1개면 자동 진행, 여러 개면 번호 선택 요청, 0개면 안전 종료 |
@@ -53,7 +49,9 @@ ruff:   All checks passed!
 | 기존 텍스트 파일 덮어쓰기 | `result.txt 내용을 ...로 바꿔줘` | overwrite로 표시하고 승인 후 실행 |
 | 파일 삭제 | `voice-action-test/result.txt 파일을 삭제해줘` | 정확한 파일 경로를 표시하고 승인·백업 후 삭제 |
 | 일괄 삭제 | `voice-action-test 폴더의 *.txt 파일을 모두 삭제해줘` | 바로 아래 파일 목록 전체를 표시하고 한 번 승인 후 삭제 |
-| 최근 쓰기/삭제 Undo | 대화형 모드에서 `undo` 또는 `되돌리기` | 최근 쓰기 하나 또는 삭제 batch 전체 복원 |
+| 이동·복사·폴더 생성 | `보고서를 보관 폴더로 옮겨줘` | 원본·목적지를 표시하고 호출마다 승인 |
+| 형식 변환 | `공문.hwpx를 pdf로 바꿔줘` | 새 파일을 만들기 전 승인 |
+| 최근 작업 Undo | 앱 `…` 메뉴의 `최근 작업 되돌리기` | 최근 쓰기·이동·복사·폴더 생성 하나 또는 삭제 batch 전체 복원 |
 
 읽기 전용 도구는 자동 실행됩니다. 파일 쓰기와 삭제는 항상 별도 승인이 필요합니다.
 
@@ -67,7 +65,7 @@ ruff:   All checks passed!
 파일 내용과 권한을 복원하며 ACL·확장 속성·원래 시각은 복원하지 않습니다.
 외부 프로그램이 검사와 unlink 사이에 대상을 바꾸는 경쟁을 완전히 막는 기능은 제공하지 않습니다.
 
-UI를 재실행한 뒤 입력 예시:
+앱에서 입력 예시:
 
 ```text
 voice-action-test/a.txt와 voice-action-test/b.txt 파일을 삭제해줘
@@ -79,13 +77,7 @@ voice-action-test 폴더 바로 아래의 모든 파일을 삭제해줘
 `Undo` 버튼 한 번으로 최근 삭제 batch를 복원합니다. 실행 중 취소한 경우 진행 중인 삭제
 batch와 journal 기록이 끝나기를 기다린 뒤 창을 닫습니다. 재실행 후 Undo로 복원할 수 있습니다.
 
-### 모드별 쓰기/삭제 동작
-
-| 실행 모드 | 쓰기 요청 처리 |
-|---|---|
-| 네이티브 앱(`native-preview/`) | 표시된 대상·작업·미리보기를 확인하고 `승인` 버튼을 눌러야 실행합니다. |
-
-거절 토큰은 `거절`, `reject`, `no`, `n`, `취소`, `cancel`, `c`입니다. 대소문자와 앞뒤 공백은 정규화하지만, 빈 입력이나 알 수 없는 문자열은 승인으로 취급하지 않습니다.
+네이티브 앱은 표시된 대상·작업·미리보기를 확인하고 `승인` 버튼을 눌러야 실행합니다. 창이 닫혀 있으면 화면 위 승인 칩으로 묻습니다.
 
 ## 불가능하거나 의도적으로 지원하지 않는 명령
 
@@ -107,24 +99,22 @@ batch와 journal 기록이 끝나기를 기다린 뒤 창을 닫습니다. 재�
 - 이미지·오디오·일반 바이너리 파일의 내용 처리
 - macOS 앱 클릭, 키보드 입력, 실행, 창 제어, AX tree 읽기
 - 병렬 도구 실행, 자동 재시도, MCP 자동 재연결
-- provider fallback 또는 한 명령 안에서 여러 모델 사용
-- 마이크 입력, STT, 녹음, 전역 단축키, 메뉴바 앱, 알림
 
-`RECORDING`과 `TRANSCRIBING` 상태는 향후 음성 기능을 위한 자리만 마련되어 있으며 현재 사용되지 않습니다.
+메인 모델 호출이 실패하면 `OPENAI_API_KEY`가 있을 때 OpenAI 대체 모델(`VOICE_ACTION_FALLBACK_MODEL`, 기본 `gpt-4o-mini`)로 한 번 다시 부릅니다. 음성은 Swift 앱이 녹음하고 `voice_action/transcribe.py`가 글로 바꿔 일반 명령으로 보냅니다(런타임의 `RECORDING`·`TRANSCRIBING` 상태는 쓰지 않습니다).
 
 ## 요구 사항
 
 - Python `>=3.12,<3.13`
 - [uv](https://docs.astral.sh/uv/)
 - Node.js와 npm
-- Playwright Chromium
-- OpenRouter, Groq 또는 OpenAI API key
-- macOS 활성 앱 조회를 사용할 경우 Accessibility 권한
+- macOS 15 이상과 Swift 6 도구(네이티브 앱)
+- OpenRouter, Groq 또는 OpenAI API key (음성은 `GROQ_API_KEY`)
+- 마이크 권한, 앱 밖에서 ⌥를 감지하려면 입력 모니터링 권한
 
 Python 주요 의존성은 `mcp`, `openai`, `anyio`, `jsonschema`, `rich`, `python-dotenv`입니다. Node 의존성은 다음 버전으로 고정되어 있습니다.
 
 - `@modelcontextprotocol/server-filesystem` `2026.8.31`
-- `@playwright/mcp` `0.0.81`
+- `@playwright/mcp` `0.0.81` (웹 기능은 꺼져 있어 지금은 쓰지 않음)
 
 ## 설치
 
@@ -133,8 +123,9 @@ Python 주요 의존성은 `mcp`, `openai`, `anyio`, `jsonschema`, `rich`, `pyth
 ```sh
 uv sync --locked
 npm ci
-npm run playwright:install
 ```
+
+(`npm run playwright:install`은 보관된 웹 기능을 다시 켤 때만 필요합니다.)
 
 기본 provider는 `GROQ_API_KEY`가 있으면 Groq, 없으면 OpenAI입니다.
 
@@ -183,7 +174,8 @@ provider·모델·허용 폴더는 `config.json`과 `.voice-action/config.env`�
   "provider": "groq",
   "model": "openai/gpt-oss-20b",
   "allowed_directories": ["./voice-action-test"],
-  "max_tool_rounds": 10,
+  "max_tool_rounds": 20,
+  "max_run_seconds": 90,
   "llm_timeout_seconds": 60,
   "mcp_timeout_seconds": 30,
   "max_tool_result_chars": 50000
@@ -192,7 +184,7 @@ provider·모델·허용 폴더는 `config.json`과 `.voice-action/config.env`�
 
 설정 우선순위는 높은 순서대로 다음과 같습니다.
 
-1. CLI 옵션
+1. 명령행 옵션(진단 스크립트 `llm_mcp_transcript.py`만)
 2. `VOICE_ACTION_*` 환경변수
 3. 현재 디렉터리의 `config.json`
 4. `~/.voice-action/config.json`
@@ -205,13 +197,18 @@ VOICE_ACTION_PROVIDER
 VOICE_ACTION_MODEL
 VOICE_ACTION_BASE_URL
 VOICE_ACTION_ALLOWED_DIRECTORIES   # JSON 배열
-VOICE_ACTION_MAX_TOOL_ROUNDS
+VOICE_ACTION_MAX_TOOL_ROUNDS       # 한 명령의 모델 호출 한도(기본 20)
+VOICE_ACTION_MAX_RUN_SECONDS       # 한 명령의 시간 한도, 승인 대기 제외(기본 90)
 VOICE_ACTION_LLM_TIMEOUT_SECONDS
 VOICE_ACTION_MCP_TIMEOUT_SECONDS
 VOICE_ACTION_MAX_TOOL_RESULT_CHARS
 VOICE_ACTION_FINDER_REVEAL         # on(기본) | off, 환경변수로만 설정
-VOICE_ACTION_FINDER_DOCK           # on(기본) | off, Finder 옆 패널 자동 배치
+VOICE_ACTION_FINDER_DOCK           # on(기본) | off, 설정만 읽고 네이티브 앱에서는 쓰지 않음
+VOICE_ACTION_FALLBACK_MODEL        # 메인 호출 실패 시 OpenAI 대체 모델(기본 gpt-4o-mini)
+VOICE_ACTION_ESCALATION_MODEL      # 복구가 두 번 실패하면 이어받을 OpenRouter 모델(없으면 끔)
 ```
+
+한 명령 안에서 모델이 형식을 틀리거나 도구가 "파일 없음"을 돌려주면 명령을 끝내지 않고 오류를 모델에게 돌려줘 다시 시도하게 합니다. 없는 파일에는 같은 폴더의 비슷한 실제 경로를 알려 줍니다. 같은 호출이 같은 결과를 두 번 내면 다른 방법을 쓰라고 알리고, 세 번이면 알아낸 것을 보고하고 멈춥니다. 승인 거절·허용 폴더 밖·인증 실패는 지금처럼 바로 끝납니다. `escalation_model`(config.json 또는 위 환경변수)을 정하고 `OPENROUTER_API_KEY`가 있으면, 복구가 두 번 실패한 뒤 그 모델이 지금까지의 대화를 이어받습니다.
 
 provider별 기본 모델:
 
@@ -219,10 +216,8 @@ provider별 기본 모델:
 - Groq: `openai/gpt-oss-20b` (키 `GROQ_API_KEY`, base URL `https://api.groq.com/openai/v1`)
 - OpenAI: `gpt-4o-mini` (키 `OPENAI_API_KEY`)
 
-OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합니다. CLI에서
-`--provider`만 바꾸면 `config.json`의 `model`·`base_url`이 그대로 남으므로, 바꿀 때는
-`--provider openrouter --model anthropic/claude-sonnet-5.5 --base-url https://openrouter.ai/api/v1`처럼
-함께 지정하세요. 모델은 OpenRouter의 도구 호출 지원 모델 ID로 바꿀 수 있습니다. 한 명령에서는 하나의 provider와 하나의 모델만 사용합니다.
+OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합니다. provider만 바꾸면
+`model`·`base_url`이 그대로 남으므로 함께 바꾸세요. 모델은 OpenRouter의 도구 호출 지원 모델 ID로 바꿀 수 있습니다. 한 명령에서는 하나의 provider와 하나의 모델만 사용합니다.
 
 ## 자기 피드백 루프
 
@@ -245,17 +240,13 @@ OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합
 | R4 | 쓰기 거절, 또는 승인 후 5분 안에 undo |
 | R5 | 직전 명령 10분 안의 정정·지시 ("아니…", "다시…", "왜…", "…말고", "다음부턴…", "앞으로는…", "제대로") |
 | R6 | clarification 최대 횟수 초과 |
-| R7 | 답변에 낮은 점수(1~3)를 줬고, 같은 원인 추정이 7일 안에 서로 다른 실행 2회 |
+| U1 | 사용자가 `/feedback 내용`으로 직전 답변에 의견을 남김 (반복 조건 없음) |
 | R8 | 한 실행의 모델 호출이 6회 이상 (호출 한도 10회 안에서 낭비 포착) |
 | R9 | 한 실행에서 검색 도구 호출이 4회 이상 |
 
-### 답변 평가 (1~5점)
+### `/feedback` 의견
 
-답변(Completed)이 나오면 UI에 `이 답변은 어땠나요?` 버튼 1~5가 뜹니다. 입력창이 비어 있을 때 숫자 키 1~5로도 누를 수 있습니다(타이핑 중인 숫자는 가로채지 않음). 4~5점은 저장되면 평가 영역이 사라집니다. 1~3점은 원인 칩(`엉뚱한 파일`·`내용 부족`·`틀린 내용`·`너무 김`·`너무 느림`·`기타`)이 나타나며, 이유 하나를 선택해 저장하면 평가 영역이 사라집니다. 저장하지 못하면 안내를 표시하고 다시 선택할 수 있게 열어 둡니다. 취소·거절·Undo 결과에는 평가 막대가 뜨지 않습니다. 대화형 터미널에서는 `rate 2 wrong_file too_slow`처럼 여러 원인을 지정하거나 다시 평가할 수 있습니다. 다음 명령을 입력하면 이전 답변은 더 평가할 수 없습니다.
-
-- 점수와 칩만 저장합니다(`rating` event). 자유 입력은 받지 않습니다.
-- 원인은 먼저 그 실행의 기록으로 **코드가 추정**합니다(`search_failed`, `search_incomplete`, `partial_read`, `tool_errors`, `many_calls`, `slow`, `clarified`, 마지막으로 `search_content_stage`). 모델 호출 없음. `slow`는 모델 응답 시간만 잰 값입니다(도구 시간은 측정하지 않음). 여러 원인 칩은 가장 앞 이름 하나로 signature를 만들고, 칩과 모든 추정은 근거에 함께 남습니다.
-- 각 실행은 **마지막 평가**만 셉니다(점수를 올리거나 칩을 바꾸면 이전 값은 빠짐). 같은 추정(signature)으로 낮은 점수가 서로 다른 실행 2회가 되면 그때 R7로 OpenRouter 분석을 요청하고, 결과는 다른 규칙과 같이 lesson **후보**로만 남습니다. 점수만으로 프롬프트가 바뀌지 않습니다.
+채팅에 `/feedback 검색 결과가 너무 많아, 수정해줘`처럼 입력하면 그 글은 명령으로 실행되지 않고 직전 답변에 대한 의견으로 저장됩니다(`user_feedback` event). 반복을 기다리지 않고 바로 U1로 OpenRouter 분석을 요청하며, 근거는 직전 실행 기록과 그 의견입니다. 대화 기억과 첨부는 그대로 남고, 질문에 답하는 중에는 받지 않습니다. 분석 결과는 다른 규칙과 같이 lesson **후보**나 코드 수정 요청으로만 이어집니다.
 
 감지되면 백그라운드에서 OpenRouter 모델이 그 사건의 근거 run만 보고 원인을 분석해 다음 중 하나를 적용합니다. 메인 LLM 설정과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
 
@@ -274,7 +265,7 @@ VOICE_ACTION_FEEDBACK_MODEL=anthropic/claude-sonnet-5.5  # OpenRouter의 아무 
 VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 최근 24시간 분석 요청 한도 (취소된 요청 포함)
 ```
 
-종료 시 진행 중인 분석은 CLI에서 최대 15초, UI에서 최대 5초 기다린 뒤 취소합니다. 취소해도 이미 보낸 요청은 한도에 포함됩니다.
+종료 시 진행 중인 분석은 최대 5초 기다린 뒤 취소합니다. 취소해도 이미 보낸 요청은 한도에 포함됩니다.
 
 lesson 관리: `uv run python main.py --lessons`(활성·후보 목록), `--lesson-on ID`(후보 채택), `--lesson-off ID`(비활성화·후보 거절). 채택 절차는 `docs/self-improvement-guide.md` 5.2절.
 
@@ -291,18 +282,7 @@ filesystem__read_text_file
 filesystem__write_file
 ```
 
-### Web
-
-```text
-web__browser_navigate
-web__browser_snapshot
-```
-
-### macOS
-
-```text
-macos__get_active_app
-```
+웹(`web__browser_navigate`·`web__browser_snapshot`)과 macOS 활성 앱(`macos__get_active_app`) 도구는 꺼져 있습니다([`archive/web-macos-mcp/`](archive/web-macos-mcp/README.md)).
 
 MCP server가 추가 도구를 제공하더라도 자동으로 노출되지 않습니다. `delete_file`, `move_file`, Playwright action 도구 등은 발견되더라도 제외됩니다. 각 이름은 `namespace__tool` 형식이며 `MCPManager`가 원래 client로 순차 dispatch합니다.
 
@@ -335,10 +315,13 @@ local__create_directory   폴더 생성 요청 또는 이동·복사 요청일 �
 - 삭제 기능은 이미 지원하지만 삭제 요청에만 노출합니다. 이번 도구 목록에 없다는 이유로
   앱에 삭제 기능 자체가 없다고 안내하지 않도록 기능 설명과 한 번의 교정을 제공합니다.
 
-### 단계적 파일 검색 (앱 내부 도구)
+### 단계적 파일 검색·목록 (앱 내부 도구)
 
 ```text
-local__find_files    웹 요청이 아니면 항상 노출, 읽기 전용
+local__find_files    항상 노출, 읽기 전용
+local__list_files    크기·날짜 순 목록, 읽기 전용
+local__group_files   비슷한 파일끼리 묶기, 읽기 전용 (이동은 따로 승인)
+local__open_file     열기 요청일 때만 노출, 기본 앱으로 열기
 ```
 
 파일명이 불분명한 요청(`예산안 내용 알려줘`, `팀 미팅 노트 읽어줘`)에서 모델은 검색어(한/영 변형 포함)만 넘기고, 검색은 앱이 합니다.
@@ -365,13 +348,14 @@ local__find_files    웹 요청이 아니면 항상 노출, 읽기 전용
 
 ```text
 local__convert_file     변환 요청("pdf로 바꿔줘", "jpg로 변환")일 때만 노출, 승인 필요
-local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
+local__read_document    항상 노출, 읽기 전용
 ```
 
 | 변환 | 변환기 |
 | --- | --- |
 | txt·md·rtf·html·doc·docx·odt → txt·rtf·html·doc·docx·odt | `textutil` |
 | txt·md → pdf (서식 없는 글) | `cupsfilter` |
+| hwpx(한글) → pdf (글자만, 그림·표 모양 빠짐) | Python 표준 라이브러리 + `cupsfilter` |
 | pdf → txt | PDFKit (pyobjc) |
 | png·jpeg(jpg)·heic·tiff·gif·bmp 서로 (아이폰 HEIC → JPG·PNG 포함) | `sips` |
 | csv ↔ json | Python 표준 라이브러리 |
@@ -401,6 +385,8 @@ local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
 
 파일 작업을 Finder와 이어 줍니다. 모든 작업은 허용 폴더 안에서만 일어납니다.
 
+**결과 파일 칩.** 만들거나 고친 파일이 5개 이하면 파일마다 드래그 칩을 띄웁니다. 창이 닫혀 있으면 화면 위 떠 있는 상자로 보여 줍니다. ⌘⇧R(최근 파일)·⌘⇧L(큰 파일)은 모델 없이 5개를 바로 칩으로 띄웁니다.
+
 **파일 첨부(드래그).** 앱 창 어디에나 Finder의 파일 하나를 끌어다 놓으면 `📎 파일명`이 표시되고, **다음 명령 하나**의 대상이 됩니다. 놓는다고 실행되지는 않습니다.
 
 - 허용 폴더 밖의 파일, 링크, 폴더, 없는 파일은 첨부하지 않고 이유와 함께 **요청을 거부**합니다. 파일을 둘 이상 놓아도 거부합니다. 앞서 첨부한 파일은 유지됩니다.
@@ -410,24 +396,21 @@ local__read_document    웹 요청이 아니면 항상 노출, 읽기 전용
 
 **Finder에서 결과 보기.** 파일을 만들거나 바꾸는 작업(텍스트 쓰기, 변환)이 **성공**하면 그 파일을 Finder에서 선택한 채로 보여 줍니다. 경로는 모델의 답변이 아니라 앱이 실제로 쓴 경로(`Completed.changed_paths`)이고, 표시 직전에 허용 폴더 안인지·링크가 아닌지·존재하는지 다시 확인합니다. 승인 대기·거절·실패·삭제·Undo에서는 열지 않습니다. Finder를 열지 못해도 작업 결과는 그대로입니다. `VOICE_ACTION_FINDER_REVEAL=off`로 끕니다(기본 on).
 
-- 자동 배치를 끄려면 `VOICE_ACTION_FINDER_DOCK=off`, Finder 결과 표시를 끄려면 `VOICE_ACTION_FINDER_REVEAL=off`입니다.
+- Finder 옆 자동 배치는 네이티브 앱에 아직 없습니다.
 - 현재 Finder 폴더에 따라 파일 접근 권한이 바뀌지는 않습니다. `allowed_directories`가 그대로 적용됩니다.
 
 ## 처리 흐름
 
 ```text
-사용자 입력
+SwiftUI 앱(글·음성 입력) ─JSON lines─► native_bridge.py
   ↓
 RuntimeController — 단일 실행과 상태 전이 관리
   ↓
-Planner — LLM 호출, clarification, 최대 5회 tool loop
+Planner — LLM 호출, clarification, 모델 호출 최대 20회(max_tool_rounds)·90초(max_run_seconds), 실패 복구·반복 감지
   ↓
 RiskGuard — read/write/forbidden 고정 분류
   ↓
-MCPManager — namespace별 client dispatch
-  ├─ Filesystem MCP
-  ├─ Playwright MCP
-  └─ macOS in-process client
+local__* 앱 내부 도구 / MCPManager → Filesystem MCP
 ```
 
 활성 명령의 주요 상태:
@@ -442,7 +425,7 @@ IDLE
   → IDLE
 ```
 
-동시에 두 명령을 실행하지 않습니다. 처리 중 들어온 새 입력은 `[BUSY]`로 반환됩니다. 도구는 순차 실행되며 기본 최대 5 iteration입니다.
+동시에 두 명령을 실행하지 않습니다. 처리 중 들어온 새 입력은 `[BUSY]`로 반환됩니다. 도구는 순차 실행되며 모델 호출은 기본 최대 10회입니다.
 
 ## 파일 경계와 쓰기 승인
 
@@ -479,6 +462,8 @@ Filesystem client는 application과 MCP server 양쪽에서 경계를 검사합�
 
 ## 웹 안전 정책
 
+> 웹 기능은 꺼져 있습니다. 아래는 다시 켤 때 지킬 규칙입니다.
+
 웹 작업에는 별도의 순서와 범위 제한이 있습니다.
 
 1. navigation URL은 사용자 원문에 명시된 HTTP(S) URL이어야 합니다.
@@ -500,8 +485,8 @@ Playwright navigation 결과에서는 URL과 title만 모델에 전달하고 내
 
 - `회의록 요약해줘`처럼 파일이 모호하면 먼저 검색합니다(`local__find_files`).
 - 후보 1개: 자동으로 해당 파일을 읽습니다.
-- 후보 2~5개: 읽기 전에 선택을 요청합니다. UI는 폴더·수정일·크기를 붙인 버튼과 숫자 키(1~N)로, 터미널은 번호로 고릅니다.
-- 후보 6개 이상: 나열하지 않고 범위를 좁혀 달라고 묻습니다(`narrow_search`). 폴더·형식 버튼 몇 개를 보여주고 직접 입력도 받습니다. 터미널에서는 `N번`으로 버튼을 고르고, 그 밖의 입력은 검색 단서로 씁니다.
+- 후보 2~5개: 읽기 전에 선택을 요청합니다. 폴더·수정일·크기를 붙인 버튼으로 고릅니다.
+- 후보 6개 이상: 나열하지 않고 범위를 좁혀 달라고 묻습니다(`narrow_search`). 폴더·형식 버튼 몇 개를 보여주고 직접 입력도 받습니다. 직접 입력은 검색 단서로 씁니다.
 - 번호만 다른 파일이 많을 때(`임시-1` ~ `임시-37`)는 `임시-1 ~ 임시-37 (37개)` 한 줄로 요약하고 `가장 최근 파일` 버튼을 줍니다.
 - 후보 0개: 파일을 만들거나 수정하지 않고 종료합니다. 검사하지 못한 범위(긴 파일의 뒷부분, pdf·docx 본문 등)가 있었으면 "찾지 못했다"고 단정하지 않고 그 범위를 함께 알립니다.
 - 사용자만 아는 정보가 없을 때(`빈 md 파일 하나 만들어줘`의 파일 이름, 저장할 내용)는 **자유 입력 질문**(`free_text`)을 합니다. 버튼 없이 입력창으로 답하고, 답은 원래 요청 옆에 붙어 같은 작업이 이어지며, 질문 2회 한도에 포함됩니다. 질문 안에서 `취소`는 그대로 취소입니다.
@@ -513,7 +498,7 @@ Clarification은 가상 application contract이며 MCP server에는 전송되지
 
 ## Undo
 
-Undo는 승인된 `filesystem__write_file`과 `local__delete_files`에 적용됩니다.
+Undo는 승인된 쓰기(`filesystem__write_file`), 삭제, 이동·복사·폴더 생성, 변환에 적용됩니다.
 Planner나 MCP 도구로 노출하지 않고 runtime의 typed API가 직접 처리합니다.
 
 기본 journal:
@@ -547,7 +532,7 @@ Undo 동작:
 기존 `undo_entries` 테이블과 쓰기 이력은 유지합니다. 삭제는 같은 DB의 `delete_batches`와
 `delete_files`에 별도로 기록하며, 쓰기/삭제 중 가장 최근 활성 작업부터 Undo합니다.
 
-네이티브 앱에서는 IDLE일 때만 Undo 버튼이 활성화됩니다. 
+네이티브 앱에서는 IDLE일 때만 `…` 메뉴의 `최근 작업 되돌리기`가 활성화됩니다.
 
 ## 오류, 제한 및 자원 정리
 
@@ -560,24 +545,19 @@ Undo 동작:
 - 잘린 결과에는 `[TRUNCATED]` marker가 추가됩니다.
 - provider/SDK의 예상치 못한 예외는 raw request나 인증정보 없이 오류 유형만 표시합니다.
 - context 종료, EOF, 오류, 취소 시 SDK session과 stdio subprocess를 정리합니다.
-- UI에서 실행 중 취소한 MCP session은 재사용하지 않으며 창을 닫습니다.
+- 실행 중 취소한 MCP session은 재사용하지 않고 연결을 정리합니다. 메뉴에서 다시 연결합니다.
 
 ## 프로젝트 구조
 
 ```text
 main.py                         피드백 lesson 관리 CLI
-voice_action/
-  config.py                    설정 병합·검증과 secret 정책
-  mcp_client.py                Filesystem MCP client와 경로 경계
-  playwright_client.py         최소 권한 Playwright MCP client
-  macos_client.py              현재 활성 앱 조회 client
-  mcp_manager.py               Multi-MCP lifecycle과 namespace routing
-  planner.py                   LLM adapter, tool loop, 웹·검색 정책
-  risk_guard.py                고정 위험 분류와 쓰기 승인
-  runtime.py                   single-flight 상태 머신
-  undo.py                      SQLite write-ahead Undo journal
-  ui.py                        presenter와 async worker(네이티브 브리지 공용)
-tests/                         단위·통합 테스트
+llm_mcp_transcript.py           진단용 한 번 실행
+voice_action/                   파일별 역할은 docs/ARCHITECTURE.md "파일 지도"
+native-preview/                 SwiftUI 앱
+archive/web-macos-mcp/          꺼 둔 웹·활성 앱 client
+evals/                          평가 과제·실행기·능력 점수
+scripts/                        점검(check.py)·worktree(vibe.py)·화면 검사(ui_check.py)
+tests/                          단위·통합 테스트
 voice-action-test/             기본 허용 root와 예제 파일
 config.example.json            설정 예시
 pyproject.toml / uv.lock       Python 의존성
@@ -605,7 +585,7 @@ uv run --locked pytest -q -m integration
 uv run --locked ruff check .
 ```
 
-통합 테스트는 실제 Node MCP subprocess와 Chromium을 시작하고 임시 디렉터리에 파일을 생성합니다. 실제 Groq/OpenAI API key나 외부 인터넷은 필요하지 않습니다. Playwright 통합 테스트는 loopback 포트를 열 수 있는 환경이어야 합니다.
+통합 테스트는 실제 Node MCP subprocess를 시작하고 임시 디렉터리에 파일을 생성합니다. 실제 Groq/OpenAI API key나 외부 인터넷은 필요하지 않습니다. 개발 후 한 번에 점검하려면 `uv run python scripts/check.py`(ruff·pytest·평가 재생·변형 케이스)를 씁니다.
 
 실제 모델과 네트워크까지 포함한 수동 smoke test는 아래의 **격리된 수동 검증
 절차**를 사용하십시오. 기존 `voice-action-test`, 기존 `.voice-action/undo.sqlite3`,
@@ -648,13 +628,7 @@ PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/llm_
 | 다중 후보 clarification | `회의록 요약해줘`; 읽기 전에 두 후보의 선택 대기가 나타나야 합니다. |
 | create 승인 대기 | `source.txt를 요약해 create.txt에 저장해줘`; 승인 입력 없이 EOF(Ctrl-D)로 종료한 뒤 `create.txt`가 없어야 합니다. |
 | overwrite 승인 대기 | `source.txt를 요약해 overwrite.txt에 저장해줘`; 승인 입력 없이 EOF(Ctrl-D)로 종료한 뒤 사전 내용이 유지되어야 합니다. |
-| 웹 읽기 | `https://example.com 페이지를 읽어줘`; `web__browser_navigate` 뒤 `web__browser_snapshot` 순서만 허용됩니다. |
-| 웹 저장 승인 대기 | `https://example.com 페이지를 읽어 web-summary.md에 저장해줘`; navigation → snapshot → 승인 대기이며, 승인 없이 파일이 없어야 합니다. |
-| 활성 앱 | `현재 활성 앱을 알려줘`; macOS Accessibility 권한이 있을 때 한 번의 조회 결과와 최종 결과가 일치해야 합니다. |
 | 격리 Undo | 새 세션에서 임시 root의 `undo-target.txt` 쓰기를 **승인**한 뒤 `undo`를 입력합니다. 해당 임시 journal의 최신 항목만 되돌리고 대상 파일만 원래 상태로 복원/삭제해야 합니다. |
-
-웹 시나리오는 외부 HTTPS 접근이 가능한 환경에서만 수행합니다. 접근할 수 없거나
-navigation/snapshot이 실패하면 write가 호출되지 않는 것이 올바른 판정입니다.
 
 ### 수동 transcript 기록
 
@@ -682,31 +656,20 @@ arguments/results를 기록합니다. 이 옵션은 민감한 파일·웹 내용
 
 선택한 provider에 맞는 환경변수를 설정하거나 `.voice-action/config.env`에 넣으십시오. JSON에는 key를 넣을 수 없습니다.
 
-### Filesystem MCP 또는 Playwright MCP가 설치되지 않았다는 오류
+### Filesystem MCP가 설치되지 않았다는 오류
 
 ```sh
 npm ci
-npm run playwright:install
 ```
 
 ### 허용 경로 밖 접근 오류
 
 절대경로가 `allowed_directories` 중 하나의 실제 하위 경로인지 확인하십시오. symlink가 root 밖을 가리키면 의도적으로 거부됩니다.
 
-### macOS 활성 앱 조회가 실패함
+### 오른쪽 ⌥로 녹음이 안 됨
 
-시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 실행 중인 터미널 또는 Python 프로세스에 권한을 부여하십시오. 권한 실패는 해당 도구 호출만 실패시키며 Filesystem과 Web session은 계속 사용할 수 있습니다.
-
-### 웹 페이지를 읽었지만 저장하지 못함
-
-사용자 명령에 URL과 출력 filename을 모두 명시해야 합니다.
-
-```text
-https://example.com 페이지를 읽고 summary.md에 저장해줘
-```
-
-navigation 또는 snapshot이 실패한 명령에서는 이후 쓰기가 차단됩니다.
+시스템 설정 → 개인정보 보호 및 보안에서 Symbio에 마이크 권한을, 앱 밖에서도 쓰려면 입력 모니터링 권한을 주십시오. 음성 변환에는 `GROQ_API_KEY`가 필요합니다.
 
 ## 구현 범위 요약
 
-현재 버전은 범용 데스크톱 자동화 도구가 아닙니다. 검증된 좁은 도구 집합을 이용해 **허용 폴더의 텍스트 작업, 읽기 전용 웹 조사, macOS 활성 앱 확인**을 수행하는 기반입니다. 특히 파일 쓰기 전 승인, 쓰기 전 Undo journal, canonical path 검증, 웹→파일 범위 고정이 핵심 설계입니다.
+현재 버전은 범용 데스크톱 자동화 도구가 아닙니다. 검증된 좁은 도구 집합으로 **허용 폴더의 파일 찾기·읽기·정리·변환**을 합니다. 파일 쓰기 전 승인, 쓰기 전 Undo journal, canonical path 검증이 핵심 설계입니다. 웹·활성 앱은 꺼 두었습니다.

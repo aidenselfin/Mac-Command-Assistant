@@ -7,7 +7,7 @@ description: voice-action 작업을 시작·진행·종료할 때 웹 패널이 
 
 패널 `http://127.0.0.1:8765`은 `/Users/juhyeon/.claude/voice-action/` 아래 파일만 3초마다 읽는다. git 밖이다. 패널 코드(`dock-web/`)는 고치지 않고 기록만 갱신한다. 절대 경로로 열고 Edit로 자기 항목만 고친다(통째 Write 금지). 기록은 코드를 고친 같은 작업 안에서 끝내기 전에 한다.
 
-1. `worklog.json`의 `worktrees["<키>"]`: 키는 브랜치에서 `claude/`·`work/`·`codex/`를 뗀 이름(detached면 폴더 이름). 필드 `title`·`status`("작업 중"|"완료"|"보류")·`updated`·`done[]`·`todo[]`, 하위 세션은 `parent`. 시작할 때 만들고 단계마다·끝낼 때 고친다.
+1. `worklog.json`의 `worktrees["<키>"]`: 키는 브랜치에서 `claude/`·`work/`·`codex/`를 뗀 이름(detached면 폴더 이름). 필드 `title`·`status`("작업 중"|"완료"|"보류")·`updated`·`done[]`·`todo[]`. 시작할 때 만들고 단계마다·끝낼 때 고친다.
 2. 글은 짧은 명사형 일반어로 쓴다(`title`·`done`·`todo` 10자 안팎, 파일명·커밋 용어 없이). `todo`는 규모가 보이게 쓴다.
 3. 범위가 처음 제목과 달라지면 묻지 말고 `title`과 세션 제목(`set_session_title`, `session_id: "self"`)을 같은 문장으로 고친다.
 4. main에 합쳐지면 항목을 `archive`로 옮겨 카드를 없앤다. 큰 변경은 `milestones["<해시 7자리>"]`에 짧은 제목을 남긴다.

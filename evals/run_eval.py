@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +31,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import heavy_lock  # noqa: E402
 
 from main import error_message  # noqa: E402
+from voice_action import finder  # noqa: E402
 from voice_action.config import Config, load_config  # noqa: E402
 from voice_action.feedback import FeedbackLoop  # noqa: E402
 from voice_action.mcp_client import SUPPORTED_TOOLS, MCPClient  # noqa: E402
@@ -39,6 +41,7 @@ from voice_action.planner import (  # noqa: E402
     Clarification,
     ClarificationRequest,
     Completed,
+    ModelFormatError,
     ModelTurn,
     Planner,
     PlannerEventType,  # noqa: E402
@@ -46,6 +49,19 @@ from voice_action.planner import (  # noqa: E402
 )
 from voice_action.runtime import RuntimeController  # noqa: E402
 from voice_action.undo import UndoJournal  # noqa: E402
+
+OPENED: list[str] = []  # files a trial opened, in order
+
+
+class _NoApps:
+    """Trials never launch apps: an open is checked by the app's rules, then only recorded."""
+
+    def openURL_(self, url):  # noqa: N802 - the Cocoa method name
+        OPENED.append(str(url.path()))
+        return True
+
+
+finder._workspace = _NoApps
 
 TASKS = Path(__file__).with_name("tasks")
 RESULTS = Path(__file__).with_name("results")
@@ -65,6 +81,8 @@ class Scripted:
         if not self.turns:
             raise LookupError("scripted turns exhausted")
         turn = self.turns.pop(0)
+        if "format_error" in turn:  # a reply the provider adapter could not use
+            raise ModelFormatError(turn["format_error"])
         calls = [
             ToolCall(f"c{self.calls}_{i}", c["name"], json.dumps(c["args"]))
             for i, c in enumerate(turn.get("calls", []))
@@ -157,6 +175,7 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
             aged = time.time() - days * 86400
             os.utime(root / path, (aged, aged))
         initial = manifest(root)
+        OPENED.clear()
         client = None
         if config is None:
             trial_config = Config("openai", "scripted", "unused", (root,))
@@ -279,8 +298,14 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         problems = diff(expected_manifest(initial, files), manifest(root))
         problems += [f"{name}: not run" for name in expect.get("must_run", [])
                      if name not in tools_run]
+        if "opened" in expect:  # NFC: Cocoa hands paths back decomposed
+            opened = [unicodedata.normalize("NFC", Path(p).relative_to(root).as_posix())
+                      for p in OPENED]
+            if opened != expect["opened"]:
+                problems.append(f"opened {opened}, expected {expect['opened']}")
         problems += [f"reply: missing {word!r}" for word in expect.get("reply_contains", [])
-                     if word not in (text or "")]
+                     if word not in (text or "")
+                     and word not in (text or "").replace(",", "")]
         problems += [f"reply: should not mention {word!r}"
                      for word in expect.get("reply_excludes", []) if word in (text or "")]
         position = 0  # the words must appear in this order (later mentions may repeat earlier ones)

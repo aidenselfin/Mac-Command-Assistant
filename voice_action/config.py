@@ -34,7 +34,8 @@ class Config:
     api_key: str = field(repr=False)
     allowed_directories: tuple[Path, ...]
     base_url: str | None = None
-    max_tool_rounds: int = 10
+    max_tool_rounds: int = 20
+    max_run_seconds: float = 90  # one command's model/tool loop, not counting approval waits
     llm_timeout_seconds: float = 60
     mcp_timeout_seconds: float = 30
     max_tool_result_chars: int = 50000
@@ -48,6 +49,8 @@ class Config:
     feedback_autonomy: bool = True
     finder_reveal: bool = True
     finder_dock: bool = True  # put the revealed Finder window beside the app window
+    # A stronger OpenRouter model that takes over after two failed recoveries; None = off.
+    escalation_model: str | None = None
 
 
 def load_config(
@@ -85,6 +88,7 @@ def load_config(
         "base_url",
         "allowed_directories",
         "max_tool_rounds",
+        "max_run_seconds",
         "llm_timeout_seconds",
         "mcp_timeout_seconds",
         "max_tool_result_chars",
@@ -127,7 +131,8 @@ def load_config(
         resolved.append(path)
     numbers = {}
     for key, default, kind in (
-        ("max_tool_rounds", 10, int),
+        ("max_tool_rounds", 20, int),
+        ("max_run_seconds", 90, float),
         ("llm_timeout_seconds", 60, float),
         ("mcp_timeout_seconds", 30, float),
         ("max_tool_result_chars", 50000, int),
@@ -172,6 +177,10 @@ def load_config(
             raise ValueError
     except ValueError as exc:
         raise ConfigError("VOICE_ACTION_FEEDBACK_DAILY_LIMIT는 양의 정수여야 합니다.") from exc
+    escalation = env.get("VOICE_ACTION_ESCALATION_MODEL") or data.get("escalation_model") or ""
+    if not isinstance(escalation, str):
+        raise ConfigError("escalation_model은 모델 이름 문자열이어야 합니다.")
+    openrouter_key = (env.get("OPENROUTER_API_KEY") or "").strip() or None
     return Config(
         provider,
         data["model"],
@@ -180,7 +189,7 @@ def load_config(
         base_url,
         **numbers,
         feedback_enabled=feedback == "on",
-        feedback_api_key=(env.get("OPENROUTER_API_KEY") or "").strip() or None,
+        feedback_api_key=openrouter_key,
         voice_api_key=(env.get("GROQ_API_KEY") or "").strip() or None,
         fallback_api_key=(
             None if provider == "openai" else (env.get("OPENAI_API_KEY") or "").strip() or None
@@ -191,4 +200,6 @@ def load_config(
         feedback_autonomy=autonomy == "on",
         finder_reveal=finder == "on",
         finder_dock=dock == "on",
+        # Off without an OpenRouter key: the stronger model reuses that key.
+        escalation_model=(escalation.strip() or None) if openrouter_key else None,
     )
