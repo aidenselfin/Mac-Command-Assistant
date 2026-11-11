@@ -10,6 +10,7 @@ case "${1:-quick}" in
     changed=$(git status --porcelain | awk '{print $2}')
     tests=""
     case "$changed" in *file_search*) tests="$tests tests/test_file_search.py tests/test_find_files_flow.py";; esac
+    case "$changed" in *read_command*) tests="$tests tests/test_read_command.py";; esac
     case "$changed" in *file_operations*|*undo.py*) tests="$tests tests/test_file_operations.py tests/test_undo.py";; esac
     case "$changed" in *deletion*) tests="$tests tests/test_deletion.py";; esac
     case "$changed" in *conversion*) tests="$tests tests/test_conversion.py";; esac
@@ -19,7 +20,7 @@ case "${1:-quick}" in
     case "$changed" in *vibe.py*) tests="$tests tests/test_vibe.py";; esac
     if [ -z "$tests" ]; then echo "영역을 알 수 없어 전체를 실행합니다."; exec "$0" full; fi
     $RUN pytest -q $tests tests/test_integration_features.py && $RUN ruff check . ;;
-  search|파일찾기) $RUN pytest -q tests/test_file_search.py tests/test_find_files_flow.py ;;
+  search|파일찾기) $RUN pytest -q tests/test_read_command.py tests/test_file_search.py tests/test_find_files_flow.py ;;
   fileops|파일정리) $RUN pytest -q tests/test_file_operations.py tests/test_undo.py ;;
   delete|삭제) $RUN pytest -q tests/test_deletion.py ;;
   convert|변환) $RUN pytest -q tests/test_conversion.py tests/test_conversion_review.py ;;
