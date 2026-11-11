@@ -110,6 +110,7 @@ class Counting:
                 "heard": str(heard or "")[:160],
                 "said": (turn.text or "")[:160],
                 "calls": [c.name for c in turn.tool_calls],
+                "args": [str(c.arguments)[:200] for c in turn.tool_calls],
                 "asked": turn.clarification.question[:120] if turn.clarification else None,
             })
         return turn
