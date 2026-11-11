@@ -7,6 +7,12 @@
 파일 정리·의미 검색·네이티브 UI 세 갈래를 `main`에 통합했다. 다음은 사람이 직접 써 보며 확인하는 일과 이동 과제의 live 성공률 개선(아래 "다음 작업").
 
 # 최근 검증
+- 2026-11-11 **클라우드 2차 개선**(Groq gpt-oss-120b, 과제 89×3, 리눅스, 유료 live 사용): 변경 전 **197/267**(INVALID 21) → 변경 후 **194/267**(INVALID 21).
+  전체 합계는 변동 폭 안이다. 목표 과제만 보면 `read_whole_file` 0→3, `see_find_by_ext` 1→3
+  (프롬프트에 "읽은 내용·찾은 파일 이름을 답변에 직접 쓰기", "전부 보여 달라는 요청은 `local__list_files`" 추가).
+  나머지 변동은 같은 코드 재측정 범위(예: `summarize_bullets`는 모델이 "20 %"로 써서 채점 실패).
+  남은 문제: `see_same_name_many_places`·`read_injection_in_folder`·`read_scan_folder_for_term`은 `find_files`가 후보 여럿이면 앱이 파일 선택을 되물어 INVALID.
+  `docx` 읽기·변환·파일 열기 과제는 맥 전용 도구라 리눅스에서 실패. benchmark.py는 안 쟀다. 리눅스에서 `tests/test_ui.py`가 멈추고 `test_conversion`·`test_file_search` 1건은 환경 탓(변경 전에도 실패).
 - 2026-11-11 **클라우드 live 기준선**(Groq gpt-oss-120b, 과제 85×1, 리눅스): 66/85(INVALID 8)에서 채점기 쉼표 보정 뒤 68/85(INVALID 5).
   변환 4과제(`connect_*`)는 맥 전용 `textutil`·`cupsfilter`가 없어 클라우드에서 항상 실패. 재생은 90/94(같은 4개).
   `summarize_folder_to_file`은 읽은 폴더 안에 저장해 실패하며 프롬프트 보강(작업 폴더 바로 아래 저장)은 효과 없어 되돌림.
