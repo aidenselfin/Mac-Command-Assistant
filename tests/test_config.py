@@ -77,6 +77,9 @@ def test_switching_provider_keeps_json_model_unless_given(tmp_path):
         {"max_tool_rounds": 0},
         {"max_tool_rounds": 1.5},
         {"max_tool_rounds": True},
+        {"max_run_seconds": 0},
+        {"max_run_seconds": "inf"},
+        {"escalation_model": 3},
         {"mcp_timeout_seconds": "nan"},
         {"llm_timeout_seconds": -1},
         {"base_url": "https://secret@example.com"},
@@ -141,3 +144,20 @@ def test_fallback_only_with_other_provider(tmp_path):
     assert (config.fallback_api_key, config.fallback_model) == ("o", "m")
     assert load_config(environ={"GROQ_API_KEY": "g"}, **kw).fallback_api_key is None
     assert load_config(environ={"OPENAI_API_KEY": "o"}, **kw).fallback_api_key is None
+
+
+def test_recovery_limits_and_stronger_model(tmp_path):
+    (tmp_path / "voice-action-test").mkdir()
+    kw = {"cwd": tmp_path, "home": tmp_path / "home"}
+    plain = load_config(environ={"GROQ_API_KEY": "g"}, **kw)
+    assert (plain.max_tool_rounds, plain.max_run_seconds, plain.escalation_model) == (20, 90, None)
+    env = {"GROQ_API_KEY": "g", "VOICE_ACTION_ESCALATION_MODEL": "anthropic/claude-sonnet-5.5",
+           "VOICE_ACTION_MAX_RUN_SECONDS": "45"}
+    # The stronger model reuses the OpenRouter key; without one it stays off.
+    assert load_config(environ=env, **kw).escalation_model is None
+    on = load_config(environ={**env, "OPENROUTER_API_KEY": "r"}, **kw)
+    assert (on.escalation_model, on.max_run_seconds) == ("anthropic/claude-sonnet-5.5", 45)
+    from_json = load_config(
+        {"escalation_model": "x/y"}, environ={"GROQ_API_KEY": "g", "OPENROUTER_API_KEY": "r"}, **kw
+    )
+    assert from_json.escalation_model == "x/y"

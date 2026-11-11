@@ -1,0 +1,36 @@
+{
+  "id": "recover_format_error",
+  "family": "file.read.recover",
+  "axis": "see",
+  "level": 25,
+  "status": "active",
+  "note": "되묻기와 도구를 한 응답에 함께 낸 형식 위반을 바로잡고 이어간다.",
+  "files": {
+    "notes.txt": "회의는 화요일"
+  },
+  "request": "notes.txt 읽고 회의 요일 알려줘",
+  "script": [
+    {
+      "format_error": "clarification과 MCP 도구를 동시에 요청할 수 없습니다."
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/notes.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "회의는 화요일입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "reply_contains": [
+      "화요일"
+    ]
+  }
+}

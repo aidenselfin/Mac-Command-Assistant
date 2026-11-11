@@ -16,6 +16,7 @@
 | 형식 변환·문서 읽기 | ✅ | `pdf를 텍스트로 바꿔줘`, `공문.hwpx를 pdf로` | `conversion.py` | 변환=쓰기(승인), 읽기, hwpx→pdf는 글자만 | `test_conversion.py` `test_conversion_review.py` | `convert_*` `read_document_html` | |
 | 웹 읽기·저장 | ⏸ 꺼짐(보관) | `https://… 읽고 요약` | `archive/web-macos-mcp/…/playwright_client.py` | 읽기 + 저장은 승인 | `archive/…/test_integration_playwright.py` | (없음, 로컬 HTTP fixture 통합 테스트로 검증) | |
 | 활성 앱 조회 | ⏸ 꺼짐(보관) | `현재 활성 앱` | `archive/web-macos-mcp/…/macos_client.py` | 읽기 | `archive/…/test_macos_client.py` | | |
+| **실행 중 복구(오류 되돌림·파일 없음 안내·반복 감지·상위 모델)** | ✅ (상위 모델은 `escalation_model` 설정 시) | (실패 시 자동) | `planner.py`(`_check_progress` `_missing_path_hint` `_on_disk_path`) `config.py` `ui.py` | 안전 경계 오류는 복구하지 않음 | `test_recovery_loop.py` `test_config.py` | `recover_*` | 2026-11-11 실행 중 복구 루프 |
 | Undo | ✅ | `…` 메뉴 `최근 작업 되돌리기` | `undo.py` | | `test_undo.py` `test_integration_undo.py` | `overwrite_undo` `create_directory_undo` | |
 | 직전 대화 기억·후속 질문 | ✅ | `그 요약을 파일로 저장해줘` | `planner.py`(Exchange) | | `test_followup.py` `test_free_text.py` | `follow_up_*` | |
 | 자가 피드백(`/feedback` 의견·lesson) | ✅ 피드백 on | `/feedback 검색 결과가 너무 많아` | `feedback.py` `runtime.py` `native_bridge.py` | 일반 명령으로 실행하지 않음, 질문 대기 중엔 거부 | `test_feedback*.py` `test_native_bridge.py` `test_lesson_candidates.py` | `evals/run_eval.py --lesson` | 2026-10-04 lesson |
