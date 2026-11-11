@@ -1,6 +1,7 @@
 """Shared UI messages, presenter and runtime worker used by the native bridge."""
 
 import asyncio
+import concurrent.futures
 import queue
 import threading
 from collections.abc import Callable
@@ -402,6 +403,7 @@ class AsyncRuntimeWorker:
         self._ready = False
         self._pre_shutdown = threading.Event()
         self._stopped = threading.Event()
+        self._finishing = False
         self._close_after_stop = False
 
     @property
@@ -466,12 +468,31 @@ class AsyncRuntimeWorker:
         thread = self._thread
         if thread is None:
             return
-        if thread.is_alive() and self._loop is not None:
-            future = asyncio.run_coroutine_threadsafe(self._request_shutdown(), self._loop)
-            with suppress(Exception):
-                future.result()
+        loop = self._loop
+        if (
+            thread.is_alive()
+            and loop is not None
+            and not self._finishing
+            and not self._stopped.is_set()
+        ):
+            self._await_shutdown_request(loop)
         if threading.current_thread() is not thread:
             thread.join()
+
+    def _await_shutdown_request(self, loop: asyncio.AbstractEventLoop) -> None:
+        # cancel_active()가 루프를 끝내는 중이면 예약한 요청이 실행되지 않거나 취소될 수 있다.
+        # 그래서 future 결과를 기다리지 않고, 끝나거나 워커가 멈추면 기다림을 끝낸다.
+        coroutine = self._request_shutdown()
+        try:
+            future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+        except RuntimeError:
+            coroutine.close()
+            return
+        while not future.done() and not self._stopped.is_set():
+            concurrent.futures.wait([future], timeout=0.05)
+        if not future.done():
+            future.cancel()
+            coroutine.close()
 
     def _schedule(self, coroutine) -> bool:
         loop = self._loop
@@ -551,6 +572,7 @@ class AsyncRuntimeWorker:
                 )
             )
         finally:
+            self._finishing = True
             if feedback is not None:
                 await feedback.close(wait_seconds=5)
             self._ready = False

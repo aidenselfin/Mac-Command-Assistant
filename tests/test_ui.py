@@ -364,6 +364,37 @@ def test_worker_active_cancel_closes_owned_manager_and_http_client(config):
     )
 
 
+def test_worker_cancel_then_shutdown_never_hangs(config):
+    # 회귀: cancel_active()가 루프를 끝내는 사이 shutdown()이 실행되지 않을 요청을 기다리며 멈췄다.
+    for _ in range(30):
+        messages = queue.Queue()
+        manager, client, model = FakeManager(), FakeClient(), BlockingModel()
+        worker = AsyncRuntimeWorker(
+            config,
+            messages,
+            manager_factory=lambda _config, manager=manager: manager,
+            client_factory=lambda _config, client=client: client,
+            model_factory=lambda _client, _model_name, model=model: model,
+        )
+        worker.start()
+        wait_for_message(messages, UIMessageType.STATE)
+        assert worker.submit("파일 목록")
+        assert model.entered.wait(5)
+        assert worker.cancel_active()
+        wait_for_message(messages, UIMessageType.STOPPED)
+
+        done = threading.Event()
+        stopper = threading.Thread(
+            target=lambda w=worker, d=done: (w.shutdown(), d.set()), daemon=True
+        )
+        stopper.start()
+
+        assert done.wait(5), "shutdown()이 멈춘 루프를 기다리며 끝나지 않았습니다."
+        assert manager.closed.is_set()
+        assert client.closed.is_set()
+        assert worker.thread is not None and not worker.thread.is_alive()
+
+
 def test_worker_normal_shutdown_closes_owned_resources(config):
     messages = queue.Queue()
     manager, client = FakeManager(), FakeClient()
