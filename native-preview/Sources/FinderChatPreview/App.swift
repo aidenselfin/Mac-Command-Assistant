@@ -117,6 +117,7 @@ private struct ChatPanel: View {
         case "WAITING_USER_INPUT": return "답변이 필요해요"
         case "PLANNING", "RESUMING_PLAN": return "요청을 처리하고 있어요"
         case "STOPPED": return "연결 종료 · 메뉴에서 다시 시작하세요"
+        case "SLEEPING": return "쉬는 중 · 쓰면 바로 깨어나요"
         default: return "연결 준비 중"
         }
     }
