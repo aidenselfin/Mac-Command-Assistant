@@ -12,6 +12,7 @@ struct Approval: Decodable {
     let operation: String
     let target: String
     let targets: [String]
+    let previews: [String]?  // delete: head lines or binary kind·size per target, in order
     let preview: String
     let truncated: Bool
     let characters: Int

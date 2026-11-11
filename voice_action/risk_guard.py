@@ -94,6 +94,8 @@ class PreparedWrite:
     snapshots: tuple[tuple, ...] = field(default=(), repr=False)
     file_state: str = field(default="", repr=False)
     payload: bytes = field(default=b"", repr=False)  # a conversion's output, made before approval
+    # Per-target content preview for the user's approval screen only (never sent to the model).
+    previews: tuple[str, ...] = field(default=(), repr=False)
 
 
 def classify_tool(name: str) -> ToolRisk:
@@ -232,7 +234,7 @@ class RiskGuard:
         if self._undo_journal is None:
             raise RiskGuardError("Undo journal이 없어 파일을 삭제할 수 없습니다.")
         try:
-            normalized, snapshots = self._undo_journal.deletions.prepare(arguments)
+            normalized, snapshots, previews = self._undo_journal.deletions.prepare(arguments)
         except (OSError, sqlite3.Error, UndoJournalError) as exc:
             raise RiskGuardError("삭제 대상/백업을 준비할 수 없습니다.") from exc
         canonical = _canonical_json(normalized)
@@ -243,6 +245,7 @@ class RiskGuard:
         return PreparedWrite(
             DELETE_TOOL, targets[0] if len(targets) == 1 else f"{len(targets)}개 파일",
             "delete", 0, "", False, canonical, digest, nonce, targets, snapshots,
+            previews=previews,
         )
 
     def _prepare_convert(self, arguments: dict) -> PreparedWrite:

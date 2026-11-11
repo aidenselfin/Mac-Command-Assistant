@@ -170,6 +170,10 @@ private struct ChatPanel: View {
                     Text("대상 \(approval.targets.count)개").font(.callout.weight(.medium))
                     ForEach(Array(approval.targets.enumerated()), id: \.offset) { index, path in
                         Text("\(index + 1). \(path)").font(.caption).textSelection(.enabled)
+                        if let previews = approval.previews, index < previews.count {
+                            Text(previews[index]).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .lineLimit(4).padding(.leading, 12).textSelection(.enabled)
+                        }
                     }
                 }
                 if !approval.preview.isEmpty {

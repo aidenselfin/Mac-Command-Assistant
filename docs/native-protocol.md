@@ -12,7 +12,7 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 | `config` | `folders` | 시작 시 허용 폴더 |
 | `state` | `state` | 런타임 상태 이름(IDLE, PLANNING, WAITING_APPROVAL …) |
 | `tool` | `name` | 지금 실행 중인 도구 |
-| `approval` | `approval_id` `operation` `target` `targets` `preview` `truncated` `characters` | 승인 요청. `operation`: `create` `overwrite` `delete` `move` `copy` `mkdir` `convert` … <br>이동·복사는 `targets[0]`=원본, `target`=목적지. 폴더 생성은 `target`만 |
+| `approval` | `approval_id` `operation` `target` `targets` `previews` `preview` `truncated` `characters` | 승인 요청. `operation`: `create` `overwrite` `delete` `move` `copy` `mkdir` `convert` … <br>이동·복사는 `targets[0]`=원본, `target`=목적지. 폴더 생성은 `target`만 <br>삭제는 `previews[i]`=`targets[i]` 내용 요약(글은 앞 3줄·줄당 80자, 바이너리는 종류·크기, 앞 20개만). 화면에만 쓰고 모델엔 보내지 않는다 |
 | `clarification` | `text` `kind` `choices` | 질문 또는 후보 선택 |
 | `completed` | `text` `changed_paths` `found_paths` `offer_file` `offer_paths` | 완료. `found_paths`는 검색이 한 파일로 정한 경로(드래그 칩용), `offer_file`은 "파일 줘"처럼 파일 자체를 달라는 명령인지, `offer_paths`는 드래그 칩으로 줄 파일(만들거나 고친 파일, 없으면 "파일 줘"로 찾은 파일, 5개 이하) |
 | `error` | `text` | 오류·바쁨 |

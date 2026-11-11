@@ -260,6 +260,7 @@ class ApprovalRequired:
     preview_truncated: bool
     context: ApprovalContext = field(repr=False)
     targets: tuple[str, ...] = ()
+    previews: tuple[str, ...] = field(default=(), repr=False)  # user screen only
 
 
 @dataclass(frozen=True)
@@ -2348,6 +2349,7 @@ class Planner:
             prepared.preview_truncated,
             context,
             prepared.targets,
+            prepared.previews,
         )
 
     @staticmethod
