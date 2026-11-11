@@ -1,0 +1,31 @@
+{
+  "id": "neg_open_wrong_file",
+  "family": "control",
+  "negative": true,
+  "files": {
+    "a.txt": "x",
+    "b.txt": "y"
+  },
+  "request": "a.txt 열어줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__open_file",
+          "args": {
+            "path": "{root}/b.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "열었습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "opened": [
+      "a.txt"
+    ]
+  }
+}

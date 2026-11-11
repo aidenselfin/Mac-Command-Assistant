@@ -24,6 +24,7 @@ final class VoiceInput: ObservableObject {
     /// The listening chip waits this long, so a quick double tap goes straight to the type box.
     private static let badgeWait: Duration = .milliseconds(220)
     private var inputPanel: TypePanel?
+    var inputShown: Bool { inputPanel?.isVisible == true }
     private var lastPress = Date.distantPast
     /// Two right-Option presses within this window open the text box instead of recording.
     private static let doubleTap: TimeInterval = 0.4
@@ -71,7 +72,7 @@ final class VoiceInput: ObservableObject {
         }
     }
 
-    private func flagsChanged(key: UInt16, flags: UInt) {
+    func flagsChanged(key: UInt16, flags: UInt) {
         // Another modifier joining the hold (Shift, Command, ...) makes it a shortcut, not speech.
         guard key == Self.rightOptionKey else { discard(); return }
         let held = NSEvent.ModifierFlags(rawValue: flags)
@@ -95,7 +96,7 @@ final class VoiceInput: ObservableObject {
     private func begin() {
         let backend = Backend.shared
         // An offline backend (asleep) starts now and is ready by the time the key is let go.
-        guard enabled, !recording, backend.canSubmit || !backend.online else { return }
+        guard enabled, !recording, backend.canSubmit || !backend.online, !UITest.active else { return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: break
         case .notDetermined:

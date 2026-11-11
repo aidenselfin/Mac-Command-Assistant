@@ -3,7 +3,7 @@
   "family": "app.open",
   "axis": "connect",
   "level": 82,
-  "status": "target",
+  "status": "active",
   "files": {
     "a.txt": "x"
   },
@@ -12,6 +12,24 @@
     "files": {},
     "must_run": [
       "local__open_file"
+    ],
+    "opened": [
+      "a.txt"
     ]
-  }
+  },
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__open_file",
+          "args": {
+            "path": "{root}/a.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "a.txt를 기본 앱으로 열었습니다."
+    }
+  ]
 }

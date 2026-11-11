@@ -1,10 +1,12 @@
-"""Show files the app just wrote in Finder (macOS).
+"""Show files the app just wrote in Finder, and open a file in its default app (macOS).
 
 Only the paths the app itself reports as changed are passed in, and each one is checked again
 here: inside an allowed folder, not a link, still there. A failure only means nothing opens;
 it never changes the result of the file work that came before.
 """
 
+import os
+import stat
 import sys
 import unicodedata
 from collections.abc import Callable, Iterable
@@ -13,7 +15,7 @@ from pathlib import Path
 from typing import Protocol
 
 from voice_action.conversion import _inside
-from voice_action.mcp_client import ToolRejectedError
+from voice_action.mcp_client import ToolDefinition, ToolRejectedError, ToolResult
 
 MAX_REVEALED = 10
 
@@ -49,6 +51,56 @@ def reveal(
     except Exception:  # noqa: BLE001 - a missing framework or AppKit refusal must not matter
         return False
     return True
+
+
+OPEN_FILE_TOOL = "local__open_file"
+OPEN_DEFINITION = ToolDefinition(
+    OPEN_FILE_TOOL,
+    "허용된 폴더 안 파일 하나를 macOS 기본 앱으로 연다(예: txt는 텍스트 편집기, pdf는 미리보기). "
+    "사용자가 파일을 열어 달라고 할 때만 쓴다. path는 찾은 파일의 절대경로다. 내용을 읽거나 "
+    "요약할 때는 쓰지 않는다. 프로그램·스크립트·앱은 열 수 없다.",
+    {"type": "object", "properties": {"path": {"type": "string"}},
+     "required": ["path"], "additionalProperties": False},
+)
+# Opening one of these runs it (Terminal runs a .command, Script Editor may run a script).
+# ponytail: a fixed list plus the executable bit; a launch-services "is this an app" check
+# would catch handlers this list does not know.
+PROGRAM_SUFFIXES = frozenset({
+    ".app", ".command", ".tool", ".sh", ".bash", ".zsh", ".csh", ".ksh", ".fish", ".py",
+    ".pyw", ".pl", ".rb", ".php", ".js", ".scpt", ".scptd", ".applescript", ".workflow",
+    ".action", ".terminal", ".pkg", ".mpkg", ".dmg", ".jar", ".prefpane", ".kext", ".plugin",
+    ".bundle", ".mobileconfig", ".shortcut", ".webloc", ".inetloc", ".fileloc", ".url",
+    ".osax", ".service", ".saver", ".qlgenerator", ".mdimporter", ".xpc", ".ipa",
+})
+
+
+def open_file(
+    arguments: dict,
+    roots: tuple[Path, ...],
+    *,
+    workspace: Callable[[], object] | None = None,
+) -> ToolResult:
+    """Open one regular, non-program file inside an allowed folder with its default app."""
+    if sys.platform != "darwin":
+        raise ToolRejectedError("파일 열기는 macOS에서만 됩니다.")
+    path = _inside(arguments.get("path"), tuple(root.resolve() for root in roots), exists=True)
+    metadata = os.stat(path, follow_symlinks=False)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ToolRejectedError("일반 파일만 열 수 있습니다.")
+    if path.suffix.lower() in PROGRAM_SUFFIXES or metadata.st_mode & 0o111:
+        raise ToolRejectedError("프로그램·스크립트 파일은 열지 않습니다.")
+    # ponytail: macOS opens by path, so a swap to a link after this check is not caught;
+    # only a process already writing in the folder can race it. Close it with a file handle
+    # if Launch Services ever takes one.
+    try:
+        from Foundation import NSURL
+
+        opened = bool((workspace or _workspace)().openURL_(NSURL.fileURLWithPath_(str(path))))
+    except Exception:  # noqa: BLE001 - a missing framework or AppKit refusal is a failed open
+        opened = False
+    if not opened:
+        return ToolResult(False, f"파일을 열지 못했습니다: {path}")
+    return ToolResult(True, f"기본 앱으로 열었습니다: {path}")
 
 
 # ---- placing the Finder window beside the app --------------------------------------------

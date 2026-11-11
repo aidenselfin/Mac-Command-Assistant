@@ -80,13 +80,20 @@ def test_clarification_and_cancel_use_original_runtime_contract():
 
 
 @pytest.mark.parametrize("payload", [None, [], {"action": "submit", "text": []},
-                                    {"action": "rate", "score": True},
-                                    {"action": "rate", "score": 1, "tags": ["bad"]}])
+                                    {"action": "rate", "score": 1}])
 def test_malformed_commands_do_not_reach_worker(payload):
     transport, worker, events = bridge()
     transport.command(payload)
     assert events[-1]["type"] == "rejected"
     assert not worker.mock_calls
+
+
+def test_feedback_command_waits_until_the_question_is_answered():
+    transport, worker, events = bridge()
+    transport.message(UIMessage(UIMessageType.STATE, RuntimeState.WAITING_USER_INPUT))
+    transport.command({"action": "submit", "text": "/feedback 너무 느려"})
+    assert events[-1]["type"] == "rejected" and "/feedback" in events[-1]["text"]
+    worker.submit.assert_not_called()
 
 
 @pytest.mark.integration
@@ -177,6 +184,7 @@ def test_json_stream_rejects_malformed_input_and_closes_worker_on_shutdown(
     monkeypatch.setattr(native_bridge, "load_config", lambda: config)
     monkeypatch.setattr(native_bridge, "AsyncRuntimeWorker", lambda *_: worker)
     monkeypatch.setattr(native_bridge.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(native_bridge, "stale_app_notice", lambda *_: None)
     read_fd, write_fd = os.pipe()
     os.write(write_fd, b'not json\n{"action":"shutdown"}\n')
     os.close(write_fd)
@@ -194,7 +202,6 @@ def test_completed_event_carries_found_paths_for_drag_chip():
 
     events = []
     worker = Mock()
-    worker.can_rate.return_value = False
     NativeBridge(worker, events.append).message(
         UIMessage(UIMessageType.OUTCOME, Completed("찾았어요", found_paths=("/a/b.txt",)))
     )
@@ -228,7 +235,6 @@ def test_offer_file_follows_the_original_request_through_a_clarification():
 
     events = []
     worker = Mock()
-    worker.can_rate.return_value = False
     worker.submit.return_value = True
     bridge = NativeBridge(worker, events.append)
     bridge.state = RuntimeState.IDLE
@@ -238,3 +244,46 @@ def test_offer_file_follows_the_original_request_through_a_clarification():
     found = Completed("찾았어요", found_paths=("/a/b.txt",))
     bridge.message(UIMessage(UIMessageType.OUTCOME, found))
     assert events[-1]["offer_file"] is True
+
+
+def test_completed_event_offers_made_files_as_chips_up_to_five(tmp_path):
+    from voice_action.planner import Completed
+
+    files = [str(tmp_path / f"{n}.md") for n in range(6)]
+    for path in files:
+        open(path, "w").close()
+    folder = str(tmp_path)  # a made folder is never a chip
+
+    def offered(completed, request=""):
+        events = []
+        worker = Mock()
+        bridge = NativeBridge(worker, events.append)
+        bridge.request = request
+        bridge.message(UIMessage(UIMessageType.OUTCOME, completed))
+        return events[-1]["offer_paths"]
+
+    assert offered(Completed("요약을 저장했어요", (files[0],))) == [files[0]]
+    assert offered(Completed("저장했어요", (*files[:5], folder))) == files[:5]
+    assert offered(Completed("저장했어요", tuple(files))) == []
+    assert offered(Completed("찾았어요", found_paths=(files[0],)), "회의록 요약해줘") == []
+    assert offered(Completed("찾았어요", found_paths=(files[0],)), "회의록 줘") == [files[0]]
+
+
+def test_stale_app_notice_compares_the_built_tree_with_the_checkout(tmp_path):
+    import subprocess
+
+    from voice_action.native_bridge import STALE_APP, stale_app_notice
+
+    (tmp_path / "native-preview").mkdir()
+    (tmp_path / "native-preview" / "App.swift").write_text("v1")
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "v1"], check=True)
+    tree = subprocess.run([*git, "rev-parse", "HEAD:native-preview"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+    assert stale_app_notice(tree, tmp_path) is None
+    assert stale_app_notice(None, tmp_path) == STALE_APP  # built before the version was recorded
+    assert stale_app_notice(tree + "-dirty", tmp_path) == STALE_APP
+    assert stale_app_notice(tree, tmp_path / "not-a-repo") is None  # no git: stay quiet

@@ -1,0 +1,10 @@
+{
+ "about": "⌘⇧O가 대화를 지우고 백엔드 기억도 지운다, 진행 중이면 취소 뒤 지운다",
+ "steps": [
+  {"emit": {"type": "completed", "text": "답", "offer_paths": []}, "expect": {"messages": ["assistant: 답"]}},
+  {"do": "key", "key": "cmd+shift+o", "expect": {"messages": [], "sent": ["reset"]}},
+  {"emit": {"type": "state", "state": "PLANNING"}},
+  {"do": "key", "key": "cmd+shift+o", "expect": {"sent": ["cancel"]}},
+  {"emit": {"type": "state", "state": "IDLE"}, "expect": {"sent": ["reset"], "state": "IDLE"}}
+ ]
+}
