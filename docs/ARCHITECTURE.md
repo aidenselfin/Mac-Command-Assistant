@@ -34,6 +34,7 @@
 | `voice_action/risk_guard.py` | 도구 위험 분류(`classify_tool`), 승인 발급·검증, 읽기 도구 실행 | 새 도구는 여기에 분류를 추가해야 한다 |
 | `voice_action/runtime.py` | 단일 실행 상태 머신(IDLE→PLANNING→…), 취소, 피드백 연결 | |
 | `voice_action/file_search.py` | `local__find_files`(이름→폴더→내용 단계 검색), `local__list_files`(크기·날짜 목록), `local__group_files`(비슷한 파일 묶기) | |
+| `voice_action/read_command.py` | `local__run_read_command`: find·grep 등 읽기 프로그램을 셸 없이 실행(시험 중, `search_commands`일 때만 노출) | 경로는 실행 전후로 허용 폴더 검사 |
 | `voice_action/file_operations.py` | `local__move_file` `local__copy_file` `local__create_directory` | |
 | `voice_action/deletion.py` | `local__delete_files`(백업 후 삭제) | |
 | `voice_action/conversion.py` | `local__convert_file`(승인 쓰기), `local__read_document`(pdf·docx 읽기) | |
@@ -65,7 +66,7 @@
 |---|---|
 | 새 로컬 도구 추가 | 도구 모듈(`file_operations.py` 참고) → `risk_guard.py` 분류·승인 → `planner.py` 노출 조건 → 테스트·eval 과제 |
 | 모델이 도구를 못 고르거나 잘못 고른다 | `planner.py` 시스템 프롬프트·노출 조건, `docs/self-improvement-guide.md`, `evals/tasks/` |
-| 검색이 못 찾는다 | `file_search.py`(단계) |
+| 검색이 못 찾는다 | `file_search.py`(단계), 읽기 명령 방식은 `read_command.py`·`planner.py`의 `COMMAND_SEARCH_RULES` |
 | 승인 화면을 바꾼다 | SwiftUI `native-preview/…/App.swift`, 필요하면 `native_bridge.py`와 프로토콜 문서 |
 | 설정 항목 추가 | `config.py` → README 설정 표 → `tests/test_config.py` |
 | 안전 경계(허용 폴더·symlink) | `risk_guard.py`, 각 도구 모듈의 `_open_below` 계열. 약화하지 않는다 |
