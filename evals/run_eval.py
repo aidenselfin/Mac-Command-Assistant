@@ -67,6 +67,7 @@ TASKS = Path(__file__).with_name("tasks")
 RESULTS = Path(__file__).with_name("results")
 FAILURES = ROOT / ".voice-action" / "failure-tasks"
 SKIP = {".eval"}  # harness-owned files inside the trial root
+SEARCH_COMMANDS = False  # --search-commands: every live trial searches with read commands
 
 
 class Scripted:
@@ -178,10 +179,13 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         OPENED.clear()
         client = None
         if config is None:
-            trial_config = Config("openai", "scripted", "unused", (root,))
+            trial_config = Config("openai", "scripted", "unused", (root,),
+                                  search_commands=task.get("search_commands", False))
             model = Scripted(task["script"], root)
         else:
-            trial_config = replace(config, allowed_directories=(root,), feedback_enabled=False)
+            trial_config = replace(config, allowed_directories=(root,), feedback_enabled=False,
+                                   search_commands=SEARCH_COMMANDS or task.get("search_commands",
+                                                                                False))
             inner, client = live_model(trial_config)  # closed in finally, once per trial
             model = Counting(inner)
         feedback = None
@@ -406,7 +410,11 @@ async def main(argv=None) -> int:
     parser.add_argument("--include-targets", action="store_true",
                         help="also run status=target tasks (abilities the app does not have yet)")
     parser.add_argument("--dir", type=Path, default=TASKS, help="task folder")
+    parser.add_argument("--search-commands", action="store_true",
+                        help="search with find·grep·mdfind instead of the fixed search tools")
     args = parser.parse_args(argv)
+    global SEARCH_COMMANDS
+    SEARCH_COMMANDS = args.search_commands
     tasks = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(args.dir.glob("*.json"))]
     if args.live and args.dir == TASKS:  # real failures the feedback loop kept, verbatim
         tasks += [json.loads(p.read_text(encoding="utf-8"))

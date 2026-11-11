@@ -1,0 +1,55 @@
+{
+  "id": "cmd_find_unclear_name",
+  "family": "file.find",
+  "axis": "read",
+  "level": 22,
+  "status": "active",
+  "files": {
+    "기획/예산안-v2.md": "# 예산안\n총액 3천만원",
+    "기타/잡담.txt": "점심 메뉴"
+  },
+  "request": "예산안 내용 알려줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__run_read_command",
+          "args": {
+            "argv": [
+              "find",
+              "{root}",
+              "(",
+              "-iname",
+              "*예산안*",
+              "-o",
+              "-iname",
+              "*budget*",
+              ")"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/기획/예산안-v2.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "예산안 총액은 3천만원입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__run_read_command",
+      "filesystem__read_text_file"
+    ]
+  },
+  "search_commands": true
+}

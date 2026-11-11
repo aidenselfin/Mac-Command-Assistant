@@ -51,6 +51,8 @@ class Config:
     finder_dock: bool = True  # put the revealed Finder window beside the app window
     # A stronger OpenRouter model that takes over after two failed recoveries; None = off.
     escalation_model: str | None = None
+    # Search by find·grep·mdfind (local__run_read_command) instead of the fixed search tools.
+    search_commands: bool = False
 
 
 def load_config(

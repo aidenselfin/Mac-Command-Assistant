@@ -1,0 +1,53 @@
+{
+  "id": "cmd_open_file_in_subfolder",
+  "family": "finder.open",
+  "axis": "finder",
+  "level": 10,
+  "status": "active",
+  "files": {
+    "보관/회의 메모.txt": "x",
+    "보관/예산.csv": "1"
+  },
+  "request": "회의 메모 열어줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__run_read_command",
+          "args": {
+            "argv": [
+              "find",
+              "{root}",
+              "-iname",
+              "*회의*메모*"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "local__open_file",
+          "args": {
+            "path": "{root}/보관/회의 메모.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "회의 메모.txt를 열었습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__run_read_command",
+      "local__open_file"
+    ],
+    "opened": [
+      "보관/회의 메모.txt"
+    ]
+  },
+  "search_commands": true
+}

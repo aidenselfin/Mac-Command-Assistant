@@ -59,7 +59,7 @@ FAILURE_DIR = "failure-tasks"  # next to the feedback DB; run_eval --live reads 
 LIST_TOOLS = {"filesystem__list_directory", "local__list_files"}
 WASTE_CALLS = 6  # R8: model calls in one run
 SEARCH_CALLS = 4  # R9: search tool calls in one run
-SEARCH_TOOLS = ("local__find_files", "filesystem__search_files")
+SEARCH_TOOLS = ("local__find_files", "filesystem__search_files", "local__run_read_command")
 # R10: the user gave up on the same command (cancelled it) more than once in a week.
 CANCEL_REPEAT, CANCEL_WINDOW = 2, 7 * 86400
 SECRET_PATTERN = re.compile(

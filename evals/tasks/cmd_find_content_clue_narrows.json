@@ -1,0 +1,56 @@
+{
+  "id": "cmd_find_content_clue_narrows",
+  "family": "file.find.ask",
+  "axis": "read",
+  "level": 54,
+  "status": "active",
+  "files": {
+    "proposal-1.txt": "일반 내용",
+    "proposal-2.txt": "일반 내용",
+    "proposal-3.txt": "예산 승인 건",
+    "proposal-4.txt": "일반 내용",
+    "proposal-5.txt": "일반 내용",
+    "proposal-6.txt": "일반 내용",
+    "proposal-7.txt": "일반 내용"
+  },
+  "request": "proposal 문서 중에 예산 승인 얘기가 들어 있는 걸 읽어줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__run_read_command",
+          "args": {
+            "argv": [
+              "grep",
+              "-rli",
+              "예산 승인",
+              "{root}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/proposal-3.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "예산 승인 건입니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__run_read_command",
+      "filesystem__read_text_file"
+    ],
+    "changed_paths": []
+  },
+  "search_commands": true
+}

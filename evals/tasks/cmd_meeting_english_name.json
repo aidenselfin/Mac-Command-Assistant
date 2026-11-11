@@ -1,0 +1,55 @@
+{
+  "id": "cmd_meeting_english_name",
+  "family": "file.find",
+  "axis": "summarize",
+  "level": 46,
+  "status": "active",
+  "files": {
+    "meeting-minutes.txt": "Decision: ship on Friday",
+    "메모.txt": "점심"
+  },
+  "request": "회의록 요약해줘",
+  "script": [
+    {
+      "calls": [
+        {
+          "name": "local__run_read_command",
+          "args": {
+            "argv": [
+              "find",
+              "{root}",
+              "(",
+              "-iname",
+              "*회의록*",
+              "-o",
+              "-iname",
+              "*minutes*",
+              ")"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "filesystem__read_text_file",
+          "args": {
+            "path": "{root}/meeting-minutes.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "금요일에 배포하기로 했습니다."
+    }
+  ],
+  "expect": {
+    "files": {},
+    "must_run": [
+      "local__run_read_command",
+      "filesystem__read_text_file"
+    ]
+  },
+  "search_commands": true
+}

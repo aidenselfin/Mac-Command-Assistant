@@ -46,6 +46,7 @@ from voice_action.mcp_client import (
     ToolRejectedError,
     ToolResult,
 )
+from voice_action.read_command import READ_COMMAND_DEFINITION, READ_COMMAND_TOOL
 from voice_action.risk_guard import (
     WRITE_TOOLS,
     ApprovalChangedError,
@@ -677,6 +678,55 @@ def _on_disk_path(raw: object, roots: tuple[Path, ...]) -> object:
     return str(path.parent / match) if match else raw
 
 
+COMMAND_SEARCH_RULES = (
+    "정확한 파일명이 없는 파일 요청은 사용자에게 되묻기 전에 반드시 local__run_read_command로 "
+    "먼저 찾으세요. argv는 배열이고 셸이 없습니다(파이프·리다이렉트·* 확장 없음, 와일드카드는 "
+    "-name 값 안에서만). 이름은 find <루트> -iname '*단어*'(한/영 변형은 '(', …, '-o', …, ')'로 "
+    "묶기), 본문 내용은 grep -rli 단어 <루트>로 찾고, mdfind -onlyin <루트>는 Spotlight 색인된 "
+    "폴더에서만 보조로 쓰세요. 크기·날짜는 find의 -size·-mtime, 목록·정렬은 ls -lt·stat를 "
+    "쓰세요. 결과에 나온 경로를 그대로 복사해 쓰고, 삭제·이동·열기·변환 대상도 결과에 나온 "
+    "경로여야 합니다. 후보가 하나면 바로 진행하고, 여러 개인데 요청으로 고를 수 없으면 파일을 "
+    "읽지 말고 request_clarification(kind file_candidate, options에 후보 경로)으로 물으세요. "
+    "'가장 최근·가장 큰'처럼 크기·날짜로 하나를 고르는 요청은 묻지 말고 ls -lt·stat로 골라 "
+    "진행하세요. '모두 알려줘'처럼 전부를 보여 달라는 요청은 결과의 파일 이름을 답에 모두 "
+    "적으세요(결과는 사용자에게 따로 보이지 않습니다). 결과가 없으면 조건을 바꿔 한두 번 더 "
+    "찾고, 그래도 없으면 찾지 못했다고 알리세요. 잘렸다는 표시가 있으면 조건을 좁혀 다시 "
+    "찾으세요. 회의록은 '회의록'과 meeting·minutes 변형으로 찾으세요. "
+)
+
+
+def _command_search_prompt(prompt: str) -> str:
+    """The system prompt with the fixed search tools' rules swapped for read commands."""
+    # ponytail: a text swap while both search ways exist; inline the rules once one is removed.
+    for start, end in (
+        ("크기·수정일로 고르거나 정렬하는 목록 요청",
+         "local__list_files(extensions·name_contains)로 답하세요. "),
+        ("정확한 파일명이 없는 파일 요청은",
+         "'회의록'과 meeting·minutes 같은 변형을 넣어 먼저 찾으세요. "),
+    ):
+        head, rest = prompt.split(start, 1)
+        prompt = head + (COMMAND_SEARCH_RULES if start.startswith("정확") else "") + (
+            rest.split(end, 1)[1]
+        )
+    return prompt.replace("local__find_files", READ_COMMAND_TOOL)
+
+
+def _for_search_mode(messages: list[dict], commands: bool) -> list[dict]:
+    """Notes written for the fixed search tools point at the read command instead."""
+    if not commands:
+        return list(messages)
+    swapped = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str) and "local__" in content:
+            for old in ("local__list_files나 local__find_files", "local__find_files",
+                        "local__list_files", "local__group_files"):
+                content = content.replace(old, READ_COMMAND_TOOL)
+            message = {**message, "content": content}
+        swapped.append(message)
+    return swapped
+
+
 def _missing_path_hint(call: "ToolCall", roots: tuple[Path, ...]) -> str:
     """What to try next when a tool was given a path that does not exist."""
     if call.name not in HINT_TOOLS:
@@ -1209,6 +1259,7 @@ class _LoopState:
     found_paths: tuple[str, ...] = ()
     group_paths: tuple[str, ...] = ()  # files local__group_files listed: grounded move sources
     seen_paths: tuple[str, ...] = ()
+    command_paths: tuple[str, ...] = ()  # paths local__run_read_command printed: grounded targets
     empty_retries: int = 0  # times an empty final reply was sent back for a real answer
     confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
     find_tried: bool = False  # local__find_files has run in this command
@@ -1405,7 +1456,10 @@ class Planner:
                 ):
                     tools.append(definition)
             tools.append(READ_DOCUMENT_DEFINITION)
-            if self.config.allowed_directories:
+            if self.config.allowed_directories and self.config.search_commands:
+                tools.append(READ_COMMAND_DEFINITION)
+                tools = [tool for tool in tools if tool.name != FILESYSTEM_SEARCH_TOOL]
+            elif self.config.allowed_directories:
                 tools.append(FIND_FILES_DEFINITION)
                 tools.append(LIST_DEFINITION)
                 # A move may act on groups shown last turn, so it can group again for the paths.
@@ -1524,6 +1578,8 @@ class Planner:
                 + (f"\n\n(질문에 대한 사용자의 답: {'; '.join(answers)})" if answers else ""),
             },
         ]
+        if self.config.search_commands:
+            messages[0]["content"] = _command_search_prompt(messages[0]["content"])
         read_only_candidate_request = _requires_candidate_search(user_text)
         delete_search_required = _destructive_request(user_text) and not (
             OUTPUT_FILENAME_PATTERN.search(user_text)
@@ -1704,7 +1760,7 @@ class Planner:
             try:
                 async with asyncio.timeout(remaining):
                     turn = await self._active_model(state).generate(
-                        list(state.messages),
+                        _for_search_mode(state.messages, self.config.search_commands),
                         exposed_tools,
                         allow_tools=True,
                         allow_clarification=not (
@@ -1731,9 +1787,15 @@ class Planner:
                 if turn.clarification is not None and turn.clarification.kind == "free_text"
                 else None
             )
+            grounded_choice = (
+                turn.clarification is not None
+                and turn.clarification.kind == "file_candidate"
+                and set(turn.clarification.options) <= set(state.command_paths)
+            )
             if turn.clarification is not None:
                 if typed_refusal is not None or (
-                    turn.clarification.kind != "free_text"
+                    not grounded_choice
+                    and turn.clarification.kind != "free_text"
                     and (
                         turn.clarification.kind != "edit_criteria"
                         or not _ambiguous_mutation(state.user_text)
@@ -2126,7 +2188,7 @@ class Planner:
             if call.name != MKDIR_TOOL:
                 source = arguments.get("source")
                 chosen = state.attachment or state.single_search_candidate
-                if chosen is None and source in state.group_paths:
+                if chosen is None and source in (*state.group_paths, *state.command_paths):
                     chosen = source  # listed by the app itself, not named by the model
                 if chosen is not None and source != chosen:
                     return "첨부하거나 선택한 파일만 이동·복사할 수 있습니다."
@@ -2157,6 +2219,11 @@ class Planner:
             if not explicit:
                 return "목적지 파일명 또는 폴더가 사용자 요청에 명시되지 않았습니다."
             return None
+        if self.config.search_commands and call.name in {OPEN_FILE_TOOL, CONVERT_TOOL}:
+            target = arguments.get("path" if call.name == OPEN_FILE_TOOL else "source")
+            known = (*state.command_paths, state.attachment, state.single_search_candidate)
+            if target not in known and not _write_target_is_explicit(target, state.user_text, ()):
+                return "대상 파일은 사용자가 말한 파일이거나 이번 검색 결과에 나온 경로여야 합니다."
         if call.name == FILESYSTEM_WRITE_TOOL and (
             _operation_requested(MOVE_TOOL, state.user_text)
             or _operation_requested(COPY_TOOL, state.user_text)
@@ -2231,6 +2298,8 @@ class Planner:
                 state.web_failed = True
                 return "출력 파일이 사용자 원문에 명시되지 않았습니다."
         if state.search_required and not state.search_completed:
+            if call.name == READ_COMMAND_TOOL:
+                return None
             if call.name != FIND_FILES_TOOL:
                 return "모호한 파일 요청은 local__find_files로 먼저 탐색해야 합니다."
             if state.read_only_candidate_request and not any(
@@ -2382,6 +2451,8 @@ class Planner:
                 return outcome
             if state.find_override is not None:
                 result_text, state.find_override = state.find_override, None
+        elif call.name == READ_COMMAND_TOOL and result.structured is not None:
+            self._accept_command_result(state, result.structured["paths"])
         elif call.name == GROUP_FILES_TOOL and result.structured is not None:
             state.group_paths = tuple(dict.fromkeys(
                 (*state.group_paths,
@@ -2514,6 +2585,16 @@ class Planner:
                 state.single_search_candidate = found
                 state.candidate_read = _acts_without_reading(state.user_text)
         return None
+
+    @staticmethod
+    def _accept_command_result(state: _LoopState, paths: list[str]) -> None:
+        """Every path a read command printed may be acted on; nothing else found is."""
+        state.search_completed = state.find_tried = True
+        state.command_paths = tuple(dict.fromkeys((*state.command_paths, *paths)))
+        state.seen_paths = tuple(dict.fromkeys((*state.seen_paths, *paths)))
+        state.find_none = not state.command_paths
+        if len(paths) == 1:  # one file found is a draggable file too
+            state.found_paths = (paths[0],)
 
     @staticmethod
     def _named_candidates(state: _LoopState, response: dict) -> str | None:
