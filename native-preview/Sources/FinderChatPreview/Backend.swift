@@ -27,13 +27,12 @@ final class Backend: ObservableObject {
     @Published var choices: [String] = [] { didSet { syncChips() } }
     @Published var approval: Approval? { didSet { syncChips() } }
     @Published var attachment: String?
-    // The one found file, offered as a chip the user drags out; "파일 줘" also floats it over other apps.
-    @Published var dragFile: URL? { didSet { if dragFile == nil { FileBox.shared.show(nil) } } }
+    // Files the command made, edited or was asked for (at most 5), each a chip the user drags out;
+    // with the chat window closed they also float over other apps.
+    @Published var dragFiles: [URL] = [] { didSet { if dragFiles.isEmpty { FileBox.shared.show([]) } } }
     @Published var online = false
     @Published var pending = false { didSet { if !pending { Toast.shared.thinking(nil) } } }
     @Published var transcribing = false
-    @Published var ratable = false
-    @Published var lowScore: Int?
     private var process: Process?
     private var input: FileHandle?
     private var buffer = Data()
@@ -96,9 +95,11 @@ final class Backend: ObservableObject {
                 DispatchQueue.main.async { Task { @MainActor in Backend.shared.syncChips() } }
             }
         }
-        struct Runtime: Decodable { let project: String; let python: String }
+        // app_tree: the native-preview code this app was built from, so the backend can warn when stale.
+        // args: only a UI test replaces the real backend with a scripted one.
+        struct Runtime: Decodable { let project: String; let python: String; let app_tree: String?; let args: [String]? }
         do {
-            guard let url = Bundle.main.url(forResource: "runtime", withExtension: "json") else {
+            guard let url = UITest.runtime ?? Bundle.main.url(forResource: "runtime", withExtension: "json") else {
                 throw CocoaError(.fileNoSuchFile)
             }
             let runtime = try JSONDecoder().decode(Runtime.self, from: Data(contentsOf: url))
@@ -110,15 +111,14 @@ final class Backend: ObservableObject {
             state = "STARTING"
             online = false
             pending = false
-            ratable = false
-            lowScore = nil
             approval = nil
             choices = []
             child.executableURL = URL(fileURLWithPath: runtime.python)
-            child.arguments = ["-u", "-m", "voice_action.native_bridge"]
+            child.arguments = runtime.args ?? ["-u", "-m", "voice_action.native_bridge"]
             child.currentDirectoryURL = URL(fileURLWithPath: runtime.project)
             var environment = ProcessInfo.processInfo.environment
             environment["PYTHONPATH"] = runtime.project
+            environment["SYMBIO_APP_TREE"] = runtime.app_tree
             // 앱 아이콘으로 켜면 PATH가 최소라 filesystem MCP가 쓰는 node를 못 찾는다.
             let extra = "/opt/homebrew/bin:/usr/local/bin"
             environment["PATH"] = extra + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
@@ -186,42 +186,20 @@ final class Backend: ObservableObject {
                 choices = []
                 tool = ""
                 append(type == "error" ? "error" : "assistant", text)
-                ratable = value["ratable"] as? Bool ?? false
-                lowScore = nil
-                if type == "completed", let found = (value["found_paths"] as? [String])?.first {
-                    let url = URL(fileURLWithPath: found).standardizedFileURL
-                    if url == url.resolvingSymlinksInPath(),
-                       folders.contains(where: { url.path.hasPrefix($0 + "/") }),
-                       (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular {
-                        if value["offer_file"] as? Bool == true {  // "회의록 줘": only then offer a drag
-                            dragFile = url
-                            // spoken from another app, or from the type box with the chat window closed
-                            // canBecomeMain: the menu-bar item's own window is visible but is not the chat
-                            if !chatShown { FileBox.shared.show(url) }
-                        }
-                    }
+                if type == "completed" {
+                    dragFiles = (value["offer_paths"] as? [String] ?? []).compactMap(offerable)
+                    // canBecomeMain: the menu-bar item's own window is visible but is not the chat
+                    if !dragFiles.isEmpty, !chatShown { FileBox.shared.show(dragFiles) }
                 }
                 if type == "completed", reveal,
                    let paths = value["changed_paths"] as? [String], !paths.isEmpty {
-                    let checked = paths.compactMap { path -> URL? in
-                        let url = URL(fileURLWithPath: path).standardizedFileURL
-                        guard url == url.resolvingSymlinksInPath(),
-                              folders.contains(where: { url.path.hasPrefix($0 + "/") }),
-                              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-                              attributes[.type] as? FileAttributeType == .typeRegular else { return nil }
-                        return url
-                    }
+                    let checked = paths.compactMap(offerable)
                     if !checked.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(checked) }
                 }
             case "attachment":
                 if let path = value["path"] as? String { attachment = path }
                 else if text.isEmpty { attachment = nil }
                 if !text.isEmpty { append("error", text) }
-            case "rating_saved":
-                let score = value["score"] as? Int ?? 0
-                let tags = value["tags"] as? [String] ?? []
-                if score > 3 || !tags.isEmpty { ratable = false; lowScore = nil }
-                else { lowScore = score }
             case "rejected":
                 pending = false
                 transcribing = false
@@ -236,10 +214,21 @@ final class Backend: ObservableObject {
                 if let problem = value["error"] as? String { append("error", problem) }
                 else { submit(text) }
             case "notice": append("notice", text)
+            case "_test" where UITest.active: UITest.handle(value)
             case "stopped": online = false; pending = false; approval = nil; choices = []
             default: break
             }
         }
+    }
+
+    /// A regular file inside an allowed folder, not reached through a symlink; anything else is never offered.
+    private func offerable(_ path: String) -> URL? {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard url == url.resolvingSymlinksInPath(),
+              folders.contains(where: { url.path.hasPrefix($0 + "/") }),
+              (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular
+        else { return nil }
+        return url
     }
 
     func append(_ role: String, _ text: String) {
@@ -270,10 +259,12 @@ final class Backend: ObservableObject {
         guard canSubmit, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if send("submit", fields: ["text": text]) {
             pending = true
-            ratable = false
             choices = []
-            attachment = nil
-            dragFile = nil
+            // `/feedback 내용` is a note about the last answer: the attachment waits for a real command.
+            if text.range(of: #"^\s*/feedback(\s|$)"#, options: [.regularExpression, .caseInsensitive]) == nil {
+                attachment = nil
+            }
+            dragFiles = []
             append("user", text)
             Toast.shared.thinking("생각하는 중…")
         }
@@ -295,10 +286,8 @@ final class Backend: ObservableObject {
         choices = []
         approval = nil
         attachment = nil
-        dragFile = nil
+        dragFiles = []
         tool = ""
-        ratable = false
-        lowScore = nil
         Toast.shared.dismiss()
         ChoiceChips.shared.hide()
     }
@@ -346,6 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
         Backend.shared.start()
+        guard !UITest.active else { return }  // a test run must not catch the user's keys or add a menu icon
         VoiceInput.shared.install()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.target = self

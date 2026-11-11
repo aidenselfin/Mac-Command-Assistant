@@ -58,9 +58,8 @@ private struct ChatPanel: View {
                             }
                             .buttonStyle(.plain).disabled(!backend.canSubmit)
                         }
-                        if let file = backend.dragFile { dragChip(file) }
+                        ForEach(backend.dragFiles, id: \.self) { dragChip($0) }
                         if let approval = backend.approval { approvalView(approval) }
-                        if backend.ratable { rating }
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -199,29 +198,6 @@ private struct ChatPanel: View {
         .padding(10).background(Color.purple.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
         .onDrag { NSItemProvider(contentsOf: file) ?? NSItemProvider() }
         .help("끌어서 원하는 곳에 놓으세요")
-    }
-
-    private var rating: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("답변 평가").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                ForEach(1...5, id: \.self) { score in
-                    Button(String(score)) { _ = backend.send("rate", fields: ["score": score]) }
-                        .buttonStyle(.bordered).controlSize(.mini)
-                }
-            }
-            if let score = backend.lowScore {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
-                    ForEach([("wrong_file", "엉뚱한 파일"), ("missing_content", "내용 부족"),
-                             ("wrong_content", "틀린 내용"), ("too_long", "너무 김"),
-                             ("too_slow", "너무 느림"), ("other", "기타")], id: \.0) { tag, title in
-                        Button(title) { _ = backend.send("rate", fields: ["score": score, "tags": [tag]]) }
-                            .controlSize(.small)
-                    }
-                }
-            }
-        }.disabled(!backend.idle)
     }
 
     private var composer: some View {

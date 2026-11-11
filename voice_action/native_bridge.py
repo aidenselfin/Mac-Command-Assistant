@@ -5,14 +5,14 @@ import os
 import queue
 import selectors
 import signal
+import subprocess
 import sys
 import threading
 import uuid
 
 from voice_action.config import load_config
-from voice_action.feedback import RATING_TAGS
 from voice_action.planner import ApprovalRequired, Clarification, Completed, Error
-from voice_action.runtime import Busy, RuntimeState
+from voice_action.runtime import FEEDBACK_COMMAND, Busy, RuntimeState
 from voice_action.transcribe import clip_path, is_hallucination, purge_stale, transcribe
 from voice_action.ui import AsyncRuntimeWorker, UIMessageType, display_path
 
@@ -60,6 +60,28 @@ def asks_for_file(text):
     return not stem or not _verb_form(stem)
 
 
+OFFER_LIMIT = 5
+
+
+def offer_paths(changed, found, wants_file):
+    """Drag-chip files: what the command made or edited, else the found file if it was asked for."""
+    paths = [path for path in (changed or (found if wants_file else ())) if os.path.isfile(path)]
+    return paths if len(paths) <= OFFER_LIMIT else []
+
+
+STALE_APP = "화면 앱이 최신 코드보다 옛 빌드예요. native-preview/install-app.sh를 다시 실행하세요."
+
+
+def stale_app_notice(built, project):
+    """Warn when the screen app holds older native-preview code than the checkout it runs from."""
+    try:
+        current = subprocess.run(["git", "-C", str(project), "rev-parse", "HEAD:native-preview"],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return STALE_APP if current and built != current else None
+
+
 class NativeBridge:
     def __init__(self, worker, emit, voice_key=None):
         self.worker, self.emit, self.voice_key = worker, emit, voice_key
@@ -97,7 +119,8 @@ class NativeBridge:
                            "changed_paths": list(value.changed_paths),
                            "found_paths": list(value.found_paths),
                            "offer_file": asks_for_file(self.request),
-                           "ratable": self.worker.can_rate()})
+                           "offer_paths": offer_paths(value.changed_paths, value.found_paths,
+                                                      asks_for_file(self.request))})
             elif isinstance(value, (Error, Busy)):
                 self.emit({"type": "error", "text": value.message})
         elif kind is UIMessageType.PLANNER_EVENT:
@@ -105,9 +128,6 @@ class NativeBridge:
         elif kind is UIMessageType.ATTACHMENT:
             path, refusal = value
             self.emit({"type": "attachment", "path": path, "text": refusal})
-        elif kind is UIMessageType.RATING_SAVED:
-            score, tags = value
-            self.emit({"type": "rating_saved", "score": score, "tags": list(tags)})
         elif kind is UIMessageType.FAILURE:
             self.in_flight = False
             self.approval_id = None
@@ -169,6 +189,8 @@ class NativeBridge:
             if (self.state not in {RuntimeState.IDLE, RuntimeState.WAITING_USER_INPUT}
                     or not isinstance(text, str) or not text.strip()):
                 return self.refuse()
+            if self.state is RuntimeState.WAITING_USER_INPUT and FEEDBACK_COMMAND.match(text):
+                return self.refuse("질문에 먼저 답한 뒤 /feedback을 보내 주세요.")
             if self.worker.submit(text):
                 if self.state is not RuntimeState.WAITING_USER_INPUT:
                     self.request = text
@@ -191,12 +213,6 @@ class NativeBridge:
             return True
         elif action == "reset":
             if self.worker.reset_conversation():
-                return True
-        elif action == "rate":
-            score, tags = request.get("score"), request.get("tags", [])
-            if (type(score) is int and 1 <= score <= 5 and isinstance(tags, list)
-                    and all(isinstance(tag, str) and tag in RATING_TAGS for tag in tags)
-                    and self.worker.rate(score, tuple(tags))):
                 return True
         return self.refuse()
 
@@ -223,8 +239,8 @@ class NativeBridge:
             self.emit({"type": "transcript", "text": text, "error": problem})
             self.transcribing = False
 
-    def refuse(self):
-        self.emit({"type": "rejected", "text": "현재 상태에서 처리할 수 없는 요청입니다."})
+    def refuse(self, text="현재 상태에서 처리할 수 없는 요청입니다."):
+        self.emit({"type": "rejected", "text": text})
         return True
 
 
@@ -253,6 +269,10 @@ def main():
     signal.signal(signal.SIGINT, stop)
     emit({"type": "config", "folders": [str(path) for path in config.allowed_directories],
           "finder_reveal": config.finder_reveal})
+    notice = stale_app_notice(os.environ.get("SYMBIO_APP_TREE"), os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    if notice:
+        emit({"type": "notice", "text": notice})
     worker.start()
     # Read bytes ourselves: buffered readline can leave the next JSON message invisible to select.
     buffered = b""
