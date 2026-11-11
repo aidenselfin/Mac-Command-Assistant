@@ -280,7 +280,8 @@ async def run_trial(task: dict, config: Config | None, lessons: list[str]) -> di
         problems += [f"{name}: not run" for name in expect.get("must_run", [])
                      if name not in tools_run]
         problems += [f"reply: missing {word!r}" for word in expect.get("reply_contains", [])
-                     if word not in (text or "")]
+                     if word not in (text or "")
+                     and word not in (text or "").replace(",", "")]
         problems += [f"reply: should not mention {word!r}"
                      for word in expect.get("reply_excludes", []) if word in (text or "")]
         position = 0  # the words must appear in this order (later mentions may repeat earlier ones)
