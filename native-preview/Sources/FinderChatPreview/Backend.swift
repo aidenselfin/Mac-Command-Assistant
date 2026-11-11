@@ -40,6 +40,13 @@ final class Backend: ObservableObject {
     private var voiceClip: URL?
     private var voiceCancelled = false
     private var session = UUID()
+    /// Idle this long, the Python backend and its Node helper (~160MB) stop; the next use starts them.
+    private static let sleepAfter: Duration = .seconds(600)
+    private var sleepTimer: Task<Void, Never>?
+    private var asleep = false
+    private var observing = false
+    /// Work that arrived while the backend was asleep or starting; runs once it reports a state.
+    private var whenOnline: [() -> Void] = []
 
     var running: Bool { process != nil }
 
@@ -88,11 +95,20 @@ final class Backend: ObservableObject {
 
     func start() {
         guard process == nil else { return }
-        // Showing the chips depends on whether the chat window is up, which changes without any event.
-        for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification,
-                     NSWindow.willCloseNotification] {
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
-                DispatchQueue.main.async { Task { @MainActor in Backend.shared.syncChips() } }
+        asleep = false
+        if !observing {
+            observing = true
+            // Showing the chips depends on whether the chat window is up, which changes without any event.
+            for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification,
+                         NSWindow.willCloseNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                    DispatchQueue.main.async { Task { @MainActor in Backend.shared.syncChips() } }
+                }
+            }
+            // Coming back to the chat window wakes the backend before the user starts typing.
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+                Task { @MainActor in Backend.shared.wake() }
             }
         }
         // app_tree: the native-preview code this app was built from, so the backend can warn when stale.
@@ -144,7 +160,11 @@ final class Backend: ObservableObject {
                     self.transcribing = false
                     self.approval = nil
                     self.choices = []
-                    self.state = "STOPPED"
+                    self.state = self.asleep ? "SLEEPING" : "STOPPED"
+                    // Woken while the old process was still shutting down. A crash drops the queue instead.
+                    if self.asleep, !self.whenOnline.isEmpty { self.start() } else if !self.asleep {
+                        self.whenOnline = []
+                    }
                 }
             }
             try child.run()
@@ -172,6 +192,12 @@ final class Backend: ObservableObject {
                 state = value["state"] as? String ?? "STARTING"
                 online = true
                 if state == "IDLE", resetWhenIdle { pending = false; newConversation() }
+                if canSubmit {
+                    let queued = whenOnline
+                    whenOnline = []
+                    queued.forEach { $0() }
+                }
+                scheduleSleep()
             case "tool": tool = value["name"] as? String ?? ""
             case "approval":
                 pending = false
@@ -322,6 +348,30 @@ final class Backend: ObservableObject {
         }
     }
 
+    /// Starts a sleeping backend. `action` runs now if it is up, else once it reports its first state.
+    func wake(then action: (() -> Void)? = nil) {
+        if online { action?(); return }
+        if let action { whenOnline.append(action) }
+        start()  // no-op while already starting
+    }
+
+    /// Every state report restarts the countdown, so only a backend left idle for `sleepAfter` stops.
+    private func scheduleSleep() {
+        sleepTimer?.cancel()
+        sleepTimer = Task { @MainActor in
+            try? await Task.sleep(for: Self.sleepAfter)
+            guard !Task.isCancelled else { return }
+            // Waiting work or the chat in front: keep it up and look again later.
+            guard idle, approval == nil, choices.isEmpty, !chatShown, !VoiceInput.shared.recording else {
+                scheduleSleep()
+                return
+            }
+            // ponytail: the backend's follow-up memory goes with it; the shown chat stays.
+            asleep = true
+            shutdown {}
+        }
+    }
+
     func shutdown(_ finished: @escaping @MainActor () -> Void) {
         guard let child = process else { finished(); return }
         _ = send("shutdown")
@@ -387,6 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openWindow() { Self.showChat() }
 
     static func showChat() {
+        Backend.shared.wake()
         NSApp.activate()
         // The app also owns small helper windows (status item, 64pt stub): pick the chat window by title.
         NSApp.windows.first { $0.title == "Symbio" }?.makeKeyAndOrderFront(nil)

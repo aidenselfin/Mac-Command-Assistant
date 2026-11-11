@@ -95,7 +95,8 @@ final class VoiceInput: ObservableObject {
 
     private func begin() {
         let backend = Backend.shared
-        guard enabled, !recording, backend.canSubmit, !UITest.active else { return }
+        // An offline backend (asleep) starts now and is ready by the time the key is let go.
+        guard enabled, !recording, backend.canSubmit || !backend.online, !UITest.active else { return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: break
         case .notDetermined:
@@ -117,6 +118,7 @@ final class VoiceInput: ObservableObject {
             backend.append("error", "녹음을 시작하지 못했습니다.")
             return
         }
+        backend.wake()
         recorder = new
         new.isMeteringEnabled = true
         loudest = -160
@@ -169,7 +171,8 @@ final class VoiceInput: ObservableObject {
             try? FileManager.default.removeItem(at: current.url)
             return
         }
-        Backend.shared.sendVoice(current.url)
+        let clip = current.url
+        Backend.shared.wake { Backend.shared.sendVoice(clip) }
     }
 
     /// Small always-on-top "listening" pill at the bottom-left of the screen.
@@ -238,13 +241,14 @@ final class VoiceInput: ObservableObject {
             panel.field = field
             panel.onDone = { [weak self] text in
                 self?.inputPanel?.orderOut(nil)
-                if let text { Backend.shared.submit(text) }
+                if let text { Backend.shared.wake { Backend.shared.submit(text) } }
             }
             pill.addSubview(field)
             panel.contentView = pill
             inputPanel = panel
         }
         badge?.orderOut(nil)
+        Backend.shared.wake()  // starts while the user types
         panel.field?.stringValue = ""
         if let area = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: area.minX + ChipStyle.margin, y: area.minY + ChipStyle.margin))
