@@ -14,6 +14,10 @@ struct FinderChatPreviewApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("새 대화") { Backend.shared.newConversation() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("최근 파일") { Backend.shared.quickList("modified", "최근 파일") }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                Button("용량 큰 파일") { Backend.shared.quickList("size", "용량 큰 파일") }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
             }
         }
     }

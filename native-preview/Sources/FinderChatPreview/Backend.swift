@@ -189,7 +189,7 @@ final class Backend: ObservableObject {
                 if type == "completed" {
                     dragFiles = (value["offer_paths"] as? [String] ?? []).compactMap(offerable)
                     // canBecomeMain: the menu-bar item's own window is visible but is not the chat
-                    if !dragFiles.isEmpty, !chatShown { FileBox.shared.show(dragFiles) }
+                    if !dragFiles.isEmpty, !chatShown || value["show_box"] as? Bool == true { FileBox.shared.show(dragFiles) }
                 }
                 if type == "completed", reveal,
                    let paths = value["changed_paths"] as? [String], !paths.isEmpty {
@@ -290,6 +290,14 @@ final class Backend: ObservableObject {
         tool = ""
         Toast.shared.dismiss()
         ChoiceChips.shared.hide()
+    }
+
+    /// ⌘⇧R·⌘⇧L: the backend lists files itself; they come back as floating drag chips on the right.
+    func quickList(_ sort: String, _ label: String) {
+        guard online, state == "IDLE", !pending, send("quick_list", fields: ["sort": sort]) else { return }
+        pending = true
+        dragFiles = []
+        append("user", label)
     }
 
     /// Hand a finished recording to the backend; it comes back as a `transcript` event.
