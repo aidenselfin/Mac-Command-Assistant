@@ -11,6 +11,7 @@ import threading
 import uuid
 
 from voice_action.config import load_config
+from voice_action.file_search import list_files
 from voice_action.planner import ApprovalRequired, Clarification, Completed, Error
 from voice_action.runtime import FEEDBACK_COMMAND, Busy, RuntimeState
 from voice_action.transcribe import clip_path, is_hallucination, purge_stale, transcribe
@@ -61,6 +62,19 @@ def asks_for_file(text):
 
 
 OFFER_LIMIT = 5
+QUICK_LISTS = {"modified": "최근 수정한 파일", "size": "용량 큰 파일"}
+QUICK_LIMIT = OFFER_LIMIT  # every listed file becomes a drag chip
+
+
+def quick_list(sort, roots):
+    """⌘⇧R·⌘⇧L: list_files straight away, no model call. Returns (text, paths)."""
+    files = list_files({"sort_by": sort, "limit": QUICK_LIMIT}, roots).structured["files"]
+    if not files:
+        return "허용 폴더에 파일이 없습니다.", []
+    lines = [f"{QUICK_LISTS[sort]} {len(files)}개"]
+    lines += [f"- {display_path(item['name'])} · {item['size']} · {item['modified']}"
+              for item in files]
+    return "\n".join(lines), [item["path"] for item in files]
 
 
 def offer_paths(changed, found, wants_file):
@@ -83,8 +97,8 @@ def stale_app_notice(built, project):
 
 
 class NativeBridge:
-    def __init__(self, worker, emit, voice_key=None):
-        self.worker, self.emit, self.voice_key = worker, emit, voice_key
+    def __init__(self, worker, emit, voice_key=None, roots=()):
+        self.worker, self.emit, self.voice_key, self.roots = worker, emit, voice_key, tuple(roots)
         self.transcribing = False
         self.voice_cancelled = False
         self.voice_lock = threading.Lock()
@@ -108,6 +122,7 @@ class NativeBridge:
                     "type": "approval", "approval_id": self.approval_id,
                     "operation": value.operation, "target": display_path(value.target_path),
                     "targets": [display_path(path) for path in value.targets],
+                    "previews": list(value.previews),
                     "preview": value.preview, "truncated": value.preview_truncated,
                     "characters": value.content_chars,
                 })
@@ -214,6 +229,16 @@ class NativeBridge:
         elif action == "reset":
             if self.worker.reset_conversation():
                 return True
+        elif action == "quick_list" and request.get("sort") in QUICK_LISTS:
+            # ponytail: walks on the reader thread; _walk's own cap keeps it short
+            try:
+                text, paths = quick_list(request["sort"], self.roots)
+            except Exception as exc:
+                return self.refuse(f"파일 목록을 만들지 못했습니다 ({type(exc).__name__}).")
+            self.emit({"type": "completed", "text": text, "changed_paths": [],
+                       "found_paths": paths, "offer_file": True, "offer_paths": paths,
+                       "show_box": True})
+            return True
         return self.refuse()
 
     def transcribe_clip(self, clip):
@@ -258,7 +283,7 @@ def main():
     messages = queue.Queue()
     worker = AsyncRuntimeWorker(config, messages)
     purge_stale()
-    bridge = NativeBridge(worker, emit, config.voice_api_key)
+    bridge = NativeBridge(worker, emit, config.voice_api_key, config.allowed_directories)
     stopped = False
 
     def stop(_signum, _frame):

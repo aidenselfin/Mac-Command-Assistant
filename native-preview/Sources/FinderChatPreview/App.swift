@@ -14,6 +14,10 @@ struct FinderChatPreviewApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("새 대화") { Backend.shared.newConversation() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("최근 파일") { Backend.shared.quickList("modified", "최근 파일") }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                Button("용량 큰 파일") { Backend.shared.quickList("size", "용량 큰 파일") }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
             }
         }
     }
@@ -116,6 +120,7 @@ private struct ChatPanel: View {
         case "WAITING_USER_INPUT": return "답변이 필요해요"
         case "PLANNING", "RESUMING_PLAN": return "요청을 처리하고 있어요"
         case "STOPPED": return "연결 종료 · 메뉴에서 다시 시작하세요"
+        case "SLEEPING": return "쉬는 중 · 쓰면 바로 깨어나요"
         default: return "연결 준비 중"
         }
     }
@@ -170,6 +175,10 @@ private struct ChatPanel: View {
                     Text("대상 \(approval.targets.count)개").font(.callout.weight(.medium))
                     ForEach(Array(approval.targets.enumerated()), id: \.offset) { index, path in
                         Text("\(index + 1). \(path)").font(.caption).textSelection(.enabled)
+                        if let previews = approval.previews, index < previews.count {
+                            Text(previews[index]).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .lineLimit(4).padding(.leading, 12).textSelection(.enabled)
+                        }
                     }
                 }
                 if !approval.preview.isEmpty {

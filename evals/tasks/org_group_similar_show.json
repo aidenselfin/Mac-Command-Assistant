@@ -1,0 +1,18 @@
+{
+  "id": "org_group_similar_show",
+  "family": "file.group",
+  "axis": "see",
+  "level": 45,
+  "status": "active",
+  "files": {"보고서_초안.txt": "a", "보고서_최종.txt": "b", "IMG_0001.jpg": "c", "IMG_0002.jpg": "d", "memo.txt": "e"},
+  "request": "비슷한 이름끼리 파일 묶어서 보여줘",
+  "script": [
+    {"calls": [{"name": "local__group_files", "args": {"by": "name"}}]},
+    {"text": "보고서 2개(보고서_초안.txt, 보고서_최종.txt), img 2개(IMG_0001.jpg, IMG_0002.jpg)로 묶을 수 있어요. 폴더로 옮길까요?"}
+  ],
+  "expect": {
+    "files": {"보고서_초안.txt": "a", "보고서_최종.txt": "b", "IMG_0001.jpg": "c"},
+    "must_run": ["local__group_files"],
+    "reply_contains": ["보고서", "IMG_0001.jpg"]
+  }
+}

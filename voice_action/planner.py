@@ -28,6 +28,8 @@ from voice_action.file_operations import COPY_TOOL, DEFINITIONS, MKDIR_TOOL, MOV
 from voice_action.file_search import (
     FIND_FILES_DEFINITION,
     FIND_FILES_TOOL,
+    GROUP_DEFINITION,
+    GROUP_FILES_TOOL,
     LIST_DEFINITION,
     LIST_FILES_TOOL,
     clarification_spec,
@@ -120,6 +122,11 @@ OPEN_PATTERN = re.compile(
     r"열어\s*(?:줘|주|봐|달)|열기|띄워|(?<![\w./-])open(?![\w./-])", re.IGNORECASE
 )
 MKDIR_PATTERN = re.compile(r"(?:폴더|디렉터리).*?(?:만들|생성)|\bmkdir\b", re.IGNORECASE)
+# "비슷한 파일 묶어줘", "다운로드 폴더 정리해줘": offer the read-only grouping tool.
+GROUP_PATTERN = re.compile(
+    r"묶|정리|분류|모아|비슷한|끼리|(?<![\w./-])(?:group|organi[sz]e|sort\s+out)(?![\w./-])",
+    re.IGNORECASE,
+)
 
 
 def _operation_requested(tool: str, text: str) -> bool:
@@ -240,6 +247,7 @@ class ApprovalContext:
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
     found_paths: tuple[str, ...] = ()
+    group_paths: tuple[str, ...] = ()
 
     @property
     def digest(self) -> str:
@@ -260,6 +268,7 @@ class ApprovalRequired:
     preview_truncated: bool
     context: ApprovalContext = field(repr=False)
     targets: tuple[str, ...] = ()
+    previews: tuple[str, ...] = field(default=(), repr=False)  # user screen only
 
 
 @dataclass(frozen=True)
@@ -1095,6 +1104,7 @@ class _LoopState:
     attachment: str | None = None
     read_paths: tuple[str, ...] = ()
     found_paths: tuple[str, ...] = ()
+    group_paths: tuple[str, ...] = ()  # files local__group_files listed: grounded move sources
     seen_paths: tuple[str, ...] = ()
     empty_retries: int = 0  # times an empty final reply was sent back for a real answer
     confirm_nudges: int = 0  # times a stalled "shall I?" reply was turned into a tool call
@@ -1285,6 +1295,9 @@ class Planner:
             if self.config.allowed_directories:
                 tools.append(FIND_FILES_DEFINITION)
                 tools.append(LIST_DEFINITION)
+                # A move may act on groups shown last turn, so it can group again for the paths.
+                if GROUP_PATTERN.search(user_text) or _operation_requested(MOVE_TOOL, user_text):
+                    tools.append(GROUP_DEFINITION)
                 # The raw search lists every match to the model, which then reads them all
                 # instead of asking; every file lookup goes through find_files.
                 tools = [tool for tool in tools if tool.name != FILESYSTEM_SEARCH_TOOL]
@@ -1904,6 +1917,8 @@ class Planner:
             if call.name != MKDIR_TOOL:
                 source = arguments.get("source")
                 chosen = state.attachment or state.single_search_candidate
+                if chosen is None and source in state.group_paths:
+                    chosen = source  # listed by the app itself, not named by the model
                 if chosen is not None and source != chosen:
                     return "첨부하거나 선택한 파일만 이동·복사할 수 있습니다."
                 if chosen is None and not _write_target_is_explicit(source, text, ()):
@@ -2158,6 +2173,11 @@ class Planner:
                 return outcome
             if state.find_override is not None:
                 result_text, state.find_override = state.find_override, None
+        elif call.name == GROUP_FILES_TOOL and result.structured is not None:
+            state.group_paths = tuple(dict.fromkeys(
+                (*state.group_paths,
+                 *(path for group in result.structured["groups"] for path in group["files"]))
+            ))
         elif call.name == LIST_FILES_TOOL and result.structured is not None:
             files = result.structured.get("files") or []
             if len(files) == 1:  # "가장 최근 파일 줘": one pick is a draggable file too
@@ -2343,6 +2363,7 @@ class Planner:
             attachment=state.attachment,
             read_paths=state.read_paths,
             found_paths=state.found_paths,
+            group_paths=state.group_paths,
         )
         return ApprovalRequired(
             prepared.tool_name,
@@ -2353,6 +2374,7 @@ class Planner:
             prepared.preview_truncated,
             context,
             prepared.targets,
+            prepared.previews,
         )
 
     @staticmethod
@@ -2391,6 +2413,7 @@ class Planner:
             attachment=context.attachment,
             read_paths=context.read_paths,
             found_paths=context.found_paths,
+            group_paths=context.group_paths,
         )
 
     def _append_tool_error(
