@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 
+final class Draft: ObservableObject { @Published var text = "" }
+
 @main
 struct FinderChatPreviewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -26,7 +28,7 @@ struct FinderChatPreviewApp: App {
 private struct ChatPanel: View {
     @StateObject private var backend = Backend.shared
     @StateObject private var voice = VoiceInput.shared
-    @State private var input = ""
+    @StateObject private var draft = Draft()  // @State 매크로는 Xcode 없이 빌드 불가
 
     var body: some View {
         VStack(spacing: 0) {
@@ -224,11 +226,11 @@ private struct ChatPanel: View {
                 Button(action: attach) { Image(systemName: "paperclip") }
                     .buttonStyle(.borderless).disabled(!backend.idle).help("파일 첨부")
                 TextField(backend.state == "WAITING_USER_INPUT" ? "답변을 입력하세요" : "명령을 입력하세요",
-                          text: $input, axis: .vertical)
+                          text: $draft.text, axis: .vertical)
                     .textFieldStyle(.plain).lineLimit(1...3).onSubmit(submit)
                 Button(action: submit) { Image(systemName: "arrow.up") }
                     .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
-                    .disabled(!backend.canSubmit || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!backend.canSubmit || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(10)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
@@ -239,8 +241,8 @@ private struct ChatPanel: View {
 
     private func submit() {
         guard backend.canSubmit else { return }
-        backend.submit(input)
-        input = ""
+        backend.submit(draft.text)
+        draft.text = ""
     }
 
     private func attach() {
