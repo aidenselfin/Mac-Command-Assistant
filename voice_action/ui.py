@@ -516,10 +516,24 @@ class AsyncRuntimeWorker:
                         model = FallbackModel(
                             model, self._model_factory(spare, self.config.fallback_model)
                         )
+                    stronger = None
+                    if self.config.escalation_model and self.config.feedback_api_key:
+                        router = await stack.enter_async_context(
+                            AsyncOpenAI(
+                                api_key=self.config.feedback_api_key,
+                                base_url="https://openrouter.ai/api/v1",
+                                timeout=self.config.llm_timeout_seconds,
+                                max_retries=0,
+                            )
+                        )
+                        stronger = self._model_factory(router, self.config.escalation_model)
+                        if feedback:
+                            stronger = feedback.wrap(stronger)
                     planner = Planner(
                         self.config,
                         manager,
                         feedback.wrap(model) if feedback else model,
+                        escalation_model=stronger,
                         tools=tools,
                         allow_local_web=self._allow_local_web,
                         undo_journal=self._build_undo_journal(),

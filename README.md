@@ -174,7 +174,8 @@ provider·모델·허용 폴더는 `config.json`과 `.voice-action/config.env`�
   "provider": "groq",
   "model": "openai/gpt-oss-20b",
   "allowed_directories": ["./voice-action-test"],
-  "max_tool_rounds": 10,
+  "max_tool_rounds": 20,
+  "max_run_seconds": 90,
   "llm_timeout_seconds": 60,
   "mcp_timeout_seconds": 30,
   "max_tool_result_chars": 50000
@@ -196,14 +197,18 @@ VOICE_ACTION_PROVIDER
 VOICE_ACTION_MODEL
 VOICE_ACTION_BASE_URL
 VOICE_ACTION_ALLOWED_DIRECTORIES   # JSON 배열
-VOICE_ACTION_MAX_TOOL_ROUNDS
+VOICE_ACTION_MAX_TOOL_ROUNDS       # 한 명령의 모델 호출 한도(기본 20)
+VOICE_ACTION_MAX_RUN_SECONDS       # 한 명령의 시간 한도, 승인 대기 제외(기본 90)
 VOICE_ACTION_LLM_TIMEOUT_SECONDS
 VOICE_ACTION_MCP_TIMEOUT_SECONDS
 VOICE_ACTION_MAX_TOOL_RESULT_CHARS
 VOICE_ACTION_FINDER_REVEAL         # on(기본) | off, 환경변수로만 설정
 VOICE_ACTION_FINDER_DOCK           # on(기본) | off, 설정만 읽고 네이티브 앱에서는 쓰지 않음
 VOICE_ACTION_FALLBACK_MODEL        # 메인 호출 실패 시 OpenAI 대체 모델(기본 gpt-4o-mini)
+VOICE_ACTION_ESCALATION_MODEL      # 복구가 두 번 실패하면 이어받을 OpenRouter 모델(없으면 끔)
 ```
+
+한 명령 안에서 모델이 형식을 틀리거나 도구가 "파일 없음"을 돌려주면 명령을 끝내지 않고 오류를 모델에게 돌려줘 다시 시도하게 합니다. 없는 파일에는 같은 폴더의 비슷한 실제 경로를 알려 줍니다. 같은 호출이 같은 결과를 두 번 내면 다른 방법을 쓰라고 알리고, 세 번이면 알아낸 것을 보고하고 멈춥니다. 승인 거절·허용 폴더 밖·인증 실패는 지금처럼 바로 끝납니다. `escalation_model`(config.json 또는 위 환경변수)을 정하고 `OPENROUTER_API_KEY`가 있으면, 복구가 두 번 실패한 뒤 그 모델이 지금까지의 대화를 이어받습니다.
 
 provider별 기본 모델:
 
@@ -401,7 +406,7 @@ SwiftUI 앱(글·음성 입력) ─JSON lines─► native_bridge.py
   ↓
 RuntimeController — 단일 실행과 상태 전이 관리
   ↓
-Planner — LLM 호출, clarification, 모델 호출 최대 10회(max_tool_rounds)
+Planner — LLM 호출, clarification, 모델 호출 최대 20회(max_tool_rounds)·90초(max_run_seconds), 실패 복구·반복 감지
   ↓
 RiskGuard — read/write/forbidden 고정 분류
   ↓
