@@ -10,7 +10,7 @@ description: voice-action에 새 local__* 도구를 추가하거나 기존 도�
 1. 도구 모듈: `voice_action/file_operations.py`를 본보기로 만든다. 허용 폴더 밖·symlink 우회를 막고 `_open_below` 계열을 쓴다.
 2. 분류: `voice_action/risk_guard.py`의 `classify_tool`에 넣는다. 쓰기·삭제·이동·변환이면 `WRITE_TOOLS`에도 넣어 1회용 승인을 거치게 한다.
 3. Undo: 파일을 바꾸면 `undo.py` journal에 기록한다. 승인 없이 "했다"고 답하지 않는다.
-4. 노출: `planner.py`의 노출 조건과 시스템 프롬프트를 고친다. 2,200줄이 넘으니 해당 함수 주변만 읽는다. 도구 스키마에 상한·`oneOf`를 넣지 않고 코드에서 검증한다.
+4. 노출: `planner.py`의 노출 조건과 시스템 프롬프트를 고친다. 2,400줄이 넘으니 해당 함수 주변만 읽는다. 도구 스키마에 상한·`oneOf`를 넣지 않고 코드에서 검증한다.
 5. 승인 화면: 쓰기 도구면 SwiftUI에 표시한다. 메시지가 바뀌면 `docs/native-protocol.md`, Swift, `native_bridge.py`를 함께 고친다.
 6. 테스트: `tests/test_<모듈>.py`와 `tests/test_risk_guard.py`. 선택 기능이면 꺼진 상태의 도구 정의가 그대로인지 `test_integration_features.py`로 확인한다.
 7. eval: `evals/tasks/*.json`에 과제를 추가한다(성공 1개 이상, 하면 안 되는 `neg_*` 1개 이상).

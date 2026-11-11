@@ -35,6 +35,6 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 
 ## 새 승인 종류를 추가할 때
 
-1. `risk_guard.py`가 `PreparedWrite.operation`을 정한다(Tk `ui.py`의 `APPROVAL_STYLE`도 맞춘다).
+1. `risk_guard.py`가 `PreparedWrite.operation`을 정한다.
 2. Swift `App.swift`의 `approvalStyle`에 제목·버튼을 추가한다(모르는 값은 "파일 변경 승인"으로 보인다).
 3. 이 문서의 `operation` 목록과 `tests/test_integration_features.py`에 사례를 추가한다.
