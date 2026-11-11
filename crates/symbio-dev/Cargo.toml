@@ -1,0 +1,10 @@
+[package]
+name = "symbio-dev"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+symbio-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

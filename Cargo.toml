@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+symbio-core = { path = "crates/symbio-core" }
+symbio-undo = { path = "crates/symbio-undo" }
+symbio-search = { path = "crates/symbio-search" }
+symbio-fileops = { path = "crates/symbio-fileops" }
+symbio-delete = { path = "crates/symbio-delete" }
+symbio-convert = { path = "crates/symbio-convert" }
+symbio-finder = { path = "crates/symbio-finder" }
+symbio-mcp = { path = "crates/symbio-mcp" }
+symbio-guard = { path = "crates/symbio-guard" }
+symbio-planner = { path = "crates/symbio-planner" }
+symbio-feedback = { path = "crates/symbio-feedback" }
+symbio-runtime = { path = "crates/symbio-runtime" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
