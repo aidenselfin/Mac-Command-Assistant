@@ -1,0 +1,22 @@
+{
+  "id": "org_group_keyword_move",
+  "family": "file.group",
+  "axis": "finder",
+  "level": 46,
+  "status": "active",
+  "files": {"회의록_1월.txt": "1", "회의록_2월.txt": "2", "memo.txt": "m"},
+  "request": "회의록 파일들 묶어서 회의록 폴더로 옮겨줘",
+  "user": {"approve": [true, true, true]},
+  "script": [
+    {"calls": [{"name": "local__group_files", "args": {"keywords": ["회의록"]}}]},
+    {"calls": [{"name": "local__create_directory", "args": {"path": "{root}/회의록"}}]},
+    {"calls": [{"name": "local__move_file", "args": {"source": "{root}/회의록_1월.txt", "destination": "{root}/회의록"}}]},
+    {"calls": [{"name": "local__move_file", "args": {"source": "{root}/회의록_2월.txt", "destination": "{root}/회의록"}}]},
+    {"text": "회의록 파일 2개를 회의록 폴더로 옮겼어요."}
+  ],
+  "expect": {
+    "files": {"회의록_1월.txt": null, "회의록_2월.txt": null, "회의록/회의록_1월.txt": "1",
+              "회의록/회의록_2월.txt": "2", "memo.txt": "m"},
+    "must_run": ["local__group_files", "local__move_file"]
+  }
+}
