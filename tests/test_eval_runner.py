@@ -47,6 +47,12 @@ class Answering:
         return ModelTurn("x입니다.", [])
 
 
+@pytest.fixture(autouse=True)
+def _no_heavy_lock(monkeypatch):
+    # The real lock waits for any live eval on this machine: one test once took 28 minutes.
+    monkeypatch.setattr(run_eval.heavy_lock, "acquire", lambda: None)
+
+
 def live_config():
     return Config("openai", "live-model", "unused-key", (ROOT,), feedback_enabled=False)
 
