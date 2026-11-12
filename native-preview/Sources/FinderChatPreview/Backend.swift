@@ -113,17 +113,13 @@ final class Backend: ObservableObject {
             }
         }
         // app_tree: the native-preview code this app was built from, so the backend can warn when stale.
-        // backend: the symbio-bridge executable. args: only a UI test replaces the real backend with a
-        // scripted one (it may still name its program `python`, the old key).
-        struct Runtime: Decodable {
-            let project: String; let backend: String?; let python: String?; let app_tree: String?; let args: [String]?
-        }
+        // backend: the symbio-bridge executable. args: only a UI test replaces the real backend with a scripted one.
+        struct Runtime: Decodable { let project: String; let backend: String; let app_tree: String?; let args: [String]? }
         do {
             guard let url = UITest.runtime ?? Bundle.main.url(forResource: "runtime", withExtension: "json") else {
                 throw CocoaError(.fileNoSuchFile)
             }
             let runtime = try JSONDecoder().decode(Runtime.self, from: Data(contentsOf: url))
-            guard let program = runtime.backend ?? runtime.python else { throw CocoaError(.fileNoSuchFile) }
             let child = Process()
             let stdin = Pipe(), stdout = Pipe()
             session = UUID()
@@ -134,11 +130,10 @@ final class Backend: ObservableObject {
             pending = false
             approval = nil
             choices = []
-            child.executableURL = URL(fileURLWithPath: program)
-            child.arguments = runtime.args ?? (runtime.backend == nil ? ["-u", "-m", "voice_action.native_bridge"] : [])
+            child.executableURL = URL(fileURLWithPath: runtime.backend)
+            child.arguments = runtime.args ?? []
             child.currentDirectoryURL = URL(fileURLWithPath: runtime.project)
             var environment = ProcessInfo.processInfo.environment
-            if runtime.backend == nil { environment["PYTHONPATH"] = runtime.project }
             environment["SYMBIO_APP_TREE"] = runtime.app_tree
             // 앱 아이콘으로 켜면 PATH가 최소라 filesystem MCP가 쓰는 node를 못 찾는다.
             let extra = "/opt/homebrew/bin:/usr/local/bin"

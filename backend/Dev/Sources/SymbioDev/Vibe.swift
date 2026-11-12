@@ -198,7 +198,6 @@ public enum Vibe {
             try handle.write(contentsOf: Data("/node_modules\n".utf8))
             try handle.close()
             writeOutput(path.path + "\n")
-            writeOutput("다음: cd 위 경로 && uv sync --locked  (.venv는 worktree마다 따로 만든다)\n")
             return
         }
         // All participating sessions and the scheduler serialize metadata/snapshot updates.

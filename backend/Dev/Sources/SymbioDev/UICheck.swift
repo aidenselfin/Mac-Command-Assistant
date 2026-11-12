@@ -184,7 +184,7 @@ public enum UICheck {
             let stem = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
             let result = work + "/\(stem).result.json", runtime = work + "/runtime.json"
             let config: JSON = [
-                "project": .string(repoRoot), "python": .string(me),
+                "project": .string(repoRoot), "backend": .string(me),
                 "args": ["ui-check", "serve", .string(path), .string(result)],
             ]
             try config.dumps().write(toFile: runtime, atomically: false, encoding: .utf8)
