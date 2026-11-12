@@ -38,11 +38,11 @@
 
 | 원문 이름 | 실제 위치 |
 |---|---|
-| RuntimeController | `voice_action/runtime.py` `RuntimeController(planner, feedback=...)` — `submit`, `approve_pending`, `reject_pending`, `undo_last_write` |
-| Planner | `voice_action/planner.py` `Planner(config, gateway, model, tools=, undo_journal=)` |
+| RuntimeController | `backend/Runtime` `RuntimeController` — `submit`, `approve_pending`, `reject_pending`, `undo_last_write` |
+| Planner | `backend/Planner` `Planner` |
 | LLM adapter | `OpenAICompatibleModel`. 인터페이스는 `async generate(messages, tools, *, allow_tools, allow_clarification) -> ModelTurn` 하나 |
 | MCP adapter | `MCPManager({"filesystem": MCPClient(config, allowed_tools=SUPPORTED_TOOLS)})`. 삭제·변환은 Planner 내부 로컬 도구 |
-| RecordingModel / lessons | `voice_action/feedback.py`. lesson은 `RecordingModel`이 system 메시지 사본 끝에 붙임. run 시작 시 고정 |
+| RecordingModel / lessons | `backend/Feedback`. lesson은 `RecordingModel`이 system 메시지 사본 끝에 붙임. run 시작 시 고정 |
 | outcome | `Completed(text)` / `Error(message)` / `Clarification` / `ApprovalRequired` |
 | 운영 feedback DB | 실행 폴더 기준 `.voice-action/feedback.sqlite3` |
 
@@ -52,7 +52,7 @@
   `깔끔하게 정리해줘` 같은 모호한 수정 요청은 **모델 호출 없이** Planner가 직접 질문한다.
   과제를 만들 때 이 정책을 따라야 한다.
 - MCP 연결은 anyio TaskGroup 안에서 돌기 때문에 예외가 **중첩 ExceptionGroup**으로 올라온다.
-  실패 분류는 가장 안쪽 예외로 한다 (`evals/run_eval.py`에 반영됨).
+  실패 분류는 가장 안쪽 예외로 한다 (평가 실행기 `backend/Dev/…/Eval.swift`에 반영됨).
 - `--live`는 프로젝트 루트에서 실행해야 로컬 `config.json`의 모델 설정이 적용된다(현재 Groq `openai/gpt-oss-120b`).
 
 ## 3. 1단계: EvalRunner (완료)
@@ -60,10 +60,10 @@
 ### 3.1 실행
 
 ```bash
-uv run python evals/run_eval.py                    # 재생 모드: API 호출 없음, 하네스 자체 검증
-uv run python evals/run_eval.py --live             # 설정된 LLM으로 전체 과제 (과금)
-uv run python evals/run_eval.py --live --task write_reject --repeat 3
-uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장"
+swift run --package-path backend/Dev symbio-dev eval                    # 재생 모드: API 호출 없음, 하네스 자체 검증
+swift run --package-path backend/Dev symbio-dev eval --live             # 설정된 LLM으로 전체 과제 (과금)
+swift run --package-path backend/Dev symbio-dev eval --live --task write_reject --repeat 3
+swift run --package-path backend/Dev symbio-dev eval --live --repeat 3 --lesson "후보 lesson 문장"
 ```
 
 출력은 과제별 `PASS / FAIL / INVALID`와 합계이고, 상세는 `evals/results/<시각>.json`에 저장된다
@@ -174,9 +174,9 @@ uv run python evals/run_eval.py --live --repeat 3 --lesson "후보 lesson 문장
 ### 5.2 비교·채택 절차 (사람이 실행)
 
 ```bash
-uv run python main.py --lessons                                            # 후보 #ID와 문장 확인
-uv run python evals/run_eval.py --live --repeat 3 2>/dev/null              # baseline
-uv run python evals/run_eval.py --live --repeat 3 --lesson "<후보 문장>" 2>/dev/null  # candidate
+swift run --package-path backend/App symbio lessons                        # 후보 #ID와 문장 확인
+swift run --package-path backend/Dev symbio-dev eval --live --repeat 3 2>/dev/null              # baseline
+swift run --package-path backend/Dev symbio-dev eval --live --repeat 3 --lesson "<후보 문장>" 2>/dev/null  # candidate
 ```
 
 두 결과 JSON을 과제별 통과 횟수로 비교하고 아래 규칙으로 결정한다.
@@ -195,10 +195,10 @@ lesson이 겨냥한 실패를 재현하는 과제가 없으면 **먼저 그 과�
 
 ## 6. 4단계: 도구 설명·Planner 프롬프트 변경도 같은 방식으로
 
-- `planner.py`의 도구 설명·프롬프트를 바꾼 뒤, 변경 전 commit과 변경 후 각각
+- `backend/Planner`의 도구 설명·프롬프트를 바꾼 뒤, 변경 전 commit과 변경 후 각각
   `--live --repeat 3`을 실행해 5.2 규칙으로 비교한다.
 - 결과 JSON의 `versions.commit`/`dirty`/`code_hash`로 어떤 코드에서 잰 것인지 구분한다.
-- `risk_guard.py`, 승인 정책, `evals/run_eval.py`의 채점 로직은 이 비교로 바꾸지 않는다.
+- `backend/Guard`, 승인 정책, 평가 실행기(`symbio-dev eval`)의 채점 로직은 이 비교로 바꾸지 않는다.
   채점기를 바꿀 때는 negative control이 계속 실패 처리되는지 먼저 확인한다.
 
 ## 7. 보류한 단계와 도입 시점
@@ -209,11 +209,11 @@ lesson이 겨냥한 실패를 재현하는 과제가 없으면 **먼저 그 과�
 | 과제 split(validation/heldout) | 과제가 50개를 넘고 같은 과제로 lesson을 반복 튜닝하기 시작할 때 |
 | LLM 사용자 시뮬레이터 | scripted user의 `simulator_failure`가 자주 나올 때 |
 | LLM judge | 요약·번역 품질을 채점해야 할 때. 파일 상태로 판정 가능한 것은 계속 코드로 |
-| 자동 코드 수정 (원문 15, 19.6) | **2026-10-27 도입됨**(`autonomy.py`). 별도 브랜치·보호 파일·검증 게이트를 거쳐 사람 리뷰 없이 main에 합친다 |
+| 자동 코드 수정 (원문 15, 19.6) | **2026-10-27 도입됨**(`backend/Feedback/…/Autonomy.swift`). 별도 브랜치·보호 파일·검증 게이트를 거쳐 사람 리뷰 없이 main에 합친다 |
 | 새 기능 자동 개발 (원문 16) | 보류. 새 기능(예: 파일 이동)은 사람이 정하고, 먼저 `evals/tasks`에 실패 과제를 넣은 뒤 구현 |
 | 비용 | `--live` 1회 = 과제 수 × 반복 × 평균 2~3회 모델 호출. 25과제×3회면 약 150~225회 |
 
 ## 능력 점수
 
-`evals/benchmark.py`가 live 결과를 능력 축별·종합 1~100점으로 바꾸고 약한 축·막힌 과제·이전 점수와의 차이를 보여 준다.
+`symbio-dev benchmark`가 live 결과를 능력 축별·종합 1~100점으로 바꾸고 약한 축·막힌 과제·이전 점수와의 차이를 보여 준다.
 설계는 `docs/superpowers/specs/2026-10-28-capability-benchmark-design.md`. 재생 결과는 점수를 낼 수 없다.

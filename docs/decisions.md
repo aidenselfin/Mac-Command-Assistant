@@ -2,6 +2,11 @@
 
 오래 유지할 결정만 날짜와 함께 적는다 (최신이 위). 작업 규칙은 `AGENTS.md`, 진행 상황은 `status.md`.
 
+- 2026-11-12 Python → Swift 전환: 백엔드(`voice_action/`·`main.py`·`llm_mcp_transcript.py`)와 테스트·평가·개발 스크립트를
+  모두 Swift로 옮겼다(`backend/<모듈>` SwiftPM 패키지, 실행 파일 `symbio-bridge`·`symbio`·`symbio-dev`). 이유: 한 언어·한 빌드 도구(SwiftPM)로
+  줄이고, 화면(SwiftUI)과 같은 언어로 맞춘다. 동작·한국어 메시지·보안 검사·SQLite 스키마·`.voice-action/` 파일 위치는 그대로다.
+  외부 Swift 패키지는 쓰지 않는다. 아래 기록의 `.py` 파일 이름은 당시 이름이며, 대응은 `ARCHITECTURE.md` 파일 지도에 있다.
+
 - 2026-11-04 파일 열기: `local__open_file`은 허용 폴더 안 일반 파일 하나를 macOS 기본 앱으로 연다.
   파일을 바꾸지 않으므로 승인 없는 읽기 분류다. 대신 여는 것이 곧 실행인 파일(실행 권한, `.command`·`.app`·
   스크립트·설치 파일 등 확장자 목록)은 코드가 거부하고, "열어줘·열기·띄워·open" 요청에만 노출한다.

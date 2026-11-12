@@ -41,7 +41,7 @@ final class Backend: ObservableObject {
     private var voiceClip: URL?
     private var voiceCancelled = false
     private var session = UUID()
-    /// Idle this long, the Python backend and its Node helper (~160MB) stop; the next use starts them.
+    /// Idle this long, the backend and its Node helper (~160MB) stop; the next use starts them.
     private static let sleepAfter: Duration = .seconds(600)
     private var sleepTimer: Task<Void, Never>?
     private var asleep = false
@@ -113,8 +113,8 @@ final class Backend: ObservableObject {
             }
         }
         // app_tree: the native-preview code this app was built from, so the backend can warn when stale.
-        // args: only a UI test replaces the real backend with a scripted one.
-        struct Runtime: Decodable { let project: String; let python: String; let app_tree: String?; let args: [String]? }
+        // backend: the symbio-bridge executable. args: only a UI test replaces the real backend with a scripted one.
+        struct Runtime: Decodable { let project: String; let backend: String; let app_tree: String?; let args: [String]? }
         do {
             guard let url = UITest.runtime ?? Bundle.main.url(forResource: "runtime", withExtension: "json") else {
                 throw CocoaError(.fileNoSuchFile)
@@ -130,11 +130,10 @@ final class Backend: ObservableObject {
             pending = false
             approval = nil
             choices = []
-            child.executableURL = URL(fileURLWithPath: runtime.python)
-            child.arguments = runtime.args ?? ["-u", "-m", "voice_action.native_bridge"]
+            child.executableURL = URL(fileURLWithPath: runtime.backend)
+            child.arguments = runtime.args ?? []
             child.currentDirectoryURL = URL(fileURLWithPath: runtime.project)
             var environment = ProcessInfo.processInfo.environment
-            environment["PYTHONPATH"] = runtime.project
             environment["SYMBIO_APP_TREE"] = runtime.app_tree
             // 앱 아이콘으로 켜면 PATH가 최소라 filesystem MCP가 쓰는 node를 못 찾는다.
             let extra = "/opt/homebrew/bin:/usr/local/bin"
@@ -173,7 +172,7 @@ final class Backend: ObservableObject {
             input = stdin.fileHandleForWriting
         } catch {
             state = "STOPPED"
-            append("error", "백엔드를 시작하지 못했습니다. run.sh로 실행하고 Python 환경을 확인하세요.")
+            append("error", "백엔드를 시작하지 못했습니다. run.sh로 다시 실행해 백엔드(symbio-bridge)를 빌드하세요.")
         }
     }
 

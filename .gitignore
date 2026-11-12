@@ -32,3 +32,4 @@ evals/results/
 CLAUDE.local.md
 .claude/settings.json
 evals/generated/
+.build/
