@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Finder 실행에서도 uv와 Node, swift의 기본 설치 경로를 찾습니다.
+# Finder 실행에서도 Node와 swift의 기본 설치 경로를 찾습니다.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 cd -- "${0:A:h}" || exit 1
 

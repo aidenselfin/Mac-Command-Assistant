@@ -10,29 +10,24 @@ fi
 swift build --package-path "$PROJECT_DIR"
 BIN_DIR=$(swift build --package-path "$PROJECT_DIR" --show-bin-path)
 REPO_DIR="${PROJECT_DIR:h}"
-PYTHON_BIN="${VOICE_ACTION_PYTHON:-$REPO_DIR/.venv/bin/python}"
-COMMON_GIT_DIR=$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-if [[ ! -x "$PYTHON_BIN" ]]; then
-    PYTHON_BIN="${COMMON_GIT_DIR:h}/.venv/bin/python"
-fi
-if [[ ! -x "$PYTHON_BIN" ]]; then
-    print -u2 "Python 환경이 없습니다. 프로젝트에서 uv sync --locked를 실행하세요."
-    exit 1
-fi
+# The backend the app starts: symbio-bridge (Swift, JSON lines). `symbio` lands next to it.
+BACKEND_DIR="$REPO_DIR/backend/App"
+swift build --package-path "$BACKEND_DIR" -c release
+BACKEND="$(swift build --package-path "$BACKEND_DIR" -c release --show-bin-path)/symbio-bridge"
 RUNTIME_FILE="$PROJECT_DIR/.build/runtime.json"
 # Which native-preview code this build holds; the backend warns when the checkout has moved past it.
 APP_TREE=$(git -C "$REPO_DIR" rev-parse HEAD:native-preview 2>/dev/null || true)
 if [[ -n "$(git -C "$REPO_DIR" status --porcelain -- native-preview 2>/dev/null || true)" ]]; then
     APP_TREE="$APP_TREE-dirty"
 fi
-"$PYTHON_BIN" - "$REPO_DIR" "$PYTHON_BIN" "$APP_TREE" > "$RUNTIME_FILE" <<'PYTHON'
-import json
-import sys
-print(json.dumps({"project": sys.argv[1], "python": sys.argv[2], "app_tree": sys.argv[3]}))
-PYTHON
+json_string() {
+    local value=${1//\\/\\\\}
+    print -rn -- "\"${value//\"/\\\"}\""
+}
+print -r -- "{\"project\": $(json_string "$REPO_DIR"), \"backend\": $(json_string "$BACKEND"), \"app_tree\": $(json_string "$APP_TREE")}" > "$RUNTIME_FILE"
 APP_DIR="$PROJECT_DIR/.build/FinderChatPreview.app"
 EXECUTABLE="$APP_DIR/Contents/MacOS/FinderChatPreview"
-BACKEND_FILES=("$REPO_DIR"/voice_action/*.py(N))
+BACKEND_FILES=("$REPO_DIR"/backend/**/*.swift(N))
 BUILD_HASH=$(shasum -a 256 "$BIN_DIR/FinderChatPreview" "$PROJECT_DIR/Info.plist" \
     "$RUNTIME_FILE" "${BACKEND_FILES[@]}")
 HASH_FILE="$PROJECT_DIR/.build/preview-source.sha256"
