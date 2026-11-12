@@ -10,11 +10,23 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../Core"),
+        .package(path: "../MCP"),
+        .package(path: "../Undo"),
+        .package(path: "../Planner"),
+        .package(path: "../Feedback"),
+        .package(path: "../Runtime"),
     ],
     targets: [
-        .target(name: "SymbioDev", dependencies: [.product(name: "SymbioCore", package: "Core")]),
+        .target(name: "SymbioDev", dependencies: [
+            .product(name: "SymbioCore", package: "Core"), .product(name: "SymbioMCP", package: "MCP"),
+            .product(name: "SymbioUndo", package: "Undo"), .product(name: "SymbioPlanner", package: "Planner"),
+            .product(name: "SymbioFeedback", package: "Feedback"), .product(name: "SymbioRuntime", package: "Runtime"),
+        ]),
         .executableTarget(name: "symbio-dev", dependencies: ["SymbioDev"]),
         // Depends on the executable so `swift test` builds it next to the test bundle.
-        .testTarget(name: "SymbioDevTests", dependencies: ["SymbioDev", "symbio-dev"]),
+        .testTarget(name: "SymbioDevTests", dependencies: [
+            "SymbioDev", "symbio-dev", .product(name: "SymbioCore", package: "Core"),
+            .product(name: "SymbioPlanner", package: "Planner"),
+        ]),
     ]
 )

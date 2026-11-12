@@ -24,12 +24,13 @@ func exitStatus(_ process: Process) -> Int32 {
 @discardableResult
 func run(
     _ command: [String], environment: [String: String]? = nil,
-    captureOutput: Bool = true, captureError: Bool = false
+    captureOutput: Bool = true, captureError: Bool = false, directory: String? = nil
 ) throws -> (status: Int32, output: String, error: String) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = command
     if let environment { process.environment = environment }
+    if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory, isDirectory: true) }
     func capture(_ on: Bool) throws -> (FileHandle, URL)? {
         guard on else { return nil }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
