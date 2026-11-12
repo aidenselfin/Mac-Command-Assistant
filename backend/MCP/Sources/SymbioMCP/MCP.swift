@@ -125,7 +125,7 @@ actor StdioSession: MCPSession {
 
     func close() async {
         try? input.close()
-        for _ in 0..<40 where process.isRunning { try? await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0..<400 where process.isRunning { try? await Task.sleep(for: .milliseconds(5)) }
         if process.isRunning { process.terminate() }
         reader?.cancel()
         finish()
