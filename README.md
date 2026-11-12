@@ -17,7 +17,7 @@ LLM이 임의의 시스템 권한을 갖는 구조가 아닙니다. 애플리케
 
 ## 현재 구현 상태
 
-최신 검증 수치와 미완료 작업은 [`docs/status.md`](docs/status.md)에 있습니다(2026-11-11: pytest 773 passed, 평가 재생 94/94).
+최신 검증 수치와 미완료 작업은 [`docs/status.md`](docs/status.md)에 있습니다(2026-11-12 Python → Swift 전환 완료).
 
 전체 테스트는 실제 Filesystem MCP 서버를 포함하며, LLM 응답은 재현 가능한 scripted/mock model을 사용합니다. 따라서 다음은 검증되었습니다.
 
@@ -100,18 +100,16 @@ batch와 journal 기록이 끝나기를 기다린 뒤 창을 닫습니다. 재�
 - macOS 앱 클릭, 키보드 입력, 실행, 창 제어, AX tree 읽기
 - 병렬 도구 실행, 자동 재시도, MCP 자동 재연결
 
-메인 모델 호출이 실패하면 `OPENAI_API_KEY`가 있을 때 OpenAI 대체 모델(`VOICE_ACTION_FALLBACK_MODEL`, 기본 `gpt-4o-mini`)로 한 번 다시 부릅니다. 음성은 Swift 앱이 녹음하고 `voice_action/transcribe.py`가 글로 바꿔 일반 명령으로 보냅니다(런타임의 `RECORDING`·`TRANSCRIBING` 상태는 쓰지 않습니다).
+메인 모델 호출이 실패하면 `OPENAI_API_KEY`가 있을 때 OpenAI 대체 모델(`VOICE_ACTION_FALLBACK_MODEL`, 기본 `gpt-4o-mini`)로 한 번 다시 부릅니다. 음성은 Swift 앱이 녹음하고 백엔드(`backend/App`의 `Transcribe.swift`)가 글로 바꿔 일반 명령으로 보냅니다(런타임의 `RECORDING`·`TRANSCRIBING` 상태는 쓰지 않습니다).
 
 ## 요구 사항
 
-- Python `>=3.12,<3.13`
-- [uv](https://docs.astral.sh/uv/)
+- macOS 15 이상과 Swift 6 도구(Xcode, 앱과 백엔드 모두)
 - Node.js와 npm
-- macOS 15 이상과 Swift 6 도구(네이티브 앱)
 - OpenRouter, Groq 또는 OpenAI API key (음성은 `GROQ_API_KEY`)
 - 마이크 권한, 앱 밖에서 ⌥를 감지하려면 입력 모니터링 권한
 
-Python 주요 의존성은 `mcp`, `openai`, `anyio`, `jsonschema`, `rich`, `python-dotenv`입니다. Node 의존성은 다음 버전으로 고정되어 있습니다.
+백엔드는 외부 Swift 패키지 없이 Foundation·SQLite3·URLSession만 씁니다. Node 의존성은 다음 버전으로 고정되어 있습니다.
 
 - `@modelcontextprotocol/server-filesystem` `2026.8.31`
 - `@playwright/mcp` `0.0.81` (웹 기능은 꺼져 있어 지금은 쓰지 않음)
@@ -121,9 +119,10 @@ Python 주요 의존성은 `mcp`, `openai`, `anyio`, `jsonschema`, `rich`, `pyth
 저장소 root에서 실행합니다.
 
 ```sh
-uv sync --locked
 npm ci
 ```
+
+백엔드는 `run.sh`가 처음 실행할 때 `swift build`로 만듭니다.
 
 (`npm run playwright:install`은 보관된 웹 기능을 다시 켤 때만 필요합니다.)
 
@@ -156,11 +155,11 @@ OpenAI를 사용할 때는 provider를 `openai`로 지정하고 `OPENAI_API_KEY`
 ./native-preview/run.sh
 ```
 
-화면은 SwiftUI 네이티브 앱 하나입니다(예전 `--interactive`·Tkinter `--ui`는 제거했습니다). 앱은 Python 백엔드(`voice_action/native_bridge.py`)와 JSON lines로 통신하며, 규약은 `docs/native-protocol.md`에 있습니다.
+화면은 SwiftUI 네이티브 앱 하나입니다(예전 `--interactive`·Tkinter `--ui`는 제거했습니다). 앱은 Swift 백엔드 실행 파일 `symbio-bridge`(`backend/App`)와 JSON lines로 통신하며, 규약은 `docs/native-protocol.md`에 있습니다.
 
 ## 명령행 옵션
 
-`main.py`는 피드백 lesson 관리 전용입니다(아래 "lesson 관리"). 명령 실행은 네이티브 앱에서 합니다.
+CLI `symbio`(`swift run --package-path backend/App symbio ...`)는 피드백 lesson 관리와 진단용 한 번 실행(`transcript`)만 합니다(아래 "lesson 관리"). 명령 실행은 네이티브 앱에서 합니다.
 provider·모델·허용 폴더는 `config.json`과 `.voice-action/config.env`로 정합니다.
 
 허용 디렉터리는 실행 시 존재하는 실제 디렉터리여야 합니다. 상대경로는 현재 작업 디렉터리를 기준으로 해석되므로 일반적으로 저장소 root에서 실행해야 합니다.
@@ -184,7 +183,7 @@ provider·모델·허용 폴더는 `config.json`과 `.voice-action/config.env`�
 
 설정 우선순위는 높은 순서대로 다음과 같습니다.
 
-1. 명령행 옵션(진단 스크립트 `llm_mcp_transcript.py`만)
+1. 명령행 옵션(진단용 `symbio transcript`만)
 2. `VOICE_ACTION_*` 환경변수
 3. 현재 디렉터리의 `config.json`
 4. `~/.voice-action/config.json`
@@ -250,8 +249,8 @@ OpenRouter를 쓰려면 `config.json`에 `"provider": "openrouter"`를 지정합
 
 감지되면 백그라운드에서 OpenRouter 모델이 그 사건의 근거 run만 보고 원인을 분석해 다음 중 하나를 적용합니다. 메인 LLM 설정과 안전 규칙(RiskGuard, 승인, 허용 경로)은 바꾸지 않습니다.
 
-- lesson: 분석 결과는 먼저 **후보**로 저장되고, 백그라운드 일꾼이 `evals/run_eval.py --live --repeat 3`을 후보와 같은 코드의 기준선 2회(캐시 재사용)와 비교합니다. 기준선 최고 점수를 넘고 한 번도 안 지던 과제가 지지 않으면 **자동 채택**, 그런 회귀가 있으면 자동 거절, 그 밖에는 후보로 보류합니다(수동 `--lesson-on/--lesson-off ID`). 채택하면 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
-- code_fix: 코드를 고쳐야 하는 원인이면 일꾼이 별도 worktree·브랜치(`work/autofix-<사건 번호>`)에서 개발자 에이전트(`codex exec`, 없으면 `claude -p`)에게 수정과 회귀 테스트 추가를 맡깁니다. diff가 허용 범위(`voice_action/`·`tests/`·`docs/`·새 평가 과제)를 벗어나거나 보호 파일(`risk_guard.py`·`config.py`·`undo.py`·`mcp_client.py`·`playwright_client.py`·`feedback.py`·`autonomy.py`·`evals/run_eval.py`·`scripts/`·`native-preview/`·의존성 파일)을 건드리거나 기존 테스트·평가 과제를 고치면 버립니다. 개발 검사 도구(`scripts/check.py`: ruff·pytest·평가 재생·변형 케이스)가 모두 통과하면 `main`에 fast-forward로 합치고(main이 그새 움직였으면 main을 가져와 다시 검사한 뒤 한 번 더 시도) 되돌릴 지점으로 태그 `autofix-pre-<번호>`를 남깁니다. 합칠 수 없으면 브랜치만 남깁니다. 하루 코드 수정 3회·평가 2회 한도, 같은 signature는 하루 한 번. 끄려면 `VOICE_ACTION_FEEDBACK_AUTONOMY=off`. 결과는 `--lessons`의 `[자동 개선]`과 `.voice-action/autonomy.log`에 남습니다.
+- lesson: 분석 결과는 먼저 **후보**로 저장되고, 백그라운드 일꾼이 `symbio-dev eval --live --repeat 3`을 후보와 같은 코드의 기준선 2회(캐시 재사용)와 비교합니다. 기준선 최고 점수를 넘고 한 번도 안 지던 과제가 지지 않으면 **자동 채택**, 그런 회귀가 있으면 자동 거절, 그 밖에는 후보로 보류합니다(수동 `--lesson-on/--lesson-off ID`). 채택하면 다음 명령부터 system 프롬프트 끝에 힌트로 추가합니다. 명령이 시작될 때 고정되어, 실행 중 끝난 분석은 그 명령에 끼어들지 않습니다. 최대 5개이며, 그 lesson을 실제로 받은 서로 다른 3개 명령에서 같은 문제가 재발하면 자동 폐기됩니다.
+- code_fix: 코드를 고쳐야 하는 원인이면 일꾼이 별도 worktree·브랜치(`work/autofix-<사건 번호>`)에서 개발자 에이전트(`codex exec`, 없으면 `claude -p`)에게 수정과 회귀 테스트 추가를 맡깁니다. diff가 허용 범위(`backend/`·`docs/`·`README.md`·새 평가 과제)를 벗어나거나 보호 파일(`backend/Guard`·`Config.swift`·`backend/Undo`·`backend/MCP`·`backend/Feedback`·`backend/Dev`·`scripts/`·`native-preview/`·`AGENTS.md`·`CLAUDE.md`·`Package.swift`)을 건드리거나 기존 테스트·평가 과제를 고치면 버립니다. 개발 검사 도구(`symbio-dev check`: 빌드·테스트·평가 재생·변형 케이스)가 모두 통과하면 `main`에 fast-forward로 합치고(main이 그새 움직였으면 main을 가져와 다시 검사한 뒤 한 번 더 시도) 되돌릴 지점으로 태그 `autofix-pre-<번호>`를 남깁니다. 합칠 수 없으면 브랜치만 남깁니다. 하루 코드 수정 3회·평가 2회 한도, 같은 signature는 하루 한 번. 끄려면 `VOICE_ACTION_FEEDBACK_AUTONOMY=off`. 결과는 `--lessons`의 `[자동 개선]`과 `.voice-action/autonomy.log`에 남습니다.
 
 URL·경로·승인 관련 단어가 든 lesson과 credential이 섞인 분석 결과는 채택하지 않습니다. 이 키워드 필터는 보조 장치이지 보안 경계가 아니며, 실제 안전은 코드의 RiskGuard·URL·경로 검증이 보장합니다.
 
@@ -267,7 +266,7 @@ VOICE_ACTION_FEEDBACK_DAILY_LIMIT=20       # 최근 24시간 분석 요청 한�
 
 종료 시 진행 중인 분석은 최대 5초 기다린 뒤 취소합니다. 취소해도 이미 보낸 요청은 한도에 포함됩니다.
 
-lesson 관리: `uv run python main.py --lessons`(활성·후보 목록), `--lesson-on ID`(후보 채택), `--lesson-off ID`(비활성화·후보 거절). 채택 절차는 `docs/self-improvement-guide.md` 5.2절.
+lesson 관리: `swift run --package-path backend/App symbio lessons`(활성·후보 목록), `symbio lessons on ID`(후보 채택), `symbio lessons off ID`(비활성화·후보 거절). 채택 절차는 `docs/self-improvement-guide.md` 5.2절.
 
 ## 노출되는 도구
 
@@ -355,10 +354,10 @@ local__read_document    항상 노출, 읽기 전용
 | --- | --- |
 | txt·md·rtf·html·doc·docx·odt → txt·rtf·html·doc·docx·odt | `textutil` |
 | txt·md → pdf (서식 없는 글) | `cupsfilter` |
-| hwpx(한글) → pdf (글자만, 그림·표 모양 빠짐) | Python 표준 라이브러리 + `cupsfilter` |
-| pdf → txt | PDFKit (pyobjc) |
+| hwpx(한글) → pdf (글자만, 그림·표 모양 빠짐) | Foundation(zip 풀기) + `cupsfilter` |
+| pdf → txt | PDFKit |
 | png·jpeg(jpg)·heic·tiff·gif·bmp 서로 (아이폰 HEIC → JPG·PNG 포함) | `sips` |
-| csv ↔ json | Python 표준 라이브러리 |
+| csv ↔ json | Foundation |
 
 - 원본은 바꾸지 않고 새 파일을 만듭니다. 기본은 같은 폴더이고 같은 이름이 있으면 `이름 (1).jpg`처럼 새 이름을 씁니다. 출력 경로를 직접 지정하면 다른 허용 폴더도 되지만, 이미 있는 파일이면 거부합니다.
 - 승인 전에 임시 폴더에서 실제로 변환해 결과 크기와 미리보기(글 형식)를 승인 패널에 보여줍니다.
@@ -402,7 +401,7 @@ local__read_document    항상 노출, 읽기 전용
 ## 처리 흐름
 
 ```text
-SwiftUI 앱(글·음성 입력) ─JSON lines─► native_bridge.py
+SwiftUI 앱(글·음성 입력) ─JSON lines─► symbio-bridge
   ↓
 RuntimeController — 단일 실행과 상태 전이 관리
   ↓
@@ -550,42 +549,34 @@ Undo 동작:
 ## 프로젝트 구조
 
 ```text
-main.py                         피드백 lesson 관리 CLI
-llm_mcp_transcript.py           진단용 한 번 실행
-voice_action/                   파일별 역할은 docs/ARCHITECTURE.md "파일 지도"
+backend/<모듈>/                 Swift 백엔드 패키지(파일별 역할은 docs/ARCHITECTURE.md "파일 지도")
+backend/App/                    symbio-bridge(앱 백엔드)·symbio(lesson·진단 CLI)
+backend/Dev/                    symbio-dev(점검·평가·worktree·화면 검사)
 native-preview/                 SwiftUI 앱
 archive/web-macos-mcp/          꺼 둔 웹·활성 앱 client
-evals/                          평가 과제·실행기·능력 점수
-scripts/                        점검(check.py)·worktree(vibe.py)·화면 검사(ui_check.py)
-tests/                          단위·통합 테스트
+evals/                          평가 과제·결과·능력 점수
+scripts/                        check.sh·자동 보존·화면 시나리오(ui_scenarios/)
 voice-action-test/             기본 허용 root와 예제 파일
 config.example.json            설정 예시
-pyproject.toml / uv.lock       Python 의존성
 package.json / package-lock.json
                                 MCP/Playwright Node 의존성
 ```
 
 ## 테스트 실행
 
-전체 테스트:
+모듈 하나의 테스트(Swift Testing):
 
 ```sh
-uv run --locked pytest -q
+swift test --package-path backend/<모듈>
 ```
 
-통합 테스트만:
+전체 점검(모든 패키지 빌드·테스트·경고 0·앱 빌드·평가 재생·변형 케이스):
 
 ```sh
-uv run --locked pytest -q -m integration
+scripts/check.sh full
 ```
 
-정적 검사:
-
-```sh
-uv run --locked ruff check .
-```
-
-통합 테스트는 실제 Node MCP subprocess를 시작하고 임시 디렉터리에 파일을 생성합니다. 실제 Groq/OpenAI API key나 외부 인터넷은 필요하지 않습니다. 개발 후 한 번에 점검하려면 `uv run python scripts/check.py`(ruff·pytest·평가 재생·변형 케이스)를 씁니다.
+일부 테스트는 실제 Node MCP subprocess를 시작하고 임시 디렉터리에 파일을 생성합니다. 실제 Groq/OpenAI API key나 외부 인터넷은 필요하지 않습니다. 바뀐 패키지만 보려면 `scripts/check.sh quick`을 씁니다.
 
 실제 모델과 네트워크까지 포함한 수동 smoke test는 아래의 **격리된 수동 검증
 절차**를 사용하십시오. 기존 `voice-action-test`, 기존 `.voice-action/undo.sqlite3`,
@@ -614,7 +605,7 @@ journal은 `$TMP_WORKDIR/.voice-action/undo.sqlite3`에만 생성되고, 기존 
 
 ```sh
 cd "$TMP_WORKDIR"
-PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/llm_mcp_transcript.py" \
+swift run --package-path "$PROJECT/backend/App" symbio transcript \
   "<아래 입력>" --allowed-directory "$TMP_ROOT"
 ```
 
@@ -632,13 +623,13 @@ PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/llm_
 
 ### 수동 transcript 기록
 
-`llm_mcp_transcript.py`는 `--log-file` 경로(기본값: `llm_mcp_transcript.log`)에
+`symbio transcript`는 `--log-file` 경로(기본값: `llm_mcp_transcript.log`)에
 실행 하나당 한 줄의 JSONL record를 append합니다. 기본 기록은 run ID, 시작·종료
 시각, 상태, 도구명, 문자열 길이와 digest만 포함하며, 사용자 원문·파일 본문·웹
 snapshot·raw tool arguments/results는 남기지 않습니다.
 
 ```sh
-PYTHONPATH="$PROJECT" uv run --project "$PROJECT" --locked python "$PROJECT/llm_mcp_transcript.py" \
+swift run --package-path "$PROJECT/backend/App" symbio transcript \
   "test1.md를 요약해줘" \
   --allowed-directory "$TMP_ROOT" \
   --log-file "$TMP_LOG"

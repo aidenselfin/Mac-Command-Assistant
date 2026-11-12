@@ -20,14 +20,14 @@ Claude는 `CLAUDE.md`의 `@AGENTS.md`를 통해 같은 규칙을 읽는다.
 
 - 목표·완료 조건을 구체적으로 준다. 예: “첨부한 PDF의 요약 결과가 UI에 나타나야 한다.”
 - 같은 폴더에서는 수정을 한 세션에만 맡긴다. 동시에 여러 작업을 시키려면 세션마다 worktree를 만든다:
-  `python3 scripts/vibe.py worktree --name 작업명`(AGENTS.md "worktree와 병합"). 폴더가 다르면 잠금도
+  `swift run --package-path backend/Dev symbio-dev vibe worktree --name 작업명`(AGENTS.md "worktree와 병합"). 폴더가 다르면 잠금도
   따로이고, 같은 파일을 지정하면 `begin`이 경고한다. 다른 세션은 읽기 리뷰·설계 검토도 맡길 수 있다.
   테스트·live 평가·앱 실행은 파일이나 DB를 만들 수 있으므로 수정 세션에서 수행한다.
 - 병합은 사용자가 "메인에 병합해"라고 할 때 `merge-worktrees` 스킬로 한다.
 - 같은 수정 세션에 후속 요구를 이어서 전달한다. 다른 세션으로 넘길 때는 이전 세션의
   커밋·잠금 해제를 확인하고 커밋 hash를 전달한다.
 - 세션이 갑자기 끊겨도 다른 에이전트에게 잠금을 지우라고 하지 않는다.
-  `python3 scripts/vibe.py status`로 소유자·목표를 보고 실제 작업 종료를 확인한다.
+  `symbio-dev vibe status`로 소유자·목표를 보고 실제 작업 종료를 확인한다.
   소유자가 종료했음을 확인한 후에만 표시된 token으로 `end`하여 인계한다.
 - 기존 대화 세션은 새 규칙을 자동으로 재독한다고 가정하지 않는다. 규칙을 다시 읽으라고 지시한다.
 
@@ -40,8 +40,8 @@ gitignore 대상(API 키·로컬 설정·DB·평가 원본 등)은 보존 대상
 새 파일은 개별 경로를 사전에 등록해야 한다. 정상 완료 이력은 여전히 기능별 커밋이 맡는다.
 
 ```sh
-python3 scripts/vibe.py status
-python3 scripts/vibe.py snapshot
+swift run --package-path backend/Dev symbio-dev vibe status
+swift run --package-path backend/Dev symbio-dev vibe snapshot
 git log --oneline refs/vibe/snapshots
 git diff SNAPSHOT_HASH -- path/to/file
 # 복구할 내용을 먼저 별도 임시 파일로 확인한다.

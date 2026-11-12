@@ -1,11 +1,11 @@
-# 네이티브 앱 ↔ Python 전송 규약
+# 네이티브 앱 ↔ 백엔드 전송 규약
 
-SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_action.native_bridge`)를 띄우고 **한 줄에 JSON 하나**씩
-주고받는다. 승인 내용(nonce 등)은 Python에만 있고 Swift에는 1회용 `approval_id`만 간다. 코드: `voice_action/native_bridge.py`,
+SwiftUI 앱(`native-preview/`)은 백엔드 실행 파일 `symbio-bridge`(경로는 앱 번들의 `runtime.json`, `run.sh`가 적음)를 띄우고 **한 줄에 JSON 하나**씩
+주고받는다. 승인 내용(nonce 등)은 백엔드에만 있고 앱에는 1회용 `approval_id`만 간다. 코드: `backend/App/Sources/SymbioApp/Bridge.swift`,
 `native-preview/Sources/FinderChatPreview/Backend.swift`(수신)·`App.swift`(화면). 아래 목록이 코드와 다르면
-`tests/test_native_protocol.py`가 실패한다 — 이벤트를 추가하면 Swift의 `switch`와 이 문서를 함께 고친다.
+`backend/App/Tests/SymbioAppTests/ProtocolTests.swift`가 실패한다 — 이벤트를 추가하면 앱의 `switch`와 이 문서를 함께 고친다.
 
-## Python → Swift 이벤트 (`type`)
+## 백엔드 → 앱 이벤트 (`type`)
 
 | type | 주요 필드 | 뜻 |
 |---|---|---|
@@ -22,19 +22,19 @@ SwiftUI 앱(`native-preview/`)은 전용 Python 프로세스(`python -m voice_ac
 | `notice` | `text` | 안내. 앱이 옛 빌드(`SYMBIO_APP_TREE`가 현재 `native-preview` 트리와 다름)면 시작할 때 재설치 안내 |
 | `stopped` | | 백엔드 종료 |
 
-## Swift → Python 명령 (`action`)
+## 앱 → 백엔드 명령 (`action`)
 
 `submit`(`text`) · `approve`/`reject`(`approval_id`) · `cancel` · `undo` · `reset`(후속 질문 기억 삭제, IDLE에서만) · `quick_list`(`sort`: `modified`·`size`, 모델 없이 최근·큰 파일 5개를 `completed`의 `offer_paths`와 `show_box: true`로 보내 오른쪽 드래그 칩으로 띄움, IDLE에서만) · `attach`(`path`) · `detach` ·
 `voice`(`path`: 임시 폴더의 `voice-action-voice-*.m4a`, 변환 뒤 지운다) · `shutdown`. 상태와 맞지 않거나 `approval_id`가 다르면 `rejected`.
 `submit`의 `text`가 `/feedback 내용`이면 명령이 아니라 직전 답변에 대한 의견으로 피드백 루프(U1)에 들어가고 `completed`로 접수를 알린다. 질문 대기 중에는 `rejected`.
 
-## 화면 시험 (`scripts/ui_check.py run`)
+## 화면 시험 (`symbio-dev ui-check run`)
 
 `SYMBIO_UI_TEST_RUNTIME`이 있을 때만 대본 백엔드가 `_test`(`do`: `snapshot` `option_double_tap` `click_toast` `key` `open_chat` `close_chat` `quit`)를 보낸다.
 앱은 `_done`(`do` `ok`)과 `_snapshot`(`state`: 창·입력 칩·알림·선택 칩·파일 칩 상태)으로 답한다. 평소 앱에서는 무시된다.
 
 ## 새 승인 종류를 추가할 때
 
-1. `risk_guard.py`가 `PreparedWrite.operation`을 정한다.
+1. `backend/Guard`가 `PreparedWrite.operation`을 정한다.
 2. Swift `App.swift`의 `approvalStyle`에 제목·버튼을 추가한다(모르는 값은 "파일 변경 승인"으로 보인다).
-3. 이 문서의 `operation` 목록과 `tests/test_integration_features.py`에 사례를 추가한다.
+3. 이 문서의 `operation` 목록과 `backend/App/Tests/SymbioAppTests/BridgeTests.swift`에 사례를 추가한다.
