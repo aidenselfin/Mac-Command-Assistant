@@ -49,7 +49,7 @@ public enum MakeCases {
     /// level -> (kept count, dropped ids); only tasks that replay in a throwaway folder qualify.
     static func build(_ levels: [Int], root: URL) async throws -> [(level: Int, kept: Int, dropped: [String])] {
         let base = loadJSONFiles(root.appendingPathComponent("evals/tasks"))
-            .filter { $0.has("script") && $0["negative"]?.truthy != true && !Eval.opensFiles($0) }
+            .filter { $0.has("script") && $0["negative"]?.truthy != true }
         var result: [(level: Int, kept: Int, dropped: [String])] = []
         for level in levels {
             let folder = root.appendingPathComponent("evals/generated/L\(level)")

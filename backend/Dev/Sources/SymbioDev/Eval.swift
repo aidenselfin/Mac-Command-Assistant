@@ -1,6 +1,7 @@
 import Foundation
 import SymbioCore
 import SymbioFeedback
+import SymbioFinder
 import SymbioMCP
 import SymbioPlanner
 import SymbioRuntime
@@ -55,6 +56,18 @@ public enum Eval {
                     : nil
             }
             return ModelTurn(turn["text"]?.stringValue, calls, clarification)
+        }
+    }
+
+    /// Trials never launch apps: an open is checked by the app's rules, then only recorded.
+    final class NoApps: Workspace, @unchecked Sendable {  // `paths` is behind `lock`
+        private let lock = NSLock()
+        private var paths: [String] = []
+        var opened: [String] { lock.withLock { paths } }
+        func activateFileViewerSelecting(_ fileURLs: [URL]) throws {}
+        func open(_ url: URL) -> Bool {
+            lock.withLock { paths.append(url.path) }
+            return true
         }
     }
 
@@ -308,6 +321,7 @@ public enum Eval {
         }
         let model: any ModelClient = scripted ?? counting!
         let conversation = Conversation(task, root: root, live: config != nil, initial: initial)
+        let workspace = NoApps()
         var status = "", text = ""
         var feedback: FeedbackLoop?
         let started = ProcessInfo.processInfo.systemUptime
@@ -331,7 +345,8 @@ public enum Eval {
             let wrapped: any ModelClient = feedback.map { $0.wrap(model) } ?? model
             let timeout = task["timeout"]?.doubleValue ?? 120
             let done = try await manager.withConnection { [feedback] gateway in
-                let planner = Planner(trialConfig, gateway, wrapped, tools: try await gateway.listTools(), undoJournal: undo)
+                let planner = Planner(trialConfig, gateway, wrapped, tools: try await gateway.listTools(), undoJournal: undo,
+                    workspace: workspace)
                 let controller = RuntimeController(
                     planner,
                     plannerEventObserver: { event in
@@ -354,8 +369,9 @@ public enum Eval {
         var problems = diff(expectedManifest(initial, undone ? [:] : expect["files"] ?? [:]), after)
         let toolsRun = conversation.toolsRun
         problems += (expect["must_run"]?.list ?? []).filter { !toolsRun.contains($0) }.map { "\($0.str): not run" }
-        if let opened = expect["opened"] {  // nothing is opened (see opensFiles), so only [] passes
-            if !opened.list.isEmpty { problems.append("opened [], expected \(pyRepr(opened.list.map(\.str)))") }
+        if let want = expect["opened"] {  // NFC: Foundation hands paths back decomposed
+            let opened = workspace.opened.map { nfcRelative($0, root) }, wanted = want.list.map(\.str)
+            if opened != wanted { problems.append("opened \(pyRepr(opened)), expected \(pyRepr(wanted))") }
         }
         problems += (expect["reply_contains"]?.list ?? []).map(\.str)
             .filter { !text.contains($0) && !text.replacingOccurrences(of: ",", with: "").contains($0) }
@@ -437,10 +453,9 @@ public enum Eval {
 
     // MARK: entry point
 
-    /// Tasks that expect a file to be opened.
-    // ponytail: Planner builds its RiskGuard with NSWorkspace.shared and has no Workspace seam, so
-    // such a trial would open a real app on this Mac. They are left out until Planner takes one.
-    static func opensFiles(_ task: JSON) -> Bool { task["expect"]?.has("opened") == true }
+    static func nfcRelative(_ path: String, _ root: String) -> String {
+        (path.hasPrefix(root + "/") ? String(path.dropFirst(root.count + 1)) : path).precomposedStringWithCanonicalMapping
+    }
 
     public static func main(
         _ argv: [String], root: URL = projectRoot(), trial: TrialRunner? = nil,
@@ -471,12 +486,6 @@ public enum Eval {
         } else {  // controls pass only when a run goes wrong; they would invert a live score
             // A task marked "live": false pins one scripted path, so only replays use it.
             tasks = tasks.filter { $0["negative"]?.truthy != true && ($0["live"]?.truthy ?? true) }
-        }
-        let skipped = tasks.filter(opensFiles)
-        if !skipped.isEmpty {
-            tasks = tasks.filter { !opensFiles($0) }
-            writeOutput("건너뜀 \(skipped.count)개(파일 열기 가로채기 없음): "
-                + skipped.map { $0["id"]?.str ?? "" }.joined(separator: ", ") + "\n")
         }
         var config: Config?
         if live {

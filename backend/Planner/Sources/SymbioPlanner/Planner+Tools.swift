@@ -127,7 +127,7 @@ extension Planner {
                     return "이동·복사 원본을 local__find_files로 찾거나 정확한 파일명을 지정하세요."
                 }
                 if chosen == nil, let source = source?.stringValue {
-                    let qualified = Pattern(#"(?:/|[\w.\-]+/)[^\s"'<>]*"# + escape(pathName(source))).all(text)
+                    let qualified = Pattern(#"(?:/|[\w.\-]+/)[^\s"'<>]*"# + escape(nfc(pathName(source)))).all(nfc(text))
                         .map(\.value)
                     if !qualified.isEmpty && !qualified.contains(where: { source == $0 || source.hasSuffix("/" + $0) }) {
                         return "이동·복사 원본 경로가 사용자 요청의 경로와 일치하지 않습니다."

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SymbioConvert
 import SymbioCore
@@ -32,7 +33,8 @@ public final class Planner: @unchecked Sendable {
         _ config: Config, _ gateway: any ToolGateway, _ model: any ModelClient,
         emit: @escaping @Sendable (String) -> Void = { _ in }, tools: [ToolDefinition]? = nil,
         timing: PlannerTiming? = nil, eventObserver: PlannerEventObserver? = nil, allowLocalWeb: Bool = false,
-        undoJournal: UndoJournal? = nil, escalationModel: (any ModelClient)? = nil
+        undoJournal: UndoJournal? = nil, escalationModel: (any ModelClient)? = nil,
+        workspace: any Workspace = NSWorkspace.shared
     ) {
         self.config = config
         self.gateway = gateway
@@ -41,7 +43,8 @@ public final class Planner: @unchecked Sendable {
         escalation = escalationModel
         self.undoJournal = undoJournal
         riskGuard = RiskGuard(
-            gateway, undoJournal, roots: config.allowedDirectories, readLimit: config.maxToolResultChars)
+            gateway, undoJournal, roots: config.allowedDirectories, readLimit: config.maxToolResultChars,
+            workspace: workspace)
         self.tools = tools
         self.timing = timing ?? PlannerTiming.empty()
         self.eventObserver = eventObserver

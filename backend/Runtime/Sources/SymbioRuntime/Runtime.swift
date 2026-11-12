@@ -76,9 +76,6 @@ public func isFeedbackCommand(_ text: String) -> Bool {
 
 /// A follow-up counts only for this long after the answer it follows.
 public let memorySeconds: Double = 600
-// Python imports these from planner.py; the Swift Planner keeps them internal, so they are mirrored.
-let maxClarifications = 2
-let memoryMaxFiles = 3
 
 /// What the controller needs from the planner (Python duck typing). `Planner` conforms.
 public protocol RuntimePlanner: AnyObject, Sendable {

@@ -78,7 +78,7 @@ func openRequested(_ text: String) -> Bool {
     return openPattern.search(plain)
 }
 
-let maxClarifications = 2
+public let maxClarifications = 2
 let maxOptions = 6
 /// A yes/no question to the user. Writes, deletes and conversions are approved on the app's own
 /// screen, so asking again in words only stalls the command.
@@ -204,7 +204,7 @@ let findArgumentKeys = [
 ]
 /// Added by code, not the model, so a big file is never summarized as if it were fully read.
 let memoryReplyChars = 300
-let memoryMaxFiles = 3
+public let memoryMaxFiles = 3
 
 func memoryBlock(_ previous: Exchange) -> String {
     let files = previous.files.prefix(memoryMaxFiles).joined(separator: "; ")
@@ -356,11 +356,13 @@ func navigationResultForModel(_ toolText: String) -> String {
 
 func writeTargetIsExplicit(_ rawPath: JSON?, _ userText: String, _ userURLs: [String]) -> Bool {
     guard let raw = rawPath?.stringValue, !raw.isEmpty else { return false }
-    let filename = pathName(raw)
+    // NFC both sides: onDiskPath hands back macOS's decomposed (NFD) spelling of Korean names,
+    // and the regex compares code points, so 보고서.txt on disk would never match the request.
+    let filename = nfc(pathName(raw))
     guard !filename.isEmpty else { return false }
     var textWithoutURLs = userText
     for url in userURLs { textWithoutURLs = textWithoutURLs.replacingOccurrences(of: url, with: " ") }
-    return Pattern(#"(?<![A-Za-z0-9_.\-])"# + escape(filename) + #"(?![A-Za-z0-9_.\-])"#).search(textWithoutURLs)
+    return Pattern(#"(?<![A-Za-z0-9_.\-])"# + escape(filename) + #"(?![A-Za-z0-9_.\-])"#).search(nfc(textWithoutURLs))
 }
 
 private let urlStringRequest = Pattern(

@@ -329,6 +329,27 @@ func operationWordsInFilenamesAndNegationsDoNotEnableTools(text: String) async t
     #expect(fileExists(source) && !fileExists(folder + "/a.txt"))
 }
 
+/// Swift's FileManager (like Finder) stores Korean names decomposed (NFD). onDiskPath swaps the
+/// model's NFC source for that spelling; the "named by the user" check must still see 보고서.txt.
+@Test func copyOfAKoreanNameStoredDecomposedIsStillExplicit() async throws {
+    let config = try makeConfig()
+    let folder = config.path("백업")
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    try writeText("새", config.path("보고서.txt".decomposedStringWithCanonicalMapping))
+    let model = ScriptedModel(turns: [
+        call(copyTool, ["source": .string(config.path("보고서.txt")), "destination": .string(folder + "/보고서 (2).txt")]),
+        turn("복사 완료"),
+    ])
+    let planner = try makePlanner(config, FakeGateway(tools: []), model)
+    let pending = try #require(try await planner.run("보고서.txt를 백업 폴더에 복사해줘. 이름은 '보고서 (2).txt'로").approval)
+    #expect(pending.operation == "copy")
+}
+
+@Test func explicitTargetIgnoresNormalizationForm() {
+    let nfd = "/r/보고서.txt".decomposedStringWithCanonicalMapping
+    #expect(writeTargetIsExplicit(.string(nfd), "보고서.txt를 복사해", []))
+}
+
 // MARK: - test_conversion.py
 
 @Test func plannerConvertsAfterApproval() async throws {
