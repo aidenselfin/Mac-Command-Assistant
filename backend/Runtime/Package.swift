@@ -8,10 +8,9 @@ let package = Package(
     dependencies: [
         .package(path: "../Core"),
         .package(path: "../Planner"),
-        .package(path: "../Feedback"),
     ],
     targets: [
-        .target(name: "SymbioRuntime", dependencies: [.product(name: "SymbioCore", package: "Core"), .product(name: "SymbioPlanner", package: "Planner"), .product(name: "SymbioFeedback", package: "Feedback")]),
+        .target(name: "SymbioRuntime", dependencies: [.product(name: "SymbioCore", package: "Core"), .product(name: "SymbioPlanner", package: "Planner")]),
         .testTarget(name: "SymbioRuntimeTests", dependencies: ["SymbioRuntime"]),
     ]
 )
