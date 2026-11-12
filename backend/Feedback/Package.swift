@@ -8,10 +8,10 @@ let package = Package(
     dependencies: [
         .package(path: "../Core"),
         .package(path: "../Planner"),
-        .package(path: "../MCP"),
+        .package(path: "../Undo"),
     ],
     targets: [
-        .target(name: "SymbioFeedback", dependencies: [.product(name: "SymbioCore", package: "Core"), .product(name: "SymbioPlanner", package: "Planner"), .product(name: "SymbioMCP", package: "MCP")]),
+        .target(name: "SymbioFeedback", dependencies: [.product(name: "SymbioCore", package: "Core"), .product(name: "SymbioPlanner", package: "Planner"), .product(name: "SymbioUndo", package: "Undo")]),
         .testTarget(name: "SymbioFeedbackTests", dependencies: ["SymbioFeedback"]),
     ]
 )
