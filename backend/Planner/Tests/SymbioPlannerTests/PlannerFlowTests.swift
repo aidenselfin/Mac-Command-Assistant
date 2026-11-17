@@ -413,10 +413,24 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     let config = try makeConfig()
     let model = ScriptedModel(turns: [], repeating: turn("폴더를 만들었습니다."))
     _ = try await makePlanner(config, FakeGateway(), model).run("새 보관 폴더를 만들어줘")
-    let system = try #require(model.calls.last).system
-    #expect(system.contains("허용 루트가 하나뿐이면 위치를 묻지 말고"))
-    #expect(system.contains("만들까요"))
-    #expect(system.contains("폴더 이름은 '새'와 '폴더'를 뺀"))
+    let call = try #require(model.calls.last)
+    let mkdir = try #require(call.tools.first { $0.name == "local__create_directory" }).description
+    #expect(mkdir.contains("허용 루트가 하나뿐이면 위치를 묻지 말고"))
+    #expect(mkdir.contains("만들까요"))
+    #expect(mkdir.contains("폴더 이름은 '새'와 '폴더'를 뺀"))
+    #expect(call.system.contains(fileOperationBlock))
+}
+
+@Test func situationBlocksFollowExposedTools() async throws {
+    let config = try makeConfig()
+    let model = ScriptedModel(turns: [], repeating: turn("ok"))
+    _ = try await makePlanner(config, FakeGateway(), model).run("안녕")
+    let system = model.calls[0].system
+    #expect(system.contains(commonBlock) && system.contains(searchBlock))
+    for block in [fileOperationBlock, deleteBlock, convertBlock] { #expect(!system.contains(block)) }
+    _ = try await makePlanner(config, FakeGateway(), model).run("보고서.txt를 pdf로 변환하고 메모.txt는 삭제해줘")
+    let both = try #require(model.calls.last).system
+    #expect(both.contains(convertBlock) && both.contains(deleteBlock))
 }
 
 @Test func systemPromptEndsWithResolutionMemoryAndRoots() async throws {
@@ -424,7 +438,7 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     let model = ScriptedModel(turns: [], repeating: turn("ok"))
     _ = try await makePlanner(config, FakeGateway(), model).run("안녕", previous: Exchange("이전", "답", ["/a.txt"]))
     let system = model.calls[0].system
-    #expect(system.hasPrefix(systemPrompt + "\n직전 대화("))
+    #expect(system.hasPrefix(systemPrompt(model.calls[0].tools) + "\n직전 대화("))
     #expect(system.hasSuffix("\nAllowed roots:\n- voice-action-test: \(config.root.path)"))
     #expect(model.calls[0].messages[1] == ["role": "user", "content": "안녕"])
 }
