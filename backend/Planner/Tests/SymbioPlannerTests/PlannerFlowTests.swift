@@ -433,6 +433,17 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     #expect(both.contains(convertBlock) && both.contains(deleteBlock))
 }
 
+@Test func promptDropLeavesOutOnlyTheNamedBlock() async throws {
+    let model = ScriptedModel(turns: [], repeating: turn("ok"))
+    _ = try await makePlanner(try makeConfig(), FakeGateway(), model).run("보고서.txt를 pdf로 변환하고 메모.txt는 삭제해줘")
+    let tools = model.calls[0].tools
+    let full = systemPrompt(tools, drop: [])
+    #expect(promptDrop.isEmpty && systemPrompt(tools) == full)  // the app (switch unset) keeps every block
+    let dropped = systemPrompt(tools, drop: ["deleteBlock"])
+    #expect(!dropped.contains(deleteBlock) && dropped.contains(convertBlock))
+    #expect(dropped.count == full.count - deleteBlock.count)
+}
+
 @Test func systemPromptEndsWithResolutionMemoryAndRoots() async throws {
     let config = try makeConfig()
     let model = ScriptedModel(turns: [], repeating: turn("ok"))

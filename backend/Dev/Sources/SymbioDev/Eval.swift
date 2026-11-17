@@ -476,6 +476,7 @@ public enum Eval {
             "lessons": .array(lessons.map { .string(String(sha($0).prefix(12))) }),
             "tasks": .object(tasks.map { ($0["id"]?.str ?? "", .string(taskDigest($0))) }),
             "prompt_hashes": .array(Set(trials.compactMap { $0["prompt_hash"]?.stringValue }).sorted().map { .string($0) }),
+            "prompt_drop": .array(promptDrop.sorted().map { .string($0) }),
         ]
     }
 
@@ -496,6 +497,12 @@ public enum Eval {
             return 2
         }
         let live = args.switches.contains("--live")
+        let unknownDrop = promptDrop.subtracting(promptBlockNames)  // a typo would silently run the full prompt
+        if !unknownDrop.isEmpty {
+            writeOutput("SYMBIO_PROMPT_DROP에 없는 지침 블록: \(unknownDrop.sorted().joined(separator: ", "))\n")
+            return 2
+        }
+        if !promptDrop.isEmpty { writeOutput("지침 블록 빼고 실행: \(promptDrop.sorted().joined(separator: ", "))\n") }
         let lessons = args.all("--lesson")
         let tasksDir = root.appendingPathComponent("evals/tasks")
         let dir = args.last("--dir").map { URL(fileURLWithPath: $0) } ?? tasksDir
