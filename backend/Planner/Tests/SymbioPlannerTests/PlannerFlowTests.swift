@@ -426,7 +426,7 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     let model = ScriptedModel(turns: [], repeating: turn("ok"))
     _ = try await makePlanner(config, FakeGateway(), model).run("안녕")
     let system = model.calls[0].system
-    #expect(system.contains(commonBlock) && system.contains(searchBlock))
+    #expect(system.hasPrefix(introBlock + commonBlock) && system.contains(searchBlock))
     for block in [fileOperationBlock, deleteBlock, convertBlock] { #expect(!system.contains(block)) }
     _ = try await makePlanner(config, FakeGateway(), model).run("보고서.txt를 pdf로 변환하고 메모.txt는 삭제해줘")
     let both = try #require(model.calls.last).system

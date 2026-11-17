@@ -311,18 +311,22 @@ func errorText(_ error: any Error) -> String {
 // The system prompt is built from named blocks: the common ones always, a situation block only
 // when its tool is in this request's list (same condition as the tool exposure in `runLoop`).
 // Each comment says why the block exists and which evals/tasks/*.json cover it.
-// Rules for one tool alone live in that tool's description (open_file, create_directory).
+// Rules for create_directory alone live in its description. The open_file rule stays here: moved to the
+// description, open_file_in_subfolder failed 3/3 live (the model read the file instead).
 
-// 공통: 도구 사용 원칙·흉내 금지·결과를 답에 쓰기·질문 기준. 과제: neg_guess_without_search,
-// neg_extra_write, see_list_dir, clarify_cancel, free_text_create_file, find_unclear_name, missing_file.
-let commonBlock =
+// 첫머리(항상): 앱이 할 수 있는 일과 도구가 요청별이라는 것. 과제: neg_guess_without_search.
+let introBlock =
     "사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. "
     + "앱은 승인·Undo를 갖춘 파일 삭제, 이동·이름 변경, 복사, "
     + "폴더 생성을 지원합니다. "
     + "도구는 요청별로 제공되므로 이번 목록에 없다고 앱 전체에 기능이 없다고 "
     + "말하지 마세요. "
+
+// 공통: 흉내 금지·결과를 답에 쓰기·질문 기준. 과제: neg_extra_write, see_list_dir, clarify_cancel,
+// free_text_create_file, find_unclear_name, missing_file.
+let commonBlock =
     // Kept common: it guards most when the move tool is not in this request's list.
-    + "이동을 텍스트 쓰기나 복사 후 삭제로 흉내 내지 마세요. 파일명·목적지가 "
+    "이동을 텍스트 쓰기나 복사 후 삭제로 흉내 내지 마세요. 파일명·목적지가 "
     + "불분명하면 검색하거나 필요한 경로만 질문하고, 승인 여부는 앱이 받습니다. "
     + "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 "
     + "추측하지 마세요. "
@@ -360,6 +364,11 @@ let documentBlock =
 let fileOperationBlock =
     "이동은 local__move_file, 복사는 local__copy_file, "
     + "폴더 생성은 local__create_directory를 사용하세요. "
+
+// 열기(local__open_file이 노출될 때): 읽지 말고 기본 앱으로 열기. 과제: open_file_in_subfolder.
+let openBlock =
+    "파일을 열어 달라고 하면 찾은 파일을 local__open_file로 기본 앱에서 "
+    + "여세요. "
 
 // 웹(web__browser_navigate가 노출될 때): 사용자 URL만 읽기. 과제: target_connect_web_to_file,
 // target_connect_web_to_table. URL 문자열 번역·설명은 과제 없음.
@@ -436,8 +445,12 @@ let safetyBlock =
 /// The system prompt for this request's tool list, before the resolution, memory and allowed roots.
 func systemPrompt(_ tools: [ToolDefinition]) -> String {
     let names = Set(tools.map(\.name))
-    var blocks = [commonBlock, documentBlock]
+    // Tool routing blocks come right after the intro, where the old single prompt had them:
+    // after the "write what you read" rules, open_file_in_subfolder read the file instead (1/3 live).
+    var blocks = [introBlock]
     if !names.isDisjoint(with: [moveTool, copyTool, mkdirTool]) { blocks.append(fileOperationBlock) }
+    if names.contains(openFileTool) { blocks.append(openBlock) }
+    blocks += [commonBlock, documentBlock]
     if names.contains(webNavigateTool) { blocks.append(webBlock) }
     if names.contains(deleteTool) { blocks.append(deleteBlock) }
     if names.contains(convertTool) { blocks.append(convertBlock) }

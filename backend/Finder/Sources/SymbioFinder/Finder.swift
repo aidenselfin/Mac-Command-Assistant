@@ -38,8 +38,7 @@ public let openDefinition = ToolDefinition(
     name: openFileTool,
     description: "허용된 폴더 안 파일 하나를 macOS 기본 앱으로 연다(예: txt는 텍스트 편집기, pdf는 미리보기). "
         + "사용자가 파일을 열어 달라고 할 때만 쓴다. path는 찾은 파일의 절대경로다. 내용을 읽거나 "
-        + "요약할 때는 쓰지 않는다. 프로그램·스크립트·앱은 열 수 없다. "
-        + "파일을 열어 달라고 하면 찾은 파일을 local__open_file로 기본 앱에서 여세요.",
+        + "요약할 때는 쓰지 않는다. 프로그램·스크립트·앱은 열 수 없다.",
     schema: [
         "type": "object", "properties": ["path": ["type": "string"]],
         "required": ["path"], "additionalProperties": false,
