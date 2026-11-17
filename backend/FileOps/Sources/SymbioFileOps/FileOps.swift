@@ -37,7 +37,11 @@ public let fileOperationDefinitions: [ToolDefinition] = [
     ToolDefinition(
         name: mkdirTool,
         description: "허용 폴더 안에 새 폴더 하나를 만든다. path는 절대경로, 부모 폴더는 존재해야 한다. "
-            + "승인 필요. Undo는 만든 폴더가 비어 있고 같은 폴더일 때만 제거한다.",
+            + "승인 필요. Undo는 만든 폴더가 비어 있고 같은 폴더일 때만 제거한다. "
+            + "폴더 이름이 요청에 있고 허용 루트가 하나뿐이면 위치를 묻지 말고 "
+            + "그 루트 안에 바로 만드세요. 승인은 앱이 받으니 '만들까요' 같은 "
+            + "확인 질문은 하지 마세요. "
+            + "'새 보관 폴더'처럼 말하면 폴더 이름은 '새'와 '폴더'를 뺀 '보관'입니다.",
         schema: [
             "type": "object",
             "properties": ["path": ["type": "string"]],
