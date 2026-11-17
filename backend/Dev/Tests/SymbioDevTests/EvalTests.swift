@@ -156,6 +156,51 @@ func mainSeen(_ argv: [String], _ tasks: [JSON], status: String = "completed") a
         #expect(result["trace"]?.list.first?["said"] == "x입니다.")
     }
 
+    @Test func liveTrialRecordsTheSameInstructionHashInEveryThrowawayFolder() async {
+        let first = await Eval.runTrial(evalTask(), liveConfig(), [], liveModel: { _ in Answering() })
+        let second = await Eval.runTrial(evalTask([("request", "notes.txt 읽어줘")]), liveConfig(), [], liveModel: { _ in Answering() })
+        let hash = first["prompt_hash"]?.stringValue
+        #expect(hash?.count == 12 && first["prompt_hashes"]?.list.first?.stringValue == hash)
+        #expect(second["prompt_hash"]?.stringValue == hash)
+        // a lesson is part of the instructions, so it is a different version
+        let lesson = await Eval.runTrial(evalTask(), liveConfig(), ["항상 짧게 답하세요."], liveModel: { _ in Answering() })
+        #expect(lesson["prompt_hash"]?.stringValue != hash)
+    }
+
+    @Test func suiteRunsOnlyItsTasksAndRefusesAnUnknownOne() async throws {
+        setenv(HeavyLock.heldEnv, "1", 1)
+        let root = try project([evalTask([("id", "a")]), evalTask([("id", "b")]), evalTask([("id", "c")])])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("evals/suites"), withIntermediateDirectories: true)
+        func suite(_ ids: [String]) async throws -> (Int32, [String]) {
+            try writeJSON(["tasks": .array(ids.map { ["id": .string($0), "why": "x"] })],
+                          root.appendingPathComponent("evals/suites/s.json"))
+            let seen = Seen()
+            let code = await Eval.main(["--live", "--suite", "s", "--repeat", "2"], root: root, trial: { t, _, _ in
+                seen.add(t["id"]!.str)
+                return ["task": t["id"]!, "passed": true, "valid": true, "status": "completed", "prompt_hash": "abc"]
+            }, loadConfig: liveConfig)
+            return (code, seen.all)
+        }
+        #expect(try await suite(["a", "c"]) == (0, ["a", "c", "a", "c"]))
+        #expect(try await suite(["a", "zz"]) == (2, []))
+    }
+
+    @Test func promptRegressionSuiteNamesLiveTasksWithAReason() throws {
+        let data = try JSON.parse(Data(contentsOf: URL(fileURLWithPath: repoRoot + "/evals/suites/prompt-regression.json")))
+        let tasks = Dictionary(uniqueKeysWithValues: loadJSONFiles(URL(fileURLWithPath: repoRoot + "/evals/tasks"))
+            .map { ($0["id"]!.str, $0) })
+        let listed = data["tasks"]!.list
+        #expect((15...25).contains(listed.count))
+        for item in listed {
+            let t = try #require(tasks[item["id"]!.str])
+            #expect(t["negative"]?.truthy != true && t["status"]?.stringValue != "target" && (t["live"]?.truthy ?? true))
+            let why = item["why"]?.stringValue ?? ""
+            #expect(why.count > 3)
+        }
+        #expect(Set(listed.compactMap { tasks[$0["id"]!.str]?["axis"]?.stringValue }).count == 6)
+    }
+
     @Test func agesSetModificationTimeBeforeTheRun() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(atPath: root) }
@@ -189,7 +234,7 @@ func mainSeen(_ argv: [String], _ tasks: [JSON], status: String = "completed") a
         let done = try run([tool, "eval"], captureError: true, directory: root.path)
         let saved = try #require(done.output.split(separator: "\n").last { $0.hasPrefix("saved ") })
         let data = try JSON.parse(Data(contentsOf: root.appendingPathComponent(String(saved.dropFirst(6)))))
-        #expect(Set(data["versions"]?.keys ?? []) == ["commit", "dirty", "code_hash", "model", "lessons", "tasks"])
+        #expect(Set(data["versions"]?.keys ?? []) == ["commit", "dirty", "code_hash", "model", "lessons", "tasks", "prompt_hashes"])
         #expect(data["versions"]?["model"] == "scripted" && data["trials"]?.list.first?["task"] == "a")
     }
 }

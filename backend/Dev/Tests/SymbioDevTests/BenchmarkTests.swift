@@ -266,6 +266,12 @@ func resultFile(_ root: URL) -> URL { root.appendingPathComponent("evals/results
         }
     }
 
+    @Test func promptChangedNamesTasksWhoseInstructionsDiffer() {
+        let old: [JSON] = [["task": "a", "prompt_hash": "h1"], ["task": "b", "prompt_hash": "h1"], ["task": "c"]]
+        let new: [JSON] = [["task": "a", "prompt_hash": "h1"], ["task": "b", "prompt_hash": "h2"], ["task": "c", "prompt_hash": "h2"]]
+        #expect(Benchmark.promptChanged(new, old) == ["b"])
+    }
+
     @Test func compareIsSkippedWhenTheLadderChanged() throws {
         let root = try benchProject()
         defer { try? FileManager.default.removeItem(at: root) }

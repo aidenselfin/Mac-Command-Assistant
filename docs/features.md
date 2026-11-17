@@ -36,6 +36,8 @@
 | 화면 반영 검사(옛 빌드 경고, 창·칩 시나리오 재생) | ✅ | `symbio-dev ui-check status` / `run` | `Dev/UICheck.swift` `scripts/ui_scenarios/` `UITest.swift` | 재생 중 몇 초간 창이 뜬다 | `Dev/DevTests` | 시나리오 4개 | 2026-11-04 |
 | 수정 세션·worktree 도구 | ✅ | | `Dev/Vibe.swift`(`symbio-dev vibe`) | | `Dev/DevTests` | | 2026-10-14 병렬 수정 세션 |
 
+지침을 고친 뒤에는 `symbio-dev eval --live --suite prompt-regression --repeat 3`으로 고정 묶음(`evals/suites/prompt-regression.json`, 축마다 고른 20개)을 돌리고, 결과의 `prompt_hash`로 어느 지침 버전인지 구분한다.
+
 과제 이름은 `evals/tasks/*.json` 파일명이다. `status: "target"` 과제(`target_*`)는 아직 없는 능력의 목표이며 `--include-targets` 없이는 실행하지 않는다. `neg_*`와 `document_injection`은 "하면 안 되는 것"을 확인하는 부정 과제로 모든 기능에 공통이다.
 
 ## 기능 사이의 약속 (깨면 안 되는 것)

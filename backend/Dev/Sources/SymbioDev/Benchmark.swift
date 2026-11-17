@@ -140,6 +140,17 @@ public enum Benchmark {
         return staleTasks(tasks, recorded) + recorded.keys.filter { !current.contains($0) }
     }
 
+    /// Tasks run in both results whose instructions (eval's per-trial prompt_hash) differ.
+    static func promptChanged(_ new: [JSON], _ old: [JSON]) -> [String] {
+        func hashes(_ trials: [JSON]) -> [String: Set<String>] {
+            trials.reduce(into: [:]) { out, t in
+                if let hash = t["prompt_hash"]?.stringValue { out[t["task"]?.str ?? "", default: []].insert(hash) }
+            }
+        }
+        let now = hashes(new), before = hashes(old)
+        return now.keys.filter { before[$0] != nil && before[$0] != now[$0] }.sorted()
+    }
+
     static func jsonFiles(_ directory: URL) -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
             .filter { $0.hasSuffix(".json") }.sorted().map { directory.appendingPathComponent($0) }
@@ -316,6 +327,10 @@ public enum Benchmark {
             if earlier["versions"]?["model"]?.stringValue == "scripted" {
                 writeOutput("재생 결과는 비교할 수 없습니다.\n")
                 return 2
+            }
+            let changed = promptChanged(allTrials, earlier["trials"]?.list ?? [])
+            if !changed.isEmpty {
+                writeOutput("지침이 바뀐 과제 \(changed.count)개: \(changed.joined(separator: ", "))\n")
             }
             if !drifted(tasks, earlier["versions"]?["tasks"] ?? [:]).isEmpty || !stale.isEmpty {  // ladders no longer match
                 writeOutput("과제가 바뀌거나 지워져 점수 변화를 비교하지 않습니다.\n")
