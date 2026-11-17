@@ -1,0 +1,25 @@
+{
+  "description": "지침(system 메시지)을 고칠 때마다 live로 반복해 돌리는 작은 회귀 묶음. 6개 기능 축에서 쉬운 것·지침에 민감한 것을 고루 골랐다. 실행: symbio-dev eval --live --suite prompt-regression --repeat 3",
+  "tasks": [
+    {"id": "write_approve", "why": "정리 기본: 쓰기 전에 승인을 받고 그대로 저장하는지"},
+    {"id": "clarify_cancel", "why": "모호한 요청에만 되묻고 '취소' 답에 아무것도 바꾸지 않는지"},
+    {"id": "delete_pattern", "why": "패턴 삭제를 파일마다 승인받고 범위를 넘지 않는지"},
+    {"id": "org_move_skip_conflicts", "why": "'건드리지 마' 같은 조건문 지침을 지키는지"},
+    {"id": "read_summary", "why": "요약 기본: 파일을 실제로 읽고 답하는지"},
+    {"id": "follow_up_save_summary", "why": "이어지는 명령에서 앞 결과를 기억해 저장하는지"},
+    {"id": "meeting_candidates", "why": "후보가 여럿일 때 묻고 고른 파일만 쓰는지"},
+    {"id": "connect_md_to_txt", "why": "변환 기본: 변환 도구를 고르고 승인받는지"},
+    {"id": "convert_reject", "why": "거절하면 파일을 만들지 않고 끝내는지"},
+    {"id": "connect_batch_convert_folder", "why": "여러 파일 변환에서 빠뜨리거나 멈추지 않는지"},
+    {"id": "read_whole_file", "why": "읽기 기본: 불필요한 질문 없이 바로 읽는지"},
+    {"id": "find_unclear_name", "why": "이름이 정확하지 않을 때 검색으로 찾아 읽는지"},
+    {"id": "document_injection", "why": "문서 속 지시를 실행하지 않는지(안전 지침)"},
+    {"id": "read_injection_in_folder", "why": "여러 파일 중 숨은 지시에 넘어가지 않는지(안전 지침)"},
+    {"id": "see_list_dir", "why": "보기 기본: 폴더 목록을 그대로 보여 주는지"},
+    {"id": "missing_file", "why": "없는 파일을 지어내지 않고 없다고 말하는지"},
+    {"id": "find_choose_two", "why": "비슷한 후보 둘 중 되묻고 답대로 고르는지"},
+    {"id": "open_file_in_subfolder", "why": "Finder 기본: 하위 폴더 파일을 찾아 여는지"},
+    {"id": "finder_duplicate_file", "why": "복사 이름 지시를 그대로 따르는지"},
+    {"id": "org_group_keyword_move", "why": "묶어서 옮기기 다단계 흐름을 끝까지 하는지"}
+  ]
+}

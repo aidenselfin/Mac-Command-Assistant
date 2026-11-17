@@ -13,6 +13,7 @@ import SymbioUndo
 ///     symbio-dev eval                        # every task, scripted model turns
 ///     symbio-dev eval --live --repeat 3      # model from config (costs API calls)
 ///     symbio-dev eval --live --lesson "..."  # same, with one candidate lesson
+///     symbio-dev eval --live --suite prompt-regression --repeat 3  # evals/suites/<name>.json only
 ///
 /// Grading checks state and side effects only (files, approvals, outcome status, required tools
 /// run), not the quality of a summary. Negative "control" tasks validate the grader with
@@ -71,21 +72,33 @@ public enum Eval {
         }
     }
 
-    /// Counts calls and keeps why a live trial failed: what the app told the model, what it said.
+    /// Counts calls and keeps why a live trial failed: what the app told the model, what it said,
+    /// and which instructions (system messages) it was sent, as short hashes.
     final class Counting: ModelClient, @unchecked Sendable {  // fields are behind `lock`
         private let lock = NSLock()
         let inner: any ModelClient
+        let root: String
         private var count = 0
         private var kept: [JSON] = []
+        private var prompts: [String] = []  // distinct system-message hashes, first seen first
         var calls: Int { lock.withLock { count } }
         var trace: [JSON] { lock.withLock { kept } }
+        var promptHashes: [String] { lock.withLock { prompts } }
 
-        init(_ inner: any ModelClient) { self.inner = inner }
+        init(_ inner: any ModelClient, root: String = "/nonexistent-eval-root") {
+            self.inner = inner
+            self.root = root
+        }
 
         func generate(
             _ messages: [JSON], _ tools: [ToolDefinition], allowTools: Bool, allowClarification: Bool
         ) async throws -> ModelTurn {
-            lock.withLock { count += 1 }
+            let hashes = messages.filter { $0["role"]?.stringValue == "system" }
+                .map { Eval.promptHash($0["content"]?.stringValue ?? "", root: root) }
+            lock.withLock {
+                count += 1
+                for hash in hashes where !prompts.contains(hash) { prompts.append(hash) }
+            }
             let turn = try await inner.generate(messages, tools, allowTools: allowTools, allowClarification: allowClarification)
             lock.withLock {
                 guard kept.count < 12 else { return }
@@ -104,6 +117,14 @@ public enum Eval {
     static func defaultLiveModel(_ config: Config) -> any ModelClient {
         OpenAICompatibleModel(
             OpenAIClient(apiKey: config.apiKey, baseURL: config.baseURL, timeout: config.llmTimeoutSeconds), config.model)
+    }
+
+    /// The instruction version: sha256[:12] of a system message, with the trial's throwaway
+    /// folder (path and name) masked so the same instructions hash the same in every trial.
+    static func promptHash(_ content: String, root: String) -> String {
+        let masked = content.replacingOccurrences(of: root, with: "{root}")
+            .replacingOccurrences(of: (root as NSString).lastPathComponent, with: "{root}")
+        return String(sha(masked).prefix(12))
     }
 
     // MARK: grading helpers
@@ -313,7 +334,7 @@ public enum Eval {
             config.feedbackEnabled = false
             trialConfig = config
             scripted = nil
-            counting = Counting(liveModel(trialConfig))
+            counting = Counting(liveModel(trialConfig), root: root)
         } else {
             trialConfig = Config(provider: "openai", model: "scripted", apiKey: "unused", allowedDirectories: [rootURL])
             scripted = Scripted(task["script"]?.list ?? [], root: root)
@@ -413,7 +434,13 @@ public enum Eval {
             "seconds": .double(((ProcessInfo.processInfo.systemUptime - started) * 100).rounded() / 100),
             "reply": .string(String(text.unicodeScalars.prefix(200))),
         ]
-        if let counting { result.set("trace", .array(counting.trace)) }
+        if let counting {
+            result.set("trace", .array(counting.trace))
+            // first = the base instructions of the first call; the rest are nudges and follow-ups
+            let hashes = counting.promptHashes
+            result.set("prompt_hash", hashes.first.map { .string($0) } ?? .null)
+            result.set("prompt_hashes", .array(hashes.map { .string($0) }))
+        }
         return result
     }
 
@@ -434,7 +461,7 @@ public enum Eval {
         return files.sorted()
     }
 
-    static func versions(root: URL, model: String, lessons: [String], tasks: [JSON]) -> JSON {
+    static func versions(root: URL, model: String, lessons: [String], tasks: [JSON], trials: [JSON] = []) -> JSON {
         func git(_ args: String...) -> String {
             let done = try? run(["git", "-C", root.path] + args, captureError: true)
             return done?.output.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -448,6 +475,7 @@ public enum Eval {
             "model": .string(model),
             "lessons": .array(lessons.map { .string(String(sha($0).prefix(12))) }),
             "tasks": .object(tasks.map { ($0["id"]?.str ?? "", .string(taskDigest($0))) }),
+            "prompt_hashes": .array(Set(trials.compactMap { $0["prompt_hash"]?.stringValue }).sorted().map { .string($0) }),
         ]
     }
 
@@ -464,7 +492,7 @@ public enum Eval {
         let args: Arguments
         do { args = try Arguments(argv, switches: ["--live", "--include-targets"]) } catch {
             writeError("usage: symbio-dev eval [--task ID] [--live] [--repeat N] [--lesson TEXT] [--axis AXIS] "
-                + "[--include-targets] [--dir DIR]\n")
+                + "[--include-targets] [--dir DIR] [--suite NAME]\n")
             return 2
         }
         let live = args.switches.contains("--live")
@@ -476,7 +504,21 @@ public enum Eval {
             // real failures the feedback loop kept, verbatim
             tasks += loadJSONFiles(root.appendingPathComponent(".voice-action/failure-tasks"))
         }
-        let ids = args.all("--task")
+        var ids = args.all("--task")
+        if let suite = args.last("--suite") {  // a fixed set of tasks, e.g. rerun after every prompt change
+            let file = root.appendingPathComponent("evals/suites/\(suite).json")
+            guard let data = try? JSON.parse(Data(contentsOf: file)) else {
+                writeOutput("과제 묶음을 읽지 못했습니다: evals/suites/\(suite).json\n")
+                return 2
+            }
+            let listed = (data["tasks"]?.list ?? []).map { $0["id"]?.str ?? "" }
+            let missing = listed.filter { id in !tasks.contains { $0["id"]?.str == id } }
+            if !missing.isEmpty {
+                writeOutput("묶음에 없는 과제가 있습니다: \(missing.joined(separator: ", "))\n")
+                return 2
+            }
+            ids += listed
+        }
         if !ids.isEmpty { tasks = tasks.filter { ids.contains($0["id"]?.str ?? "") } }
         let axes = args.all("--axis")
         if !axes.isEmpty { tasks = tasks.filter { axes.contains($0["axis"]?.stringValue ?? "\u{0}") } }
@@ -526,7 +568,7 @@ public enum Eval {
             try FileManager.default.createDirectory(at: results, withIntermediateDirectories: true)
             let model = config?.model ?? "scripted"
             try writeJSON(
-                ["versions": versions(root: root, model: model, lessons: lessons, tasks: tasks), "trials": .array(trials)],
+                ["versions": versions(root: root, model: model, lessons: lessons, tasks: tasks, trials: trials), "trials": .array(trials)],
                 results.appendingPathComponent(name))
         } catch {
             writeError("결과를 저장하지 못했습니다: \(error)\n")

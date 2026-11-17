@@ -24,6 +24,7 @@ Symbio: 자연어 명령(글·음성)을 LLM(OpenRouter/Groq/OpenAI)이 고정�
 - 테스트: `swift test --package-path backend/<모듈>`(Swift Testing, 실제 LLM 키·네트워크 불필요). 빌드만: `swift build --package-path backend/<모듈>`
 - 평가: `symbio-dev eval`(재생) / `symbio-dev eval --live --repeat 3`(실제 모델, 유료). 화면 없이 `scripts/check.sh full`과 평가로 먼저 확인하고,
   화면을 봐야 할 때만 네이티브 앱을 쓴다.
+- 지침 회귀: 모델 지침을 고칠 때마다 `symbio-dev eval --live --suite prompt-regression --repeat 3`(과제 20개, `evals/suites/`). live 결과의 과제마다 `prompt_hash`(보낸 지침의 해시)가 남고, `symbio-dev benchmark --compare 이전결과`가 지침이 바뀐 과제를 알려 준다.
 - API 키는 `.voice-action/config.env`에만 둔다. `config.json`에 key 필드가 있으면 로딩이 거부된다.
 - `config.json`은 git에서 제외된다. 없으면 `cp config.example.json config.json`.
 
