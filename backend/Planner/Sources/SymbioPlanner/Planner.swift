@@ -351,13 +351,6 @@ let deleteBlock =
     + "지원하지 않는다고 답하세요. 승인 전에는 삭제 완료를 말하지 마세요. "
     + "여러 파일 삭제는 한 번의 local__delete_files 호출로 모으세요. "
 
-// 변환(local__convert_file이 노출될 때): 원본 유지·미지원 결과 전달. 과제: convert_approve,
-// convert_reject, convert_three_files, connect_md_to_pdf 등 connect_*.
-let convertBlock =
-    "파일 형식 변환은 local__convert_file로 하세요. 원본은 그대로 두고 "
-    + "새 파일을 만들며 승인 후 실행됩니다. 지원하지 않는 변환이라는 결과가 "
-    + "오면 사용자에게 그대로 알리세요. "
-
 // 검색·목록(허용 폴더가 있어 local__find_files·local__list_files가 노출될 때). 과제:
 // target_see_largest_file, target_see_size_ranked, target_read_latest_version, see_find_by_ext,
 // find_by_content, find_content_clue_narrows, find_choose_two, meeting_candidates,
