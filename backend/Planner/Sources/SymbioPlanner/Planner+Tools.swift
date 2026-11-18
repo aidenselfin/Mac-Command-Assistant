@@ -378,7 +378,7 @@ extension Planner {
             truthy(arguments[key]) ? (key, arguments[key]!) : nil
         })
         state.lastSearch = scalarPrefix(dumpsUnicode(kept), 500)
-        if let named = Self.namedCandidates(state, response) {
+        if let named = Self.namedCandidates(state, response, roots: config.allowedDirectories) {
             state.findOverride = named
             return nil
         }
@@ -436,14 +436,14 @@ extension Planner {
             return nil
         }
         if decision == "choose" && complete != .bool(false) && allMatchesPattern.search(state.userText)
-            && !actsWithoutReading(state.userText) && !state.readOnlyCandidateRequest
-            && !fileOperations.keys.contains(where: { operationRequested($0, state.userText) })
+            && !destructiveRequest(state.userText) && !openRequested(state.userText) && !state.readOnlyCandidateRequest
         {
-            // "memo 파일들을 읽고 요약해줘", "어느 폴더들에 있는지": every match is asked about.
+            // "memo 파일들을 읽고 요약해줘", "csv 파일을 전부 바꿔줘": every match is a target.
+            state.groupPaths = unique(state.groupPaths + candidatePaths)  // listed by the app: a move may use them
             state.findOverride = dumpsUnicode([
                 "decision": "all",
                 "note": .string(
-                    "사용자가 해당 파일 전부를 물었습니다. 고르거나 묻지 말고 아래 후보 전부를 다루세요. "
+                    "사용자가 해당 파일 전부를 말했습니다. 고르거나 묻지 말고 아래 후보 전부를 다루세요. "
                         + "위치·이름을 묻는 요청이면 후보마다 파일 이름까지 포함한 경로를 그대로 답에 적고, "
                         + "내용이 필요하면 각 파일을 읽으세요."),
                 "candidates": .array(candidates),
@@ -496,11 +496,14 @@ extension Planner {
 
     /// Several files, each named in full by the user, are the targets: there is nothing to
     /// choose. (Two files of one name in different folders still make the user choose.)
-    static func namedCandidates(_ state: LoopState, _ response: JSON) -> String? {
+    /// A file already in the named destination of a move or copy is not a source to choose.
+    static func namedCandidates(_ state: LoopState, _ response: JSON, roots: [URL] = []) -> String? {
         if response["decision"]?.stringValue != "choose" || response["complete"] == .bool(false) { return nil }
+        let destination = namedDestination(state.userText, roots)
         let paths = (response["candidates"]?.arrayValue ?? []).map { $0["path"]?.stringValue ?? "" }
+            .filter { destination == nil || pathParent($0) != destination }
         let names = paths.map(pathName)
-        if Set(names).count != names.count || !names.allSatisfy({ state.userText.contains($0) }) { return nil }
+        if paths.isEmpty || Set(names).count != names.count || !names.allSatisfy({ state.userText.contains($0) }) { return nil }
         return dumpsUnicode([
             "decision": "named",
             "note": "사용자가 이 파일들을 직접 지정했습니다. 묻지 말고 모두 처리하세요.",

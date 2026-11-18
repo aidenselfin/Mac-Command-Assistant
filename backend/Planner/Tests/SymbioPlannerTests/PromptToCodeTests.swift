@@ -148,3 +148,20 @@ private func delete(_ id: String, _ paths: [String]) -> ToolCall {
 @Test func aSearchWithOnlyABodyClueSearchesByIt() {
     #expect(normalizedFindArguments(["content_keywords": "환불"]) == ["keywords": ["환불"], "content_keywords": ["환불"]])
 }
+
+@Test func movingEveryMatchNeedsNoChoiceAndMayUseThem() async throws {
+    let config = try makeConfig()
+    for name in ["회의록_1월.txt", "회의록_2월.txt"] { try writeText("x", config.path(name)) }
+    let (planner, model) = try make(config, [find(["회의록"]), turn("옮김")])
+    _ = try? await planner.run("회의록 파일들 회의록 폴더로 옮겨줘")  // the model then stops without moving
+    #expect(parse(model.calls[1].lastContent)["decision"] == "all")
+}
+
+@Test func aSameNamedFileAlreadyInTheDestinationIsNotASourceToChoose() async throws {
+    let config = try makeConfig()
+    for name in ["a.txt", "b.txt", "보관/b.txt"] { try writeText("x", config.path(name)) }
+    let (planner, model) = try make(config, [find(["a.txt", "b.txt"]), turn("옮김")])
+    _ = try? await planner.run("a.txt, b.txt를 보관 폴더로 이동해줘")
+    let named = parse(model.calls[1].lastContent)
+    #expect(named["decision"] == "named" && named["paths"] == .array([.string(config.path("a.txt")), .string(config.path("b.txt"))]) || named["paths"] == .array([.string(config.path("b.txt")), .string(config.path("a.txt"))]))
+}
