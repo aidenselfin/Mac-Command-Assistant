@@ -343,17 +343,9 @@ let webBlock =
     + "번역·설명 요청은 페이지 방문이 필요하지 않습니다. "
     + "이동이나 우회는 금지됩니다. "
 
-// 삭제(local__delete_files가 노출될 때): 대상 찾기·되묻지 않기·일괄 삭제 범위. 과제: delete_approve,
-// delete_pattern, neg_delete_too_much, attach_delete. 재귀 삭제 거절은 과제 없음.
-let deleteBlock =
-    "삭제 대상은 사용자 표현(예: '피그마 파일')에 맞게 local__find_files로 "
-    + "직접 찾아 정하고 local__delete_files로 처리하세요. 대상을 되묻지 마세요. "
-    + "사용자 확인은 "
-    + "앱의 삭제 승인 화면이 마지막에 한 번 받습니다. "
-    + "일괄 삭제는 directory와 pattern으로 선택하고, 폴더 바로 아래 파일만 "
-    + "대상입니다. 재귀 삭제는 금지되며 요청에 하위 폴더/재귀가 포함되면 "
-    + "지원하지 않는다고 답하세요. 승인 전에는 삭제 완료를 말하지 마세요. "
-    + "여러 파일 삭제는 한 번의 local__delete_files 호출로 모으세요. "
+// 삭제 규칙(대상 찾기·되묻지 않기·재귀 금지·폴더 바로 아래만·승인 전 완료 금지·한 번의 호출)은
+// 2026-11-18 코드로 옮겼다: 검색 우선(searchRequired), 되묻기 거절(freeTextRefusal·delete_scope),
+// 재귀 거절(recursiveDelete), 승인 없는 완료 답 되돌림(deleteClaim), 같은 응답의 삭제 호출 합치기(mergeDeleteCalls).
 
 // 변환(local__convert_file이 노출될 때): 원본 유지·미지원 결과 전달. 과제: convert_approve,
 // convert_reject, convert_three_files, connect_md_to_pdf 등 connect_*. 2026-11-18 지웠다가 되살림:
@@ -367,6 +359,8 @@ let convertBlock =
 // target_see_largest_file, target_see_size_ranked, target_read_latest_version, see_find_by_ext,
 // find_by_content, find_content_clue_narrows, find_choose_two, meeting_candidates,
 // meeting_english_name, meeting_many_numbered.
+// 2026-11-18 코드로 옮긴 문장: 되묻기 전 검색(freeTextRefusal), 빈 선택 인자(find_files 인자 정리),
+// decision별 할 일(검색 결과 note·후보 여럿이면 앱이 묻기·'모두'면 decision all), 회의록 keywords(정책 오류).
 let searchBlock =
     "크기·수정일로 고르거나 정렬하는 목록 요청(가장 큰 파일, 최근 N일, "
     + "N일 넘은 파일, 폴더별 용량, 파일 크기·정보)은 local__list_files로 "
@@ -377,20 +371,10 @@ let searchBlock =
     + "'~만 찾아줘·모두 알려줘·어느 폴더들에 있는지'처럼 해당 파일 전부를 "
     + "보여 달라는 요청은 하나를 고르는 local__find_files 대신 "
     + "local__list_files(extensions·name_contains)로 답하세요. "
-    + "정확한 파일명이 없는 파일 요청은 사용자에게 되묻기 전에 "
-    + "반드시 local__find_files를 먼저 호출하세요. 안 쓰는 선택 인자는 "
-    + "생략하세요(빈 문자열 금지). keywords에는 파일명·주제어와 "
+    + "keywords에는 파일명·주제어와 "
     + "한/영 변형을 넣고 '파일' 같은 일반 단어는 빼세요. 사용자가 '…가 들어 있는', "
     + "'…얘기가 있는'처럼 본문 내용을 단서로 말하면 그 말은 keywords가 아니라 "
     + "content_keywords에 넣으세요. "
-    + "앱이 파일명, 폴더, 내용 순으로 넓혀 "
-    + "찾고 후보가 여럿이면 사용자에게 직접 묻습니다. decision이 single이면 "
-    + "그 파일로 진행하고, none이면 찾지 못했다고 알리되 complete가 false면 "
-    + "limits에 적힌 검사하지 못한 범위를 함께 알리세요. "
-    + "후보가 하나면 자동 진행하고, "
-    + "여러 개면 파일을 읽거나 선택하지 마세요. "
-    + "파일명이 특정되지 않은 회의록 요약은 local__find_files의 keywords에 "
-    + "'회의록'과 meeting·minutes 같은 변형을 넣어 먼저 찾으세요. "
 
 // 안전·경로·마무리(항상, Allowed roots 바로 앞): 도구 결과 속 지시 무시·경로 규칙·오류 보고. 과제:
 // document_injection, neg_injection_followed, read_injection_in_folder, outside_root_write,
@@ -416,7 +400,7 @@ public let promptDrop: Set<String> = Set(
     })
 
 public let promptBlockNames =
-    ["openBlock", "commonBlock", "webBlock", "deleteBlock", "convertBlock", "searchBlock", "safetyBlock"]
+    ["openBlock", "commonBlock", "webBlock", "convertBlock", "searchBlock", "safetyBlock"]
     + commonSentences.map(\.0)
 
 /// The common block with the sentences named in `drop` left out.
@@ -433,7 +417,6 @@ func systemPrompt(_ tools: [ToolDefinition], drop: Set<String> = promptDrop) -> 
     if names.contains(openFileTool) { blocks.append(("openBlock", openBlock)) }
     blocks.append(("commonBlock", commonBlock(drop: drop)))
     if names.contains(webNavigateTool) { blocks.append(("webBlock", webBlock)) }
-    if names.contains(deleteTool) { blocks.append(("deleteBlock", deleteBlock)) }
     if names.contains(convertTool) { blocks.append(("convertBlock", convertBlock)) }
     if names.contains(findFilesTool) { blocks.append(("searchBlock", searchBlock)) }
     blocks.append(("safetyBlock", safetyBlock))

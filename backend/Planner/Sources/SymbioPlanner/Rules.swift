@@ -171,7 +171,7 @@ func isConfirmation(_ text: String) -> Bool {
 }
 
 /// Why the app will not pass this typed question on, or nil when it may be asked.
-func freeTextRefusal(_ state: LoopState, _ question: String) -> String? {
+func freeTextRefusal(_ state: LoopState, _ question: String, roots: [URL] = []) -> String? {
     if confirmQuestion.search(question) || (softConfirm.search(question) && !openQuestion.search(question)) {
         return "clarification_error: 확인 질문은 필요 없습니다. 쓰기·삭제·변환은 앱이 승인 화면에서 "
             + "따로 받으니, 묻지 말고 해당 도구를 바로 호출하세요."
@@ -185,11 +185,58 @@ func freeTextRefusal(_ state: LoopState, _ question: String) -> String? {
     {
         return "clarification_error: 대상 파일을 모르면 사용자에게 묻기 전에 local__find_files로 먼저 찾으세요."
     }
+    if destructiveRequest(state.userText) && !state.seenPaths.isEmpty {
+        return "clarification_error: 삭제 대상은 묻지 말고 찾은 후보 중 요청에 맞는 파일을 직접 골라 "
+            + "local__delete_files를 호출하세요. 사용자 확인은 앱의 삭제 승인 화면이 받습니다."
+    }
+    if let folder = namedDestination(state.userText, roots), destinationQuestion.search(question) {
+        return "clarification_error: 목적지는 사용자가 말한 폴더입니다. 경로를 묻지 말고 \(folder)를 "
+            + "그대로 쓰세요(폴더가 없으면 local__create_directory로 먼저 만드세요)."
+    }
     if folderQuestion.search(question) && !folderExempt.search(state.userText) {
         return "clarification_error: 작업 폴더는 묻지 않습니다. 첫 번째 Allowed root를 기본 폴더로 "
             + "local__list_files나 local__find_files를 바로 호출하세요."
     }
     return nil
+}
+
+/// "보관 폴더로 옮겨줘", "새 보관 폴더를 만들어줘": the folder is named, so its path is not a question.
+private let namedFolder = Pattern(#"(?<name>[^\s/,]+)\s*폴더(?:로|에|를|안)"#)
+private let destinationQuestion = Pattern(#"어디|경로|위치|어느 폴더|절대"#)
+
+/// The absolute path of the folder a move, copy or mkdir request names, under the first root
+/// (or the root that already has it); nil when the request names none.
+func namedDestination(_ text: String, _ roots: [URL]) -> String? {
+    guard [moveTool, copyTool, mkdirTool].contains(where: { operationRequested($0, text) }),
+        let name = namedFolder.first(text)?["name"], let first = roots.first
+    else { return nil }
+    let existing = roots.map { $0.appendingPathComponent(name).path }.first {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: $0, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+    return existing ?? first.appendingPathComponent(name).path
+}
+
+/// "파일들", "모두 알려줘": every match is the answer, so there is nothing to choose.
+let allMatchesPattern = Pattern(#"(?:파일|폴더|문서|메모)들|모두|전부|모든|각각"#)
+
+/// Several delete calls in one reply become one approval: the first call takes every path.
+/// (The app ends a command when a delete is approved, so a second call would never run.)
+func mergeDeleteCalls(_ calls: [ToolCall]) -> [ToolCall] {
+    let deletes = calls.filter { $0.name == deleteTool }
+    guard deletes.count > 1 else { return calls }
+    var paths: [JSON] = []
+    for call in deletes {
+        guard let items = (try? JSON.parse(call.arguments))?["paths"]?.arrayValue,
+            items.allSatisfy({ $0.stringValue != nil })
+        else { return calls }  // a directory+pattern call is not merged
+        for item in items where !paths.contains(item) { paths.append(item) }
+    }
+    let arguments = JSON.object([("paths", .array(paths))]).dumps(JSONDumpOptions(ensureASCII: false))
+    let merged = ToolCall(deletes[0].id, deleteTool, arguments)
+    return calls.compactMap { call in
+        call.name != deleteTool ? call : call.id == merged.id ? merged : nil
+    }
 }
 
 let folderQuestion = Pattern(

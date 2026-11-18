@@ -51,6 +51,9 @@ extension Planner {
             // null means "not given". Dropping it here keeps every policy and schema below
             // looking at the arguments the model actually meant.
             var arguments = JSON.object(pairs.filter { !$0.1.isNull })
+            if call.name == findFilesTool {  // an unused optional argument sent as "" or [] means "not given"
+                arguments = JSON.object(arguments.objectValue?.filter { $0.1 != .string("") && $0.1 != .array([]) } ?? [])
+            }
             for key in ["path", "source"] {
                 if let value = arguments[key] { arguments.set(key, onDiskPath(value, config.allowedDirectories)) }
             }
@@ -416,6 +419,20 @@ extension Planner {
                     "크기·날짜로 하나를 고르는 요청입니다. 사용자에게 묻지 말고 "
                         + "local__list_files(paths에 아래 후보 경로)로 크기·수정 시각을 보고 "
                         + "조건에 맞는 후보 하나를 골라 진행하세요. 다른 파일은 고르지 마세요."),
+                "candidates": .array(candidates),
+            ])
+            return nil
+        }
+        if decision == "choose" && complete != .bool(false) && allMatchesPattern.search(state.userText)
+            && !actsWithoutReading(state.userText) && !state.readOnlyCandidateRequest
+            && !fileOperations.keys.contains(where: { operationRequested($0, state.userText) })
+        {
+            // "memo 파일들을 읽고 요약해줘", "어느 폴더들에 있는지": every match is asked about.
+            state.findOverride = dumpsUnicode([
+                "decision": "all",
+                "note": .string(
+                    "사용자가 해당 파일 전부를 물었습니다. 고르거나 묻지 말고 아래 후보 전부를 다루세요. "
+                        + "위치·이름을 묻는 요청이면 모든 경로를 답에 적고, 내용이 필요하면 각 파일을 읽으세요."),
                 "candidates": .array(candidates),
             ])
             return nil

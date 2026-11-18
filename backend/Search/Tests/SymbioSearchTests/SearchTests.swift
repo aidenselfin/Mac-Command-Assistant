@@ -79,8 +79,8 @@ func localStamp(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0, _ s:
         let response = find(t.url, ["예산"])
         #expect(response["stage"] == "content" && names(response) == ["memo.txt"])
         let none = find(t.url, ["존재하지않는단어"])
-        #expect(none == ["stage": "none", "decision": "none", "total": 0, "truncated": false, "complete": true])
-        #expect(none.text == #"{"stage": "none", "decision": "none", "total": 0, "truncated": false, "complete": true}"#)
+        #expect(none["decision"] == "none" && none["total"] == 0 && none["complete"] == true)
+        #expect(none["note"]!.stringValue!.contains("찾지 못했다고 사용자에게 알리세요"))  // what to do, not the prompt
     }
 
     @Test func contentSearchSkipsNonTextAndReadsOnlyTheHead() {
@@ -215,7 +215,7 @@ func localStamp(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0, _ s:
             #expect(response["decision"] == "none" && response["total"] == 0)
             #expect(response["note"]!.stringValue!.contains("조건") && response["filters_relaxed"] == nil)
         }
-        #expect(find(t.url, ["존재안함"])["note"] == nil)
+        #expect(find(t.url, ["존재안함"])["note"]!.stringValue!.contains("조건") == false)
     }
 
     @Test func emptyOptionalFieldsAndStrayKeysAreIgnored() {
@@ -333,7 +333,8 @@ func localStamp(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0, _ s:
         let t = Tmp()
         write(t.at("a.txt"), "예산 3천만원")
         let response = find(t.url, ["예산"])
-        #expect(response["decision"] == "single" && response["complete"] == true && response["note"] == nil)
+        #expect(response["decision"] == "single" && response["complete"] == true)
+        #expect(response["note"]!.stringValue!.contains("이 파일로 요청을 바로 진행"))
     }
 
     @Test func aHugeFolderIsNeverListedWhole() throws {
