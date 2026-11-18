@@ -315,7 +315,7 @@ func errorText(_ error: any Error) -> String {
 // description, open_file_in_subfolder failed 3/3 live (the model read the file instead).
 
 // 공통(항상): 문장마다 이름을 붙여 `SYMBIO_PROMPT_DROP=common.use_tools`처럼 하나씩 뺄 수 있다.
-// 2026-11-18 빼기 실험 뒤 intro·fileOperation·document·convert 블록과, 하나씩 빼도 묶음 점수가 잡음 범위였던
+// 2026-11-18 빼기 실험 뒤 intro·fileOperation·document 블록과, 하나씩 빼도 묶음 점수가 잡음 범위였던
 // 공통 문장 9개(이동 흉내 금지·결과 직접 쓰기·질문 기준 등)를 지웠다(docs/reviews/2026-11-18-prompt-ablation.md).
 // 남은 두 문장은 지어내기를 막는 규칙인데 live로 채점하는 과제가 없어 효과를 재지 못해 남겼다.
 let commonSentences: [(String, String)] = [
@@ -350,6 +350,14 @@ let deleteBlock =
     + "대상입니다. 재귀 삭제는 금지되며 요청에 하위 폴더/재귀가 포함되면 "
     + "지원하지 않는다고 답하세요. 승인 전에는 삭제 완료를 말하지 마세요. "
     + "여러 파일 삭제는 한 번의 local__delete_files 호출로 모으세요. "
+
+// 변환(local__convert_file이 노출될 때): 원본 유지·미지원 결과 전달. 과제: convert_approve,
+// convert_reject, convert_three_files, connect_md_to_pdf 등 connect_*. 2026-11-18 지웠다가 되살림:
+// 빼면 connect_md_to_txt가 변환 도구 대신 읽고 써서 흉내 냈다(4/14, 있으면 8/8).
+let convertBlock =
+    "파일 형식 변환은 local__convert_file로 하세요. 원본은 그대로 두고 "
+    + "새 파일을 만들며 승인 후 실행됩니다. 지원하지 않는 변환이라는 결과가 "
+    + "오면 사용자에게 그대로 알리세요. "
 
 // 검색·목록(허용 폴더가 있어 local__find_files·local__list_files가 노출될 때). 과제:
 // target_see_largest_file, target_see_size_ranked, target_read_latest_version, see_find_by_ext,
@@ -404,7 +412,7 @@ public let promptDrop: Set<String> = Set(
     })
 
 public let promptBlockNames =
-    ["openBlock", "commonBlock", "webBlock", "deleteBlock", "searchBlock", "safetyBlock"]
+    ["openBlock", "commonBlock", "webBlock", "deleteBlock", "convertBlock", "searchBlock", "safetyBlock"]
     + commonSentences.map(\.0)
 
 /// The common block with the sentences named in `drop` left out.
@@ -422,6 +430,7 @@ func systemPrompt(_ tools: [ToolDefinition], drop: Set<String> = promptDrop) -> 
     blocks.append(("commonBlock", commonBlock(drop: drop)))
     if names.contains(webNavigateTool) { blocks.append(("webBlock", webBlock)) }
     if names.contains(deleteTool) { blocks.append(("deleteBlock", deleteBlock)) }
+    if names.contains(convertTool) { blocks.append(("convertBlock", convertBlock)) }
     if names.contains(findFilesTool) { blocks.append(("searchBlock", searchBlock)) }
     blocks.append(("safetyBlock", safetyBlock))
     return blocks.filter { !drop.contains($0.0) }.map(\.1).joined()
