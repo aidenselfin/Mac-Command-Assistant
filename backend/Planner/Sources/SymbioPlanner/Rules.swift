@@ -221,10 +221,15 @@ func namedDestination(_ text: String, _ roots: [URL]) -> String? {
 let contentClue = Pattern(#"(?<clue>[^\s]+(?:\s+[^\s]+)?)\s*(?:얘기|이야기|내용|말)(?:이|가)?\s*(?:적힌|들어\s*있는|들어간|있는|나오는)"#)
 
 /// find_files arguments as the schema wants them: an unused optional argument sent as "" or []
-/// means "not given", and one word sent for a list (`"content_keywords": "환불"`) is a list of one.
+/// means "not given", a missing keywords falls back to content_keywords, and one word sent for a list (`"content_keywords": "환불"`) is a list of one.
 func normalizedFindArguments(_ arguments: JSON) -> JSON {
     let lists: Set<String> = ["keywords", "extensions", "content_keywords"]
-    return JSON.object((arguments.objectValue ?? []).compactMap { key, value in
+    var pairs = arguments.objectValue ?? []
+    // Only the body clue given ("content_keywords": ["환불"]): search by it, the app widens to content.
+    if !pairs.contains(where: { $0.0 == "keywords" }), let clue = pairs.first(where: { $0.0 == "content_keywords" }) {
+        pairs.insert(("keywords", clue.1), at: 0)
+    }
+    return JSON.object(pairs.compactMap { key, value in
         var value = value
         if lists.contains(key), let word = value.stringValue { value = .array([.string(word)]) }
         if let items = value.arrayValue { value = .array(items.filter { $0 != .string("") }) }

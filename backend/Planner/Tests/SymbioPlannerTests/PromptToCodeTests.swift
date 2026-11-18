@@ -144,3 +144,7 @@ private func delete(_ id: String, _ paths: [String]) -> ToolCall {
     ])
     #expect(fixed == ["keywords": ["메모"], "content_keywords": ["환불"], "modified_after": .null])
 }
+
+@Test func aSearchWithOnlyABodyClueSearchesByIt() {
+    #expect(normalizedFindArguments(["content_keywords": "환불"]) == ["keywords": ["환불"], "content_keywords": ["환불"]])
+}
