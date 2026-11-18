@@ -137,3 +137,10 @@ private func delete(_ id: String, _ paths: [String]) -> ToolCall {
     _ = try await planner.run("메모 중에 환불 얘기가 있는 파일을 모두 알려줘")
     #expect(parse(model.calls[1].lastContent)["decision"] == "all")
 }
+
+@Test func findArgumentsSentInTheWrongShapeAreFixedNotRefused() {
+    let fixed = normalizedFindArguments([
+        "keywords": "메모", "content_keywords": ["환불", ""], "extensions": "", "folder_hint": "", "modified_after": .null,
+    ])
+    #expect(fixed == ["keywords": ["메모"], "content_keywords": ["환불"], "modified_after": .null])
+}

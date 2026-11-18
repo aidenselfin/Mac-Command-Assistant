@@ -220,6 +220,18 @@ func namedDestination(_ text: String, _ roots: [URL]) -> String? {
 /// "분기 예산 얘기가 적힌", "예산 승인 얘기가 들어 있는": words the file's text should contain.
 let contentClue = Pattern(#"(?<clue>[^\s]+(?:\s+[^\s]+)?)\s*(?:얘기|이야기|내용|말)(?:이|가)?\s*(?:적힌|들어\s*있는|들어간|있는|나오는)"#)
 
+/// find_files arguments as the schema wants them: an unused optional argument sent as "" or []
+/// means "not given", and one word sent for a list (`"content_keywords": "환불"`) is a list of one.
+func normalizedFindArguments(_ arguments: JSON) -> JSON {
+    let lists: Set<String> = ["keywords", "extensions", "content_keywords"]
+    return JSON.object((arguments.objectValue ?? []).compactMap { key, value in
+        var value = value
+        if lists.contains(key), let word = value.stringValue { value = .array([.string(word)]) }
+        if let items = value.arrayValue { value = .array(items.filter { $0 != .string("") }) }
+        return value == .string("") || value == .array([]) ? nil : (key, value)
+    })
+}
+
 /// "파일들", "모두 알려줘": every match is the answer, so there is nothing to choose.
 let allMatchesPattern = Pattern(#"(?:파일|폴더|문서|메모)들|모두|전부|모든|각각"#)
 

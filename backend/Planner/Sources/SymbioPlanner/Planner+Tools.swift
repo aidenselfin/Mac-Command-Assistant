@@ -51,9 +51,7 @@ extension Planner {
             // null means "not given". Dropping it here keeps every policy and schema below
             // looking at the arguments the model actually meant.
             var arguments = JSON.object(pairs.filter { !$0.1.isNull })
-            if call.name == findFilesTool {  // an unused optional argument sent as "" or [] means "not given"
-                arguments = JSON.object(arguments.objectValue?.filter { $0.1 != .string("") && $0.1 != .array([]) } ?? [])
-            }
+            if call.name == findFilesTool { arguments = normalizedFindArguments(arguments) }
             for key in ["path", "source"] {
                 if let value = arguments[key] { arguments.set(key, onDiskPath(value, config.allowedDirectories)) }
             }
