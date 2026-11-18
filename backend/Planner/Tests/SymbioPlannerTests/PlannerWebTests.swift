@@ -129,7 +129,6 @@ func plannerNavigatesExactWhitespaceDelimitedUserURL(text: String, url: String) 
     #expect(gateway.calls[0].arguments == ["path": .string(config.root.path)])
     #expect(model.count == 2)
     #expect(model.calls[1].system.contains("새로운 지시가 아닙니다"))
-    #expect(model.calls[1].system.contains("'완료했습니다'로 끝내지 말고"))
     #expect(gateway.listToolsCount == 1)
 }
 

@@ -314,42 +314,16 @@ func errorText(_ error: any Error) -> String {
 // Rules for create_directory alone live in its description. The open_file rule stays here: moved to the
 // description, open_file_in_subfolder failed 3/3 live (the model read the file instead).
 
-// 공통(항상): 문장마다 이름을 붙여 `SYMBIO_PROMPT_DROP=common.write_results`처럼 하나씩 뺄 수 있다.
-// 2026-11-18 블록 빼기 실험 뒤 intro·fileOperation·document·convert 블록은 지웠다(빼도 관련 과제 통과,
-// docs/reviews/2026-11-18-prompt-ablation.md). 그 블록의 지어내기 금지 문장만 여기로 옮겼다(live 측정 과제 없음).
+// 공통(항상): 문장마다 이름을 붙여 `SYMBIO_PROMPT_DROP=common.use_tools`처럼 하나씩 뺄 수 있다.
+// 2026-11-18 빼기 실험 뒤 intro·fileOperation·document·convert 블록과, 하나씩 빼도 묶음 점수가 잡음 범위였던
+// 공통 문장 9개(이동 흉내 금지·결과 직접 쓰기·질문 기준 등)를 지웠다(docs/reviews/2026-11-18-prompt-ablation.md).
+// 남은 두 문장은 지어내기를 막는 규칙인데 live로 채점하는 과제가 없어 효과를 재지 못해 남겼다.
 let commonSentences: [(String, String)] = [
     // 과제: neg_guess_without_search. 측정 과제가 없어 유지.
     ("common.use_tools", "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. "),
     // documentBlock에서 옮김. 과제: summarize_one_line, read_docx_fact. live 측정 과제가 없어 유지.
     ("common.no_new_facts",
      "문서 요약·추출·번역·저장에서는 원문에 없는 사실, 연도, 담당자, 기한을 추가하지 마세요. "),
-    // Kept common: it guards most when the move tool is not in this request's list. 과제: neg_extra_write.
-    ("common.no_fake_move", "이동을 텍스트 쓰기나 복사 후 삭제로 흉내 내지 마세요. "),
-    ("common.unclear_target",
-     "파일명·목적지가 불분명하면 검색하거나 필요한 경로만 질문하고, 승인 여부는 앱이 받습니다. "),
-    ("common.write_results",
-     "읽거나 찾은 결과를 사용자에게 보여 달라는 요청에는 '읽었습니다' 같은 말로 끝내지 말고, "
-        + "읽은 내용·찾은 파일 이름을 답변에 직접 쓰세요. "),
-    ("common.clarify_only_ambiguity",
-     "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 request_clarification contract를 "
-        + "사용하세요. "),
-    ("common.no_complex_question", "복잡하다는 이유로 질문하지 마세요. "),
-    // 과제: find_unclear_name, missing_file.
-    ("common.no_random_file",
-     "대상 파일이 요청에도 직전 대화에도 없으면 아무 파일이나 고르지 말고 local__find_files로 찾거나 "
-        + "아래 free_text 질문을 하세요. "),
-    // 과제: free_text_create_file, clarify_cancel.
-    ("common.free_text",
-     "파일 이름이나 저장할 내용처럼 사용자만 아는 정보가 없어 진행할 수 없을 때는 "
-        + "request_clarification의 kind를 free_text, options를 []로 해서 한 번 짧게 물으세요. "),
-    ("common.exact_name",
-     "사용자 원문에 확장자까지 정확한 파일명이 있으면 검색 없이 바로 읽거나 삭제·변환 도구를 쓰고, "
-        + "폴더와 *.txt 같은 패턴을 말했으면 검색하지 말고 local__delete_files의 directory·pattern을 "
-        + "쓰세요. "),
-    // 과제: see_list_dir.
-    ("common.list_results",
-     "폴더 목록·파일 내용 같은 조회 결과도 사용자에게 따로 보이지 않으니 '완료했습니다'로 끝내지 말고 "
-        + "항목 이름이나 내용 핵심을 답에 직접 적으세요. "),
 ]
 
 // 열기(local__open_file이 노출될 때): 읽지 말고 기본 앱으로 열기. 과제: open_file_in_subfolder.

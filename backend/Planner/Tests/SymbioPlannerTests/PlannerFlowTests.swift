@@ -439,8 +439,8 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     #expect(promptDrop.isEmpty && systemPrompt(tools) == full)  // the app (switch unset) keeps every block
     let dropped = systemPrompt(tools, drop: ["deleteBlock"])
     #expect(!dropped.contains(deleteBlock) && dropped.contains(commonBlock()))
-    let oneSentence = systemPrompt(tools, drop: ["common.free_text"])
-    #expect(oneSentence == full.replacingOccurrences(of: commonSentences[8].1, with: ""))
+    let oneSentence = systemPrompt(tools, drop: ["common.no_new_facts"])
+    #expect(oneSentence == full.replacingOccurrences(of: commonSentences[1].1, with: ""))
     #expect(dropped.count == full.count - deleteBlock.count)
 }
 
