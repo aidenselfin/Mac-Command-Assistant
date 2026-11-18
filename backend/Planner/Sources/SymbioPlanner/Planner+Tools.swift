@@ -255,7 +255,7 @@ extension Planner {
                 }
             }
             if requested.map({ pyPath($0.path) != pyPath(candidate) }) ?? true {
-                return "검증된 단일 후보 파일만 읽거나 열 수 있습니다."
+                return "검증된 단일 후보 파일만 읽거나 열 수 있습니다. 이 경로를 그대로 쓰세요: \(candidate)"
             }
         }
         return nil
@@ -385,6 +385,19 @@ extension Planner {
             return nil
         }
         let complete = response["complete"]
+        if (decision == "choose" || decision == "narrow") && !state.contentRetried
+            && !truthy(arguments["content_keywords"]), let clue = contentClue.first(state.userText)?["clue"]
+        {
+            // "분기 예산 얘기가 적힌 메모": the clue narrows by content, so search again before asking.
+            state.contentRetried = true
+            state.findOverride = dumpsUnicode([
+                "decision": "retry_with_content",
+                "note": .string(
+                    "사용자가 본문 내용을 단서로 말했습니다('\(clue)'). 묻지 말고 그 말을 content_keywords에 "
+                        + "넣어 local__find_files를 다시 호출하세요."),
+            ])
+            return nil
+        }
         if isPatternDelete(state.userText) && (decision == "choose" || decision == "narrow") {
             // "*.txt 파일을 모두 삭제"는 고를 파일이 아니라 폴더와 패턴으로 정하는 요청이다.
             state.findOverride = dumpsUnicode([
@@ -432,7 +445,8 @@ extension Planner {
                 "decision": "all",
                 "note": .string(
                     "사용자가 해당 파일 전부를 물었습니다. 고르거나 묻지 말고 아래 후보 전부를 다루세요. "
-                        + "위치·이름을 묻는 요청이면 모든 경로를 답에 적고, 내용이 필요하면 각 파일을 읽으세요."),
+                        + "위치·이름을 묻는 요청이면 후보마다 파일 이름까지 포함한 경로를 그대로 답에 적고, "
+                        + "내용이 필요하면 각 파일을 읽으세요."),
                 "candidates": .array(candidates),
             ])
             return nil

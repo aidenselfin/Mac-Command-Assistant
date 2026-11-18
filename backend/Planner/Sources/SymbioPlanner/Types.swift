@@ -341,6 +341,7 @@ final class LoopState {
     var findTried: Bool  // local__find_files has run in this command
     var findNone: Bool  // ...and found nothing
     var findOverride: String?  // what the model is told about the last search instead
+    var contentRetried = false  // a content clue left out of find_files was pointed out once
     var rankedCandidates: [String]  // one of these must be read before answering
     var knownTarget: Bool  // an attached file or the previous command's files
     /// Recovery: how often each (tool, arguments, result) came back, fixes that failed, and

@@ -102,3 +102,30 @@ private func delete(_ id: String, _ paths: [String]) -> ToolCall {
     _ = try await none.run("없는이름 어디 있어?")
     #expect(parse(noneModel.calls[1].lastContent)["note"]?.stringValue?.contains("찾지 못했다고") == true)
 }
+
+@Test func aContentClueLeftOutOfTheSearchIsPointedOutOnceBeforeAsking() async throws {
+    let config = try makeConfig()
+    try writeText("점심", config.path("memo1.txt"))
+    try writeText("분기 예산 확정", config.path("memo2.txt"))
+    let again = find(["memo"], [("content_keywords", ["분기 예산"])])
+    let (planner, model) = try make(config, [find(["memo"]), again, turn("읽음")])
+    _ = try await planner.run("분기 예산 얘기가 적힌 메모를 읽어줘")
+    let retry = parse(model.calls[1].lastContent)
+    #expect(retry["decision"] == "retry_with_content" && retry["note"]?.stringValue?.contains("'분기 예산'") == true)
+    #expect(parse(model.calls[2].lastContent)["decision"] == "single")
+    // Only once: a second plain search goes on to the user's choice.
+    let (twice, _) = try make(config, [find(["memo"]), find(["memo"])])
+    #expect(try await twice.run("분기 예산 얘기가 적힌 메모를 읽어줘").clarification?.context.kind == "file_candidate")
+}
+
+@Test func readingAnotherFileThanTheChosenOneIsToldTheChosenPath() async throws {
+    let config = try makeConfig()
+    for name in ["회의록-1.md", "회의록-2.md"] { try writeText("x", config.path(name)) }
+    let (planner, _) = try make(config, [find(["회의록"])])
+    let question = try #require(try await planner.run("회의록 요약해줘").clarification)
+    let chosen = question.options[0]
+    let wrong = turn(nil, callJSON("r", "filesystem__read_text_file", ["path": .string(config.path("회의록.md"))]))
+    let (second, model) = try make(config, [wrong, turn(nil, callJSON("r2", "filesystem__read_text_file", ["path": .string(chosen)])), turn("요약")])
+    _ = try await second.resume(question.context, chosen)
+    #expect(model.calls[1].lastContent.contains("이 경로를 그대로 쓰세요: \(chosen)"))
+}

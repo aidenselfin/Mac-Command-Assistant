@@ -217,6 +217,9 @@ func namedDestination(_ text: String, _ roots: [URL]) -> String? {
     return existing ?? first.appendingPathComponent(name).path
 }
 
+/// "분기 예산 얘기가 적힌", "예산 승인 얘기가 들어 있는": words the file's text should contain.
+let contentClue = Pattern(#"(?<clue>[^\s]+(?:\s+[^\s]+)?)\s*(?:얘기|이야기|내용|말)(?:이|가)?\s*(?:적힌|들어\s*있는|들어간|있는|나오는)"#)
+
 /// "파일들", "모두 알려줘": every match is the answer, so there is nothing to choose.
 let allMatchesPattern = Pattern(#"(?:파일|폴더|문서|메모)들|모두|전부|모든|각각"#)
 
