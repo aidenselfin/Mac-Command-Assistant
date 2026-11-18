@@ -426,10 +426,10 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     _ = try await makePlanner(config, FakeGateway(), model).run("안녕")
     let system = model.calls[0].system
     #expect(system.hasPrefix(commonBlock()) && system.contains(searchBlock))
-    for block in [deleteBlock, convertBlock] { #expect(!system.contains(block)) }
+    #expect(!system.contains(convertBlock))
     _ = try await makePlanner(config, FakeGateway(), model).run("보고서.txt를 pdf로 변환하고 메모.txt는 삭제해줘")
     let both = try #require(model.calls.last).system
-    #expect(both.contains(convertBlock) && both.contains(deleteBlock))
+    #expect(both.contains(convertBlock))
 }
 
 @Test func promptDropLeavesOutOnlyTheNamedBlock() async throws {
@@ -438,11 +438,11 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     let tools = model.calls[0].tools
     let full = systemPrompt(tools, drop: [])
     #expect(promptDrop.isEmpty && systemPrompt(tools) == full)  // the app (switch unset) keeps every block
-    let dropped = systemPrompt(tools, drop: ["deleteBlock"])
-    #expect(!dropped.contains(deleteBlock) && dropped.contains(convertBlock))
+    let dropped = systemPrompt(tools, drop: ["convertBlock"])
+    #expect(!dropped.contains(convertBlock) && dropped.contains(searchBlock))
     let oneSentence = systemPrompt(tools, drop: ["common.no_new_facts"])
     #expect(oneSentence == full.replacingOccurrences(of: commonSentences[1].1, with: ""))
-    #expect(dropped.count == full.count - deleteBlock.count)
+    #expect(dropped.count == full.count - convertBlock.count)
 }
 
 @Test func systemPromptEndsWithResolutionMemoryAndRoots() async throws {

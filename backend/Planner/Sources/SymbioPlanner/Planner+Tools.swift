@@ -51,6 +51,7 @@ extension Planner {
             // null means "not given". Dropping it here keeps every policy and schema below
             // looking at the arguments the model actually meant.
             var arguments = JSON.object(pairs.filter { !$0.1.isNull })
+            if call.name == findFilesTool { arguments = normalizedFindArguments(arguments) }
             for key in ["path", "source"] {
                 if let value = arguments[key] { arguments.set(key, onDiskPath(value, config.allowedDirectories)) }
             }
@@ -252,7 +253,7 @@ extension Planner {
                 }
             }
             if requested.map({ pyPath($0.path) != pyPath(candidate) }) ?? true {
-                return "검증된 단일 후보 파일만 읽거나 열 수 있습니다."
+                return "검증된 단일 후보 파일만 읽거나 열 수 있습니다. 이 경로를 그대로 쓰세요: \(candidate)"
             }
         }
         return nil
@@ -377,11 +378,25 @@ extension Planner {
             truthy(arguments[key]) ? (key, arguments[key]!) : nil
         })
         state.lastSearch = scalarPrefix(dumpsUnicode(kept), 500)
-        if let named = Self.namedCandidates(state, response) {
+        if let named = Self.namedCandidates(state, response, roots: config.allowedDirectories) {
             state.findOverride = named
             return nil
         }
         let complete = response["complete"]
+        if (decision == "choose" || decision == "narrow") && !state.contentRetried
+            && !allMatchesPattern.search(state.userText)  // "…있는 파일을 모두": every match is read anyway
+            && !truthy(arguments["content_keywords"]), let clue = contentClue.first(state.userText)?["clue"]
+        {
+            // "분기 예산 얘기가 적힌 메모": the clue narrows by content, so search again before asking.
+            state.contentRetried = true
+            state.findOverride = dumpsUnicode([
+                "decision": "retry_with_content",
+                "note": .string(
+                    "사용자가 본문 내용을 단서로 말했습니다('\(clue)'). 묻지 말고 그 말을 content_keywords에 "
+                        + "넣어 local__find_files를 다시 호출하세요."),
+            ])
+            return nil
+        }
         if isPatternDelete(state.userText) && (decision == "choose" || decision == "narrow") {
             // "*.txt 파일을 모두 삭제"는 고를 파일이 아니라 폴더와 패턴으로 정하는 요청이다.
             state.findOverride = dumpsUnicode([
@@ -416,6 +431,21 @@ extension Planner {
                     "크기·날짜로 하나를 고르는 요청입니다. 사용자에게 묻지 말고 "
                         + "local__list_files(paths에 아래 후보 경로)로 크기·수정 시각을 보고 "
                         + "조건에 맞는 후보 하나를 골라 진행하세요. 다른 파일은 고르지 마세요."),
+                "candidates": .array(candidates),
+            ])
+            return nil
+        }
+        if decision == "choose" && complete != .bool(false) && allMatchesPattern.search(state.userText)
+            && !destructiveRequest(state.userText) && !openRequested(state.userText) && !state.readOnlyCandidateRequest
+        {
+            // "memo 파일들을 읽고 요약해줘", "csv 파일을 전부 바꿔줘": every match is a target.
+            state.groupPaths = unique(state.groupPaths + candidatePaths)  // listed by the app: a move may use them
+            state.findOverride = dumpsUnicode([
+                "decision": "all",
+                "note": .string(
+                    "사용자가 해당 파일 전부를 말했습니다. 고르거나 묻지 말고 아래 후보 전부를 다루세요. "
+                        + "위치·이름을 묻는 요청이면 후보마다 파일 이름까지 포함한 경로를 그대로 답에 적고, "
+                        + "내용이 필요하면 각 파일을 읽으세요."),
                 "candidates": .array(candidates),
             ])
             return nil
@@ -466,11 +496,14 @@ extension Planner {
 
     /// Several files, each named in full by the user, are the targets: there is nothing to
     /// choose. (Two files of one name in different folders still make the user choose.)
-    static func namedCandidates(_ state: LoopState, _ response: JSON) -> String? {
+    /// A file already in the named destination of a move or copy is not a source to choose.
+    static func namedCandidates(_ state: LoopState, _ response: JSON, roots: [URL] = []) -> String? {
         if response["decision"]?.stringValue != "choose" || response["complete"] == .bool(false) { return nil }
+        let destination = namedDestination(state.userText, roots)
         let paths = (response["candidates"]?.arrayValue ?? []).map { $0["path"]?.stringValue ?? "" }
+            .filter { destination == nil || pathParent($0) != destination }
         let names = paths.map(pathName)
-        if Set(names).count != names.count || !names.allSatisfy({ state.userText.contains($0) }) { return nil }
+        if paths.isEmpty || Set(names).count != names.count || !names.allSatisfy({ state.userText.contains($0) }) { return nil }
         return dumpsUnicode([
             "decision": "named",
             "note": "사용자가 이 파일들을 직접 지정했습니다. 묻지 말고 모두 처리하세요.",

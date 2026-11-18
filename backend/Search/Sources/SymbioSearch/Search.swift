@@ -667,6 +667,11 @@ public func findFiles(_ arguments: JSON, roots: [URL], limits: SearchLimits = Se
                 + "그대로 알리세요. 사용자가 말하지 않은 추측 조건이면 빼고 다시 호출하세요."
         )
     }
+    if decision == "single" {
+        notes.append("후보가 하나입니다. 사용자에게 묻지 말고 이 파일로 요청을 바로 진행하세요.")
+    } else if decision == "none" && reasons.isEmpty && !filtered {
+        notes.append("일치하는 파일이 없습니다. 다른 이름·한/영 변형으로 다시 찾거나, 찾지 못했다고 사용자에게 알리세요.")
+    }
     if !notes.isEmpty { response.set("note", .string(notes.joined(separator: " "))) }
     if decision == "single" || decision == "choose" {
         response.set("candidates", .array(ranked.map { ["path": .string($0.path), "label": .string(describe($0))] }))

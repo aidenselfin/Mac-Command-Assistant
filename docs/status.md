@@ -29,9 +29,9 @@
 0. 실행 중 복구 루프(브랜치 `claude/recovery-loop`, 병합 전): 재생·테스트만 확인. 실제 모델로 R2·R3가 줄었는지,
    `escalation_model`을 켠 비용은 live 평가로 아직 재지 않았다. 끝부분 정책 오류(후보 미확인 등)는 여전히 바로 끝난다.
 1. 읽기 축: `read_whole_file`(5단계) 같은 긴 읽기가 약하다. 파인더 축은 파일 열기 도구 추가 뒤 다시 재야 한다.
-2. 이동 과제 되묻기: "…를 보관 폴더로 옮겨줘"에서 모델이 폴더 절대 경로를 되물어 `move_*`·`create_directory_undo`가 INVALID.
-3. 후보 여럿 되묻기: `find_files` 후보가 여럿이면 앱이 고르라고 되물어
-   `see_same_name_many_places`·`read_injection_in_folder`·`read_scan_folder_for_term`이 INVALID.
+2. 한글 파일명 깨짐: 모델이 경로를 자모가 깨진 이름(`회ᄋㅐ록_2월.txt`)으로 적어 `org_group_keyword_move`가 0/6.
+   이동 목적지·후보 여럿 되묻기는 2026-11-18 코드로 막았다(`reviews/2026-11-18-prompt-ablation.md` "코드로 옮긴 뒤").
+3. (비움)
 4. 사람 확인: 위 "네이티브 앱" 항목.
 5. Swift 전환 뒤 실제 앱 화면·live 평가로 Python 때와 같은지 사람 확인이 아직 없다.
 6. 보류: [Claude Code 조사·개선 설계](reviews/2026-10-07-claude-code-research.md) 구현, 한/영 대체어·pdf/docx 본문 검색,

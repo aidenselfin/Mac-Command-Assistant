@@ -7,6 +7,7 @@ import SymbioGuard
 
 /// Python `Planner._continue` and the recovery / progress checks around it.
 
+private let deleteClaim = Pattern(#"삭제(?:했|하였|되었|됐)|삭제(?:를)?\s*완료(?!하지|되지|\s*못)|지웠"#)
 private let unsupportedClaim = Pattern(#"(?:도구|기능|지원)[^\n]{0,120}(?:없|않|불가)"#)
 
 func nowNs() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
@@ -106,7 +107,7 @@ extension Planner {
             }
 
             if let request = turn.clarification {
-                let typedRefusal = request.kind == "free_text" ? freeTextRefusal(state, request.question) : nil
+                let typedRefusal = request.kind == "free_text" ? freeTextRefusal(state, request.question, roots: config.allowedDirectories) : nil
                 if typedRefusal != nil
                     || (request.kind != "free_text"
                         && (request.kind != "edit_criteria" || !ambiguousMutation(state.userText)))
@@ -168,7 +169,7 @@ extension Planner {
                     ]
                 }),
             ])
-            state.toolCalls = turn.toolCalls
+            state.toolCalls = mergeDeleteCalls(turn.toolCalls)
             state.nextCallIndex = 0
         }
     }
@@ -219,6 +220,21 @@ extension Planner {
                 "content": .string(
                     "현재 지원·제공되는 도구: \(supported.joined(separator: ", ")). "
                         + "기능이 없다고 답하지 말고 실제 도구를 호출하세요. 승인은 앱이 받습니다."),
+            ])
+            state.iteration += 1
+            return nil
+        }
+        if state.tools.contains(where: { $0.name == deleteTool }) && destructiveRequest(state.userText)
+            && !state.writeCompleted && deleteClaim.search(text)
+        {
+            // "삭제했습니다" before any approved delete: the approval screen has not been shown.
+            if state.confirmNudges > 0 { return .error("승인된 삭제 없이 삭제했다고 답해 멈췄습니다. 파일은 그대로입니다.") }
+            state.confirmNudges += 1
+            state.messages.append(["role": "assistant", "content": .string(text)])
+            state.messages.append([
+                "role": "system",
+                "content": .string("아직 아무 파일도 삭제되지 않았습니다. 삭제는 local__delete_files를 호출해 "
+                    + "앱의 승인을 받아야 합니다. 완료라고 답하지 말고 도구를 호출하세요."),
             ])
             state.iteration += 1
             return nil
