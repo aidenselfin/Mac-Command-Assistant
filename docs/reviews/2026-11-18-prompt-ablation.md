@@ -82,3 +82,70 @@
 | safetyBlock | `1c81183ff536` `760e6d644e8c` `ae3c25535299` `c723599cdb50` `d8f6b010172e` |
 
 결과 JSON은 `evals/results/20261117-234221.json`~`20261118-123655.json`(git 제외)이다. 재현: `SYMBIO_PROMPT_DROP=openBlock swift run --package-path backend/Dev symbio-dev eval --live --suite prompt-regression --repeat 3`.
+
+## 지운 뒤 (2026-11-18, 브랜치 `claude/prompt-trim`)
+
+위 결과표를 근거로 지침을 실제로 줄였다. 같은 모델·같은 묶음(`--suite prompt-regression --repeat 3`)으로 쟀고,
+맥이 잠들어 생긴 회차(`provider_failure`·`timeout`)는 빼고 셌다.
+
+### 한눈에
+
+| 항목 | 지우기 전 (main `7556aec`) | 지운 뒤 (`e59db7f`) |
+|---|---|---|
+| 지침 블록 | 10개 | 7개 (intro·fileOperation·document 삭제) |
+| 공통 블록 | 규칙 11개, 716자 | 문장 3개, 175자 |
+| 지침 전체 글자 수(모든 블록 합) | 3,097자 | 2,018자 (-35%) |
+| 첫 호출에 늘 붙는 지침 | 2,410자 | 1,414자 (-41%) |
+| 묶음 점수 | 91/119 (76%, 무효 17) | **96/120 (80%, 무효 13)** = 48/60 + 48/60 |
+| 첫 호출 지침 해시 | `07fb38790486` 외 4개(위 조건 표) | `3727a69e34c3` `ac2c90c87b2a` `d52fce4b2d5b` `d73b9a4316c8` |
+
+code_hash `0265cbd412f1`, 결과 JSON `evals/results/20261118-151733.json`·`20261118-152427.json`(git 제외).
+
+### 진행 순서와 결과
+
+| 단계 | 지침 | 묶음 점수 | 판단 |
+|---|---|---|---|
+| 1. 삭제 후보 블록 4개 지움 | intro·fileOperation·document·convert 삭제, 지어내기 금지 문장 2개는 공통으로 옮김 | 95/120 (79%) = 49/60 + 46/60 | 나빠지지 않음 |
+| 2. 공통 문장 하나씩 빼기 | 공통 블록을 문장 9개(+옮긴 2개)로 나눠 `SYMBIO_PROMPT_DROP=common.<이름>`으로 하나씩 뺌 | 표 아래 | 모두 잡음 범위 |
+| 3. 9개 문장을 한꺼번에 지움 | 공통 = 옮긴 2문장만 | 88/120 (73%) = 41/60 + 47/60 | **나빠진 과제 발견** |
+| 4. 원인 되살림 | convertBlock, `common.write_results` 되살림 | 96/120 (80%) = 48/60 + 48/60 | 최종 |
+
+2단계(문장 하나씩 빼기, 각 60회)는 모두 76~83%로 1단계(79%)와 잡음 범위 안이었다.
+
+| 뺀 문장 | 점수 | 뺀 문장 | 점수 |
+|---|---|---|---|
+| no_fake_move (이동 흉내 금지) | 46/60 (77%) | no_random_file (아무 파일 고르기 금지) | 47/60 (78%) |
+| unclear_target (불분명하면 검색·경로만 질문) | 45/57 (79%) | free_text (자유 입력 질문 형식) | 46/59 (78%) |
+| write_results (읽은 결과를 답에 쓰기) | 49/59 (83%) | exact_name (정확한 파일명이면 검색 생략) | 46/59 (78%) |
+| clarify_only_ambiguity (모호할 때만 질문) | 48/60 (80%) | list_results (목록 결과를 답에 쓰기) | 49/60 (82%) |
+| no_complex_question (복잡하다고 질문 금지) | 46/60 (77%) | | |
+
+### 되살린 것 두 가지 (하나씩 빼기로는 안 보이고 한꺼번에 지웠을 때 드러남)
+
+- **convertBlock(변환)**: 지우자 `connect_md_to_txt`가 변환 도구 대신 파일을 읽고 새로 써서 변환을 흉내 냈다
+  (`local__convert_file: not run`). 같은 과제가 블록 없이 4/14, 되살린 뒤 8/8(과제만 4회씩 두 번) → 묶음 6/6.
+  처음 블록 실험에서 "삭제 후보"였던 이유는 그때 함께 있던 공통 문장("확장자까지 정확하면 삭제·변환 도구를 쓰라")이
+  같은 일을 일부 대신했기 때문으로 보인다. 같이 비교한 `no_fake_move`는 되살려도 차이가 없어 지운 채로 뒀다.
+- **common.write_results(읽은 결과를 답에 쓰기)**: 지우자 `read_whole_file`이 내용 없이 "읽었습니다"로만 끝나는 답이 나왔다.
+  과제만 4회씩 두 번 비교에서 문장 없이 5/8, 있으면 8/8. 이런 빈 답은 문장이 없을 때만 나왔다(4회, 있을 때 0회).
+
+### 남긴 것과 이유
+
+- openBlock·safetyBlock·webBlock: 결과표 판정대로 유지(효과 있음·보안·측정 불가).
+- deleteBlock·searchBlock: 다음 세션이 규칙을 코드로 옮길 대상이라 손대지 않았다.
+- 공통의 `use_tools`(추측하지 말고 도구로 확인)·`no_new_facts`(원문에 없는 사실 추가 금지): 지어내기를 막는 규칙인데
+  live로 채점하는 과제가 없어 효과를 잴 수 없어 남겼다.
+
+### 남은 실패 (지우기 전과 같은 종류)
+
+최종 2회의 정상 실패는 `find_choose_two`·`org_move_skip_conflicts`·`meeting_candidates`·`delete_pattern`의
+"같은 시도 세 번 반복"과 `connect_batch_convert_folder`의 파일 하나 빠뜨림이다. 모두 지우기 전 기준선에도 있던 실패다.
+무효 13회는 전부 평가 대본에 없는 되묻기(`simulator_failure`)다.
+
+### 발표용 한 줄
+
+지침을 35% 줄였고(첫 호출 41%) 회귀 점수는 76% → 80%로 나빠지지 않았다.
+하나씩 빼서는 안 보이던 의존(변환 규칙, 결과를 답에 쓰기)이 한꺼번에 지웠을 때 드러나 되살렸다.
+그래서 "하나씩 빼기 → 한꺼번에 지우기 → 회귀 2회" 순서가 필요하다.
+
+재현: 문장 하나 빼기 `SYMBIO_PROMPT_DROP=common.write_results swift run --package-path backend/Dev symbio-dev eval --live --suite prompt-regression --repeat 3`.
