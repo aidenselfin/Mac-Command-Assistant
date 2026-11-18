@@ -198,7 +198,6 @@ func describedDeleteSearchesThenSelectsAndAsksApproval(candidates: Int, approve:
     let pending = try #require(try await planner.run("영어안내문 파일 삭제연습 폴더로 이동시켜줘.").approval)
     #expect(pending.operation == "move" && fileExists(source))
     #expect(model.calls[0].toolNames.contains(moveTool))
-    #expect(model.calls[0].system.contains("파일 삭제, 이동"))
     #expect(pending.targets == [source] && pending.targetPath.hasPrefix(destination))
     let finished = try #require(try await planner.approve(pending.context).completed)
     #expect(finished.changedPaths == [destination + "/영어안내문.txt"])

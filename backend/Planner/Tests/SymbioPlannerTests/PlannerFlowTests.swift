@@ -418,7 +418,6 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     #expect(mkdir.contains("허용 루트가 하나뿐이면 위치를 묻지 말고"))
     #expect(mkdir.contains("만들까요"))
     #expect(mkdir.contains("폴더 이름은 '새'와 '폴더'를 뺀"))
-    #expect(call.system.contains(fileOperationBlock))
 }
 
 @Test func situationBlocksFollowExposedTools() async throws {
@@ -426,11 +425,10 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     let model = ScriptedModel(turns: [], repeating: turn("ok"))
     _ = try await makePlanner(config, FakeGateway(), model).run("안녕")
     let system = model.calls[0].system
-    #expect(system.hasPrefix(introBlock + commonBlock) && system.contains(searchBlock))
-    for block in [fileOperationBlock, deleteBlock, convertBlock] { #expect(!system.contains(block)) }
-    _ = try await makePlanner(config, FakeGateway(), model).run("보고서.txt를 pdf로 변환하고 메모.txt는 삭제해줘")
-    let both = try #require(model.calls.last).system
-    #expect(both.contains(convertBlock) && both.contains(deleteBlock))
+    #expect(system.hasPrefix(commonBlock()) && system.contains(searchBlock))
+    #expect(!system.contains(deleteBlock))
+    _ = try await makePlanner(config, FakeGateway(), model).run("메모.txt는 삭제해줘")
+    #expect(try #require(model.calls.last).system.contains(deleteBlock))
 }
 
 @Test func promptDropLeavesOutOnlyTheNamedBlock() async throws {
@@ -440,7 +438,9 @@ func urlLiteralExplanationDoesNotRequireNavigation(text: String) async throws {
     let full = systemPrompt(tools, drop: [])
     #expect(promptDrop.isEmpty && systemPrompt(tools) == full)  // the app (switch unset) keeps every block
     let dropped = systemPrompt(tools, drop: ["deleteBlock"])
-    #expect(!dropped.contains(deleteBlock) && dropped.contains(convertBlock))
+    #expect(!dropped.contains(deleteBlock) && dropped.contains(commonBlock()))
+    let oneSentence = systemPrompt(tools, drop: ["common.free_text"])
+    #expect(oneSentence == full.replacingOccurrences(of: commonSentences[8].1, with: ""))
     #expect(dropped.count == full.count - deleteBlock.count)
 }
 

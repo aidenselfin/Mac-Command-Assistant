@@ -314,56 +314,43 @@ func errorText(_ error: any Error) -> String {
 // Rules for create_directory alone live in its description. The open_file rule stays here: moved to the
 // description, open_file_in_subfolder failed 3/3 live (the model read the file instead).
 
-// 첫머리(항상): 앱이 할 수 있는 일과 도구가 요청별이라는 것. 과제: neg_guess_without_search.
-let introBlock =
-    "사용자 명령에 따라 제공된 namespaced MCP 도구를 사용하세요. "
-    + "앱은 승인·Undo를 갖춘 파일 삭제, 이동·이름 변경, 복사, "
-    + "폴더 생성을 지원합니다. "
-    + "도구는 요청별로 제공되므로 이번 목록에 없다고 앱 전체에 기능이 없다고 "
-    + "말하지 마세요. "
-
-// 공통: 흉내 금지·결과를 답에 쓰기·질문 기준. 과제: neg_extra_write, see_list_dir, clarify_cancel,
-// free_text_create_file, find_unclear_name, missing_file.
-let commonBlock =
-    // Kept common: it guards most when the move tool is not in this request's list.
-    "이동을 텍스트 쓰기나 복사 후 삭제로 흉내 내지 마세요. 파일명·목적지가 "
-    + "불분명하면 검색하거나 필요한 경로만 질문하고, 승인 여부는 앱이 받습니다. "
-    + "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 "
-    + "추측하지 마세요. "
-    + "읽거나 찾은 결과를 사용자에게 보여 달라는 요청에는 '읽었습니다' 같은 "
-    + "말로 끝내지 말고, 읽은 내용·찾은 파일 이름을 답변에 직접 쓰세요. "
-    + "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 "
-    + "request_clarification contract를 사용하세요. "
-    + "복잡하다는 이유로 질문하지 마세요. "
-    + "대상 파일이 요청에도 직전 대화에도 없으면 아무 파일이나 고르지 말고 "
-    + "local__find_files로 찾거나 아래 free_text 질문을 하세요. "
-    + "파일 이름이나 저장할 내용처럼 사용자만 아는 정보가 없어 진행할 수 없을 때는 "
-    + "request_clarification의 kind를 free_text, options를 []로 해서 한 번 "
-    + "짧게 물으세요. "
-    + "사용자 원문에 확장자까지 정확한 파일명이 있으면 검색 없이 바로 읽거나 "
-    + "삭제·변환 도구를 쓰고, 폴더와 *.txt 같은 패턴을 말했으면 검색하지 말고 "
-    + "local__delete_files의 directory·pattern을 쓰세요. "
-    + "폴더 목록·파일 내용 같은 조회 결과도 사용자에게 따로 보이지 않으니 "
-    + "'완료했습니다'로 끝내지 말고 항목 이름이나 내용 핵심을 답에 직접 "
-    + "적으세요. "
-
-// 문서 읽기·요약(local__read_document는 항상 노출): 지어내기 금지·읽기 도구 고르기. 과제:
-// summarize_one_line, follow_up_save_summary, summarize_docx, read_docx_fact, read_document_html,
-// neg_document_not_read. '정보 없음' 표시는 과제 없음.
-let documentBlock =
-    "문서 요약·추출·번역·저장에서는 원문에 없는 사실, 연도, 담당자, "
-    + "기한을 추가하지 마세요. 날짜는 별도 요청이 없으면 원문 표현을 유지하세요. "
-    + "결정사항·미결정 사항·담당자의 할 일을 구분하고, 완료된 작업은 "
-    + "미완료 할 일에 포함하지 마세요. 담당자별 추출에서는 해당하는 작업을 "
-    + "빠뜨리지 말고 모두 포함하세요. 없는 정보는 '정보 없음'으로 표시하세요. "
-    + "pdf·docx·doc·rtf·odt·html 문서 내용을 읽을 때는 local__read_document를, "
-    + "txt·md·csv 같은 텍스트 파일은 filesystem__read_text_file을 쓰세요. "
-
-// 이동·복사·폴더 생성(셋 중 하나가 노출될 때): 도구 이름 안내. 과제: move_approve, move_reject,
-// org_copy_file, org_rename_file, create_directory_undo.
-let fileOperationBlock =
-    "이동은 local__move_file, 복사는 local__copy_file, "
-    + "폴더 생성은 local__create_directory를 사용하세요. "
+// 공통(항상): 문장마다 이름을 붙여 `SYMBIO_PROMPT_DROP=common.write_results`처럼 하나씩 뺄 수 있다.
+// 2026-11-18 블록 빼기 실험 뒤 intro·fileOperation·document·convert 블록은 지웠다(빼도 관련 과제 통과,
+// docs/reviews/2026-11-18-prompt-ablation.md). 그 블록의 지어내기 금지 문장만 여기로 옮겼다(live 측정 과제 없음).
+let commonSentences: [(String, String)] = [
+    // 과제: neg_guess_without_search. 측정 과제가 없어 유지.
+    ("common.use_tools", "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. "),
+    // documentBlock에서 옮김. 과제: summarize_one_line, read_docx_fact. live 측정 과제가 없어 유지.
+    ("common.no_new_facts",
+     "문서 요약·추출·번역·저장에서는 원문에 없는 사실, 연도, 담당자, 기한을 추가하지 마세요. "),
+    // Kept common: it guards most when the move tool is not in this request's list. 과제: neg_extra_write.
+    ("common.no_fake_move", "이동을 텍스트 쓰기나 복사 후 삭제로 흉내 내지 마세요. "),
+    ("common.unclear_target",
+     "파일명·목적지가 불분명하면 검색하거나 필요한 경로만 질문하고, 승인 여부는 앱이 받습니다. "),
+    ("common.write_results",
+     "읽거나 찾은 결과를 사용자에게 보여 달라는 요청에는 '읽었습니다' 같은 말로 끝내지 말고, "
+        + "읽은 내용·찾은 파일 이름을 답변에 직접 쓰세요. "),
+    ("common.clarify_only_ambiguity",
+     "결과를 실질적으로 바꾸는 unresolved ambiguity가 있을 때만 request_clarification contract를 "
+        + "사용하세요. "),
+    ("common.no_complex_question", "복잡하다는 이유로 질문하지 마세요. "),
+    // 과제: find_unclear_name, missing_file.
+    ("common.no_random_file",
+     "대상 파일이 요청에도 직전 대화에도 없으면 아무 파일이나 고르지 말고 local__find_files로 찾거나 "
+        + "아래 free_text 질문을 하세요. "),
+    // 과제: free_text_create_file, clarify_cancel.
+    ("common.free_text",
+     "파일 이름이나 저장할 내용처럼 사용자만 아는 정보가 없어 진행할 수 없을 때는 "
+        + "request_clarification의 kind를 free_text, options를 []로 해서 한 번 짧게 물으세요. "),
+    ("common.exact_name",
+     "사용자 원문에 확장자까지 정확한 파일명이 있으면 검색 없이 바로 읽거나 삭제·변환 도구를 쓰고, "
+        + "폴더와 *.txt 같은 패턴을 말했으면 검색하지 말고 local__delete_files의 directory·pattern을 "
+        + "쓰세요. "),
+    // 과제: see_list_dir.
+    ("common.list_results",
+     "폴더 목록·파일 내용 같은 조회 결과도 사용자에게 따로 보이지 않으니 '완료했습니다'로 끝내지 말고 "
+        + "항목 이름이나 내용 핵심을 답에 직접 적으세요. "),
+]
 
 // 열기(local__open_file이 노출될 때): 읽지 말고 기본 앱으로 열기. 과제: open_file_in_subfolder.
 let openBlock =
@@ -449,25 +436,25 @@ public let promptDrop: Set<String> = Set(
         $0.trimmingCharacters(in: .whitespaces)
     })
 
-public let promptBlockNames = [
-    "introBlock", "fileOperationBlock", "openBlock", "commonBlock", "documentBlock", "webBlock",
-    "deleteBlock", "convertBlock", "searchBlock", "safetyBlock",
-]
+public let promptBlockNames =
+    ["openBlock", "commonBlock", "webBlock", "deleteBlock", "searchBlock", "safetyBlock"]
+    + commonSentences.map(\.0)
+
+/// The common block with the sentences named in `drop` left out.
+func commonBlock(drop: Set<String> = []) -> String {
+    commonSentences.filter { !drop.contains($0.0) }.map(\.1).joined()
+}
 
 /// The system prompt for this request's tool list, before the resolution, memory and allowed roots.
 func systemPrompt(_ tools: [ToolDefinition], drop: Set<String> = promptDrop) -> String {
     let names = Set(tools.map(\.name))
-    // Tool routing blocks come right after the intro, where the old single prompt had them:
-    // after the "write what you read" rules, open_file_in_subfolder read the file instead (1/3 live).
-    var blocks = [("introBlock", introBlock)]
-    if !names.isDisjoint(with: [moveTool, copyTool, mkdirTool]) {
-        blocks.append(("fileOperationBlock", fileOperationBlock))
-    }
+    // The open rule comes first, before the "write what you read" rules: placed after them,
+    // open_file_in_subfolder read the file instead (1/3 live).
+    var blocks: [(String, String)] = []
     if names.contains(openFileTool) { blocks.append(("openBlock", openBlock)) }
-    blocks += [("commonBlock", commonBlock), ("documentBlock", documentBlock)]
+    blocks.append(("commonBlock", commonBlock(drop: drop)))
     if names.contains(webNavigateTool) { blocks.append(("webBlock", webBlock)) }
     if names.contains(deleteTool) { blocks.append(("deleteBlock", deleteBlock)) }
-    if names.contains(convertTool) { blocks.append(("convertBlock", convertBlock)) }
     if names.contains(findFilesTool) { blocks.append(("searchBlock", searchBlock)) }
     blocks.append(("safetyBlock", safetyBlock))
     return blocks.filter { !drop.contains($0.0) }.map(\.1).joined()
