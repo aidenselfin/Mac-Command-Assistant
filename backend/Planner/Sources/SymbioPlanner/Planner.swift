@@ -316,14 +316,18 @@ func errorText(_ error: any Error) -> String {
 
 // 공통(항상): 문장마다 이름을 붙여 `SYMBIO_PROMPT_DROP=common.use_tools`처럼 하나씩 뺄 수 있다.
 // 2026-11-18 빼기 실험 뒤 intro·fileOperation·document 블록과, 하나씩 빼도 묶음 점수가 잡음 범위였던
-// 공통 문장 9개(이동 흉내 금지·결과 직접 쓰기·질문 기준 등)를 지웠다(docs/reviews/2026-11-18-prompt-ablation.md).
-// 남은 두 문장은 지어내기를 막는 규칙인데 live로 채점하는 과제가 없어 효과를 재지 못해 남겼다.
+// 공통 문장 8개(이동 흉내 금지·목록 결과 쓰기·질문 기준 등)를 지웠다(docs/reviews/2026-11-18-prompt-ablation.md).
+// 앞의 두 문장은 지어내기를 막는 규칙인데 live로 채점하는 과제가 없어 효과를 재지 못해 남겼다.
 let commonSentences: [(String, String)] = [
     // 과제: neg_guess_without_search. 측정 과제가 없어 유지.
     ("common.use_tools", "실제 정보 조회와 파일 작업은 반드시 제공된 도구로 처리하고 추측하지 마세요. "),
     // documentBlock에서 옮김. 과제: summarize_one_line, read_docx_fact. live 측정 과제가 없어 유지.
     ("common.no_new_facts",
      "문서 요약·추출·번역·저장에서는 원문에 없는 사실, 연도, 담당자, 기한을 추가하지 마세요. "),
+    // 지웠다가 되살림: 빼면 read_whole_file이 내용 없이 '읽었습니다'로만 끝났다(23회 중 4회, 있으면 38회 중 0회).
+    ("common.write_results",
+     "읽거나 찾은 결과를 사용자에게 보여 달라는 요청에는 '읽었습니다' 같은 말로 끝내지 말고, "
+        + "읽은 내용·찾은 파일 이름을 답변에 직접 쓰세요. "),
 ]
 
 // 열기(local__open_file이 노출될 때): 읽지 말고 기본 앱으로 열기. 과제: open_file_in_subfolder.
