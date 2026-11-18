@@ -129,3 +129,11 @@ private func delete(_ id: String, _ paths: [String]) -> ToolCall {
     _ = try await second.resume(question.context, chosen)
     #expect(model.calls[1].lastContent.contains("이 경로를 그대로 쓰세요: \(chosen)"))
 }
+
+@Test func askingForEveryFileWithAContentClueListsThemWithoutARetry() async throws {
+    let config = try makeConfig()
+    for name in ["memo1.txt", "memo2.txt"] { try writeText("환불", config.path(name)) }
+    let (planner, model) = try make(config, [find(["memo"]), turn("둘 다")])
+    _ = try await planner.run("메모 중에 환불 얘기가 있는 파일을 모두 알려줘")
+    #expect(parse(model.calls[1].lastContent)["decision"] == "all")
+}

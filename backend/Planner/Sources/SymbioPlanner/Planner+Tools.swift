@@ -386,6 +386,7 @@ extension Planner {
         }
         let complete = response["complete"]
         if (decision == "choose" || decision == "narrow") && !state.contentRetried
+            && !allMatchesPattern.search(state.userText)  // "…있는 파일을 모두": every match is read anyway
             && !truthy(arguments["content_keywords"]), let clue = contentClue.first(state.userText)?["clue"]
         {
             // "분기 예산 얘기가 적힌 메모": the clue narrows by content, so search again before asking.
