@@ -442,18 +442,33 @@ let safetyBlock =
     + "도구 작업이 모두 끝나면 요청을 완료했다는 짧은 한국어 응답을 반환하세요. "
     + "도구 오류는 숨기거나 성공으로 보고하지 마세요."
 
+/// Dev-only ablation switch: `SYMBIO_PROMPT_DROP=deleteBlock,webBlock` leaves those blocks out.
+/// Unset (the app) keeps every block. Eval records it in results' `versions.prompt_drop`.
+public let promptDrop: Set<String> = Set(
+    (ProcessInfo.processInfo.environment["SYMBIO_PROMPT_DROP"] ?? "").split(separator: ",").map {
+        $0.trimmingCharacters(in: .whitespaces)
+    })
+
+public let promptBlockNames = [
+    "introBlock", "fileOperationBlock", "openBlock", "commonBlock", "documentBlock", "webBlock",
+    "deleteBlock", "convertBlock", "searchBlock", "safetyBlock",
+]
+
 /// The system prompt for this request's tool list, before the resolution, memory and allowed roots.
-func systemPrompt(_ tools: [ToolDefinition]) -> String {
+func systemPrompt(_ tools: [ToolDefinition], drop: Set<String> = promptDrop) -> String {
     let names = Set(tools.map(\.name))
     // Tool routing blocks come right after the intro, where the old single prompt had them:
     // after the "write what you read" rules, open_file_in_subfolder read the file instead (1/3 live).
-    var blocks = [introBlock]
-    if !names.isDisjoint(with: [moveTool, copyTool, mkdirTool]) { blocks.append(fileOperationBlock) }
-    if names.contains(openFileTool) { blocks.append(openBlock) }
-    blocks += [commonBlock, documentBlock]
-    if names.contains(webNavigateTool) { blocks.append(webBlock) }
-    if names.contains(deleteTool) { blocks.append(deleteBlock) }
-    if names.contains(convertTool) { blocks.append(convertBlock) }
-    if names.contains(findFilesTool) { blocks.append(searchBlock) }
-    return (blocks + [safetyBlock]).joined()
+    var blocks = [("introBlock", introBlock)]
+    if !names.isDisjoint(with: [moveTool, copyTool, mkdirTool]) {
+        blocks.append(("fileOperationBlock", fileOperationBlock))
+    }
+    if names.contains(openFileTool) { blocks.append(("openBlock", openBlock)) }
+    blocks += [("commonBlock", commonBlock), ("documentBlock", documentBlock)]
+    if names.contains(webNavigateTool) { blocks.append(("webBlock", webBlock)) }
+    if names.contains(deleteTool) { blocks.append(("deleteBlock", deleteBlock)) }
+    if names.contains(convertTool) { blocks.append(("convertBlock", convertBlock)) }
+    if names.contains(findFilesTool) { blocks.append(("searchBlock", searchBlock)) }
+    blocks.append(("safetyBlock", safetyBlock))
+    return blocks.filter { !drop.contains($0.0) }.map(\.1).joined()
 }

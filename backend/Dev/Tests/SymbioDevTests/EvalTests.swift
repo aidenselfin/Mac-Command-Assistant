@@ -234,7 +234,7 @@ func mainSeen(_ argv: [String], _ tasks: [JSON], status: String = "completed") a
         let done = try run([tool, "eval"], captureError: true, directory: root.path)
         let saved = try #require(done.output.split(separator: "\n").last { $0.hasPrefix("saved ") })
         let data = try JSON.parse(Data(contentsOf: root.appendingPathComponent(String(saved.dropFirst(6)))))
-        #expect(Set(data["versions"]?.keys ?? []) == ["commit", "dirty", "code_hash", "model", "lessons", "tasks", "prompt_hashes"])
+        #expect(Set(data["versions"]?.keys ?? []) == ["commit", "dirty", "code_hash", "model", "lessons", "tasks", "prompt_hashes", "prompt_drop"])
         #expect(data["versions"]?["model"] == "scripted" && data["trials"]?.list.first?["task"] == "a")
     }
 }
