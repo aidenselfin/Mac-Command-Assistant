@@ -152,6 +152,25 @@ func whichTypedQuestionsAreReallyConfirmations(question: String, refused: Bool) 
     #expect(Array(found.unicodeScalars) == Array((base.path + "/" + decomposed).unicodeScalars))
 }
 
+@Test func looseJamoNameIsRepairedOnlyWhenOneFileIsClose() throws {
+    let base = URL(fileURLWithPath: realPath(NSTemporaryDirectory())!).appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let real = "회의록_2월.txt".decomposedStringWithCanonicalMapping
+    FileManager.default.createFile(atPath: base.path + "/" + real, contents: Data())
+    FileManager.default.createFile(atPath: base.path + "/예산_2월.txt", contents: Data())
+    let broken = base.path + "/회\u{110B}\u{3150}록_2월.txt"
+    let fixed = onDiskPath(.string(broken), [base]).stringValue!
+    #expect(Array(fixed.unicodeScalars) == Array((base.path + "/" + real).unicodeScalars))
+    // Outside the allowed roots nothing is listed or changed.
+    #expect(onDiskPath(.string(broken), [URL(fileURLWithPath: "/elsewhere")]).stringValue == broken)
+    // A plain wrong name is not guessed.
+    #expect(onDiskPath(.string(base.path + "/회의록_3월.txt"), [base]).stringValue == base.path + "/회의록_3월.txt")
+    // Two close files: no guess.
+    FileManager.default.createFile(atPath: base.path + "/회애록_2월.txt", contents: Data())
+    #expect(onDiskPath(.string(broken), [base]).stringValue == broken)
+}
+
 @Test func smallHelpersMatchPython() {
     let call = ToolCall("1", "filesystem__read_text_file", #"{"path": "/a", "head": 3}"#)
     #expect(partialRead(call, ToolResult(ok: true, text: "1\n2\n3\n")) == "앞 3줄")

@@ -29,7 +29,7 @@
 0. 실행 중 복구 루프(브랜치 `claude/recovery-loop`, 병합 전): 재생·테스트만 확인. 실제 모델로 R2·R3가 줄었는지,
    `escalation_model`을 켠 비용은 live 평가로 아직 재지 않았다. 끝부분 정책 오류(후보 미확인 등)는 여전히 바로 끝난다.
 1. 읽기 축: `read_whole_file`(5단계) 같은 긴 읽기가 약하다. 파인더 축은 파일 열기 도구 추가 뒤 다시 재야 한다.
-2. 한글 파일명 깨짐: 모델이 경로를 자모가 깨진 이름(`회ᄋㅐ록_2월.txt`)으로 적어 `org_group_keyword_move`가 0/6.
+2. 한글 파일명 깨짐: 코드 보정 추가(`Planner/Rules.swift` `jamoRepair`, 자모가 남은 이름만 같은 폴더의 가까운 파일 하나로 맞춤). 리눅스 환경이라 Swift 테스트·live 재측정 미실행, 맥에서 `scripts/check.sh full`과 `org_group_keyword_move` live 확인 필요.
    이동 목적지·후보 여럿 되묻기는 2026-11-18 코드로 막았다(`reviews/2026-11-18-prompt-ablation.md` "코드로 옮긴 뒤").
 3. (비움)
 4. 사람 확인: 위 "네이티브 앱" 항목.
