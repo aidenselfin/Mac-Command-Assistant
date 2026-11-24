@@ -1,9 +1,11 @@
-# 현재 상태 (2026-11-12)
+# 현재 상태 (2026-11-24)
 
 이 문서는 최신 검증·미완료 작업·인수인계만 둔다. 완료 이력은 `git log`와 [`reviews/`](reviews/),
 진행 중인 작업 카드는 웹 패널(`~/.claude/voice-action/worklog.json`)이 맡는다.
 
 # 최근 검증
+- 2026-11-18 지침 회귀 묶음(live, Groq gpt-oss-120b, 20과제): 지침을 35% 줄인 뒤 76% → 80%,
+  삭제·검색 지침을 코드 검사로 옮긴 뒤 **106/120(88%, 무효 0)**. 근거는 [`reviews/2026-11-18-prompt-ablation.md`](reviews/2026-11-18-prompt-ablation.md).
 - 2026-11-12 Python → Swift 전환(브랜치 `claude/swift-migration`): 백엔드·개발 도구 전부 `backend/<모듈>` Swift 패키지로 옮김.
   Swift 테스트 632개(`@Test`). 전환 뒤 기준 점검은 `scripts/check.sh full`이다.
 - 전환 전 마지막 Python 점검 2026-11-11(main `0fef514`): pytest **773 passed**,
