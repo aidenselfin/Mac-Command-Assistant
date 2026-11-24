@@ -128,8 +128,37 @@ func onDiskPath(_ raw: JSON, _ roots: [URL]) -> JSON {
     guard safeDir(parent, roots), let names = listDirectory(parent) else { return raw }
     if names.contains(where: { $0.unicodeScalars.elementsEqual(name.unicodeScalars) }) { return raw }
     let wanted = nfc(name).unicodeScalars
-    guard let match = names.first(where: { nfc($0).unicodeScalars.elementsEqual(wanted) }) else { return raw }
+    if let match = names.first(where: { nfc($0).unicodeScalars.elementsEqual(wanted) }) {
+        return .string(pathJoin(parent, match))
+    }
+    guard let match = jamoRepair(name, names) else { return raw }
     return .string(pathJoin(parent, match))
+}
+
+/// A model sometimes copies a Hangul name as loose jamo ("회ᄋㅐ록" for "회의록"). Only for a name
+/// with leftover jamo: the one listed name within two jamo of it, or nil when none or several are.
+func jamoRepair(_ name: String, _ names: [String]) -> String? {
+    let isJamo = { (s: Unicode.Scalar) in (0x1100...0x11FF).contains(s.value) || (0x3130...0x318F).contains(s.value) }
+    guard nfc(name).unicodeScalars.contains(where: isJamo) else { return nil }
+    let jamo = { (s: String) in Array(s.decomposedStringWithCompatibilityMapping.unicodeScalars) }
+    let wanted = jamo(name)
+    let close = names.filter { !$0.hasPrefix(".") && editDistance(jamo($0), wanted, limit: 2) <= 2 }
+    return close.count == 1 ? close[0] : nil
+}
+
+/// Levenshtein distance, stopping early once every row is past `limit`.
+func editDistance(_ a: [Unicode.Scalar], _ b: [Unicode.Scalar], limit: Int) -> Int {
+    if abs(a.count - b.count) > limit { return limit + 1 }
+    var row = Array(0...b.count)
+    for (i, x) in a.enumerated() {
+        var next = [i + 1]
+        for (j, y) in b.enumerated() {
+            next.append(min(row[j + 1] + 1, next[j] + 1, row[j] + (x == y ? 0 : 1)))
+        }
+        if next.min()! > limit { return limit + 1 }
+        row = next
+    }
+    return row[b.count]
 }
 
 /// Python `_missing_path_hint`: what to try next when a tool was given a path that does not exist.
